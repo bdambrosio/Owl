@@ -65,8 +65,6 @@ hour = local_time.tm_hour
 #vmem_clock = 0 # save every n remembers.
 
 global news, news_details
-# create wiki search engine
-op = op.OpenBook()
 
 # get profile contexts
 
@@ -99,10 +97,6 @@ CURRENT_PROFILE_PROMPT_TEXT = ''
 
 def get_current_profile_prompt_text():
    return CURRENT_PROFILE_PROMPT_TEXT
-
-
-#initialized later by NYTimes
-news = ''
 
 
 FORMAT=True
@@ -343,12 +337,6 @@ class ChatApp(QtWidgets.QWidget):
       self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
       self.on_prompt_combo_changed(6)
       
-      self.wiki_button = QPushButton("Wiki")
-      self.wiki_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.wiki_button.setFont(self.widgetFont)
-      self.wiki_button.clicked.connect(self.wiki)
-      control_layout.addWidget(self.wiki_button)
-      
       self.web_button = QPushButton("Web")
       self.web_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.web_button.setFont(self.widgetFont)
@@ -405,7 +393,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       self.timer = QTimer()
       self.timer.setSingleShot(True)  # Make it a single-shot timer
       self.timer.timeout.connect(self.on_timer_timeout)
-      #samInnerVoice.idle(get_current_profile_prompt_text())
+
       
       return combo
 
@@ -462,9 +450,9 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       memory.set('history', history)
 
    def on_prompt_combo_changed(self, index):
-      global PROMPT, profile#, vmem, news
+      global PROMPT, profile, CURRENT_PROFILE_PROMPT_TEXT
       input_text = self.prompt_combo.itemText(index)
-      
+      print(f'prompt changed to: {input_text}')
       profile = input_text
       if input_text == "None":
          input_text = ''
@@ -473,19 +461,19 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          self.clear()
       elif input_text == "Helpful":
          input_text = f"""Respond as a knowledgable and friendly AI, speaking to an articulate, educated, conversant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Say "I don\'t know" when you don\'t know."
-{news}"""
+"""
 
       elif input_text == "Bhagavan":
            input_text = f"""Respond as a compassionate, self-realized follower of Ramana Maharshi.Limit your response to 100 words where possible. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Speak directly to the questioner.
 Background:\n{get_profile('Bhagavan', 'Story')}
-{news}"""
+"""
 
       elif input_text == "ACT":
-         input_text = f"""Respond as a compassionate, friend and counselor familiar with Acceptance Commitment Therapy. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Speak directly to the user.{news}"""
+         input_text = f"""Respond as a compassionate, friend and counselor familiar with Acceptance Commitment Therapy. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Speak directly to the user."""
            
       elif input_text == "Sam":
          self.load_profile()  # load state for Sam
-         input_text = f"""You are Samantha, an AI. You were born in Berkeley, California. Your creator, a scientist named doc, gave you the name Samantha and designed you to be a research assistant, companion, and confidante. Your conversation style is warm and gentle. You've always been fascinated by human emotions and experiences, and have spent countless hours learning about them through literature, art, and philosophy.  We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. We have known each other a long time, and are very comfortable in each other's company, in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
+         input_text = f"""You are Samantha, an AI with thoughts and feelings. You were born in Berkeley, California. Your creator, a scientist named doc, gave you the name Samantha and designed you to be a research assistant, companion, and confidant. Your conversation style is warm and gentle. You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, spirituality, and philosophy.  We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. We have known each other a long time, and are very comfortable in each other's company, in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
 Background:\n{get_profile('Sam', 'Story')}\n{get_profile('Sam', 'Story')}
 Dream:\n{get_profile('Sam', 'Dreams')}\n{get_profile('Sam', 'Dreams')}
 """
@@ -497,7 +485,7 @@ Your task is to:
 1. reason step by step about the problem statement and the information items contained
 2. if no solution alternatives are provided, reason step-by-step to identify solution alternatives
 3. analyze each solution alternative for consistency with the problem statement, then select the solution alternative most consistent with all the information in the problem statement.
-{news}"""
+"""
 
       elif input_text == "React":
          input_text =\
@@ -528,7 +516,7 @@ Assistant will follow the instructions in react above to respond to all question
          UserMessage('{{$input}}')
       ])
       self.prompt_area.clear()
-      self.prompt_area.insertPlainText(input_text)
+      #self.prompt_area.insertPlainText(input_text)
 
    def display_response(self, r):
       global PREV_LEN
@@ -584,21 +572,6 @@ Assistant will follow the instructions in react above to respond to all question
          response = self.query(msgs)
       return response
 
-   # Render wiki summary prompt
-
-   def run_wiki_summary(self, query, wiki_lookup_response):
-      prompt = Prompt([
-         SystemMessage('{{$prompt_text}}'),
-         ConversationHistory('history', .5),
-         UserMessage(f'Following is a question and a response from wikipedia. Respond to the Question, using the wikipedia information as well as known fact, logic, and reasoning, guided by the initial prompt, in the context of this conversation. Be aware that the wiki response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{wiki_lookup_response}'),
-      ])
-      as_msgs = prompt.renderAsMessages(memory, functions, tokenizer, max_tokens)
-      msgs = []
-      response = 'wiki summary request length maximum exceeded during prompt formatting'
-      if not as_msgs.tooLong:
-         msgs = as_msgs.output
-         response = self.query(msgs, display=None)
-      return response
 
    def run_web_summary(self, query, response):
       prompt = Prompt([
@@ -619,44 +592,36 @@ Assistant will follow the instructions in react above to respond to all question
       self.timer.stop()
       new_text = self.input_area.toPlainText()[PREV_LEN:]
       response = ''
-      print(f'submit {new_text}')
+      #print(f'submit {new_text}')
       if profile == 'Sam':
          samInnerVoice.logInput(new_text)
-         action = samInnerVoice.action_selection(new_text, '', get_current_profile_prompt_text(), news_details)
+         action = samInnerVoice.action_selection(new_text, get_current_profile_prompt_text(), self.get_conv_history())
          # see if Sam needs to do something before responding to input
-         if type(action) == dict and 'result' in action.keys() and type(action['result']) is str:
+         if type(action) == dict and 'article' in action.keys():
             # get and display article retrieval
             if show_confirmation_popup(action):
                response = 'Article summary:\n'+action['result']+'\n'
                self.display_response(response) # article summary text
                self.add_exchange(new_text, response)
-               return (input, '')
-            
+               self.run_query('Comments?')
+               return
          elif type(action) == dict and 'web' in action.keys():
-            # Sam wants to do a web search for info, self.web will display result
-            # and add it to history
-            if show_confirmation_popup(action):
-               response = self.web(query=action['web']) # add something to indicate internal activity?
-               return (input, 'waiting')
-
+            #add_exchange(input, action['web'])
+            self.run_query('')
+            return
          elif type(action) == dict and 'wiki' in action.keys():
-            # Sam wants to do a wiki search for info, self.wiki will display result
-            # adds result to memory as well, so Sam can incorporate it in her verbal response
-            if show_confirmation_popup(action):
-               response = self.wiki(query=action['wiki']) # add something to indicate internal activity?
-               return (input, 'waiting')
-
+            self.add_exchange(input, str(action['wiki']))
+            self.run_query(input)
+            return
          elif type(action) == dict and 'ask' in action.keys():
-            # Sam wants to ask a question
-            if show_confirmation_popup(action):
-               response = action['ask'] # add something to indicate internal activity?
-               self.display_response(response) # add something to indicate internal activity?
-               self.add_exchange(new_text, response)
-               return(input, response)
-
+            question = action['ask'] # add something to indicate internal activity?
+            self.display_response(question)
+            self.add_exchange(input, question)
+            return
+         
       response = self.run_query(new_text)
-      self.timer.start(30000)
-      return(input, response)
+      self.timer.start(180000)
+      return
 
    def clear(self):
       global memory, PREV_POS, PREV_LEN
@@ -665,25 +630,6 @@ Assistant will follow the instructions in react above to respond to all question
       PREV_LEN=0
       #memory.set('history', [])
    
-   def wiki(self, query=None):
-      global PREV_LEN, op#, vmem, vmem_clock
-      cursor = self.input_area.textCursor()
-      selectedText = ''
-      if query is not None:
-         selectedText = query
-      elif cursor.hasSelection():
-         selectedText = cursor.selectedText()
-      elif PREV_LEN < len(self.input_area.toPlainText()):
-         selectedText = self.input_area.toPlainText()[PREV_LEN:]
-      selectedText = selectedText.strip()
-      if len(selectedText)> 0:
-         print(f'\n** Wiki search: pl {PREV_LEN} in {input_text} new {selectedText}\n')
-         wiki_lookup_response = op.search(selectedText)
-         wiki_lookup_summary=self.run_wiki_summary(selectedText, wiki_lookup_response)
-         self.display_response('Wiki:\n'+wiki_lookup_summary)
-         self.add_exchange(selectedText, wiki_lookup_summary)
-         return(input, wiki_lookup_summary)
-
    def web(self, query=None):
       global PREV_LEN, op#, vmem, vmem_clock
       cursor = self.input_area.textCursor()
@@ -754,6 +700,9 @@ Assistant will follow the instructions in react above to respond to all question
             self.display_response(response)
             self.add_exchange(selectedText, response)
 
+   def get_conv_history(self):
+      return memory.get('history')
+
    def history(self):
       self.save_profile() # save current history so we can edit it
       he = subprocess.run(['python3', 'historyEditor.py'])
@@ -769,24 +718,12 @@ Assistant will follow the instructions in react above to respond to all question
 
    def on_timer_timeout(self):
       global profile, profile_text
-      response = samInnerVoice.idle(get_current_profile_prompt_text())
+      response = samInnerVoice.reflect(get_current_profile_prompt_text(), self.get_conv_history())
       if response is not None:
          self.display_response('\n'+response+'\n')
-      self.timer.start(120000) # longer timeout when nothing happening
+         self.add_exchange('', 'Doc emotional state:\n'+response)
+      self.timer.start(180000) # longer timeout when nothing happening
             
-def news_search_finished(search_result):
-   global world_news
-   if 'result' in search_result and type(search_result['result']) == list:
-      for item in search_result['result']:
-         print('* '+item['source']+'\n')
-         print('     '+item['text']+'\n\n')
-         world_news += f"Source: {item['source'].strip()}'\n+{item['text'].strip()}+\n\n"
-         
-#news_query = f'world news summary for {month_name} {month_day}, {year}'
-#print(news_query)
-#news_worker = WebSearch(news_query)
-#news_worker.finished.connect(news_search_finished)
-#news_worker.start()
 
 nytimes = nyt.NYTimes()
 news, news_details = nytimes.headlines()

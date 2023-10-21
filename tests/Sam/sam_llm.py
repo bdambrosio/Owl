@@ -22,12 +22,16 @@ import time
 # Initialize model and cache
 models_dir = "/home/bruce/Downloads/models/"
 
+subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower())]
+"""
 models = ["Mistral-7B-OpenOrca-exl2",
           "mistral-airoboros-7b-GPTQ",
           "Nous-Hermes-70b-GPTQ",
           "platypus2-70b-instruct-gptq",
           "Spicyboros-70b-22-GPTQ",
           ]
+"""
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:
@@ -109,7 +113,7 @@ async def get_stream(request: Request):
     max_tokens = 100
     if 'max_tokens' in message_j.keys():
         max_tokens = message_j['max_tokens']
-    stop_conditions = ['###','<|endoftext|>']
+    stop_conditions = ['###','<|endoftext|>', "Reference(s):"]
     if 'eos' in message_j.keys():
         stop_conditions = message_j['eos']
 
