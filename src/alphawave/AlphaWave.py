@@ -77,7 +77,7 @@ class AlphaWave(AsyncIOEventEmitter):
         try:
             self.emit('beforePrompt', memory, functions, tokenizer, prompt, prompt_options)
             response = client.completePrompt(memory, functions, tokenizer, prompt, prompt_options)
-            #print(f'***** Alphawave completePrompt {response}')
+            print(f'***** Alphawave completePrompt {response}')
             self.emit('afterPrompt', memory, functions, tokenizer, prompt, prompt_options, response)
             if response['status'] != 'success':
                 return response

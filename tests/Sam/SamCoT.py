@@ -12,7 +12,7 @@ import faiss
 import pickle
 import hashlib
 import nltk
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import openai
 from promptrix.VolatileMemory import VolatileMemory
 from promptrix.FunctionRegistry import FunctionRegistry
@@ -72,7 +72,7 @@ def generate_faiss_id(document):
 class SamInnerVoice():
     def __init__(self, model):
         self.client = OSClient(api_key=None)
-        self.openAIClient = OpenAIClient(apiKey=openai_api_key)
+        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
 
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
@@ -81,7 +81,9 @@ class SamInnerVoice():
         self.keys_of_interest = ['title', 'abstract', 'uri']
         self.model = model
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
-        self.docEs = None
+        self.docEs = None # docs feelings
+        self.current_topics = None # topics under discussion - mostly a keyword list
+        self.last_tell_time = int(time.time()) # how long since last tell
         docHash_loaded = False
         try:
             self.docHash = {}
@@ -102,16 +104,18 @@ class SamInnerVoice():
                 pickle.dump(data, f)
         # create wiki search engine
         self.op = op.OpenBook()
-
+        self.action_selection_occurred = False
 
     def confirmation_popup(self, action):
        msg_box = QMessageBox()
        msg_box.setWindowTitle("Confirmation")
+       self.action_text = action
        msg_box.setText(f"Can Sam perform {action}?")
        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+       #msg_box.editTextChanged.connect(lambda x: self.action_text) # Add this line
        retval = msg_box.exec_()
        if retval == QMessageBox.Yes:
-          return True
+          return self.action_text
        elif retval == QMessageBox.No:
           return False
 
@@ -121,6 +125,7 @@ class SamInnerVoice():
             log.write(input.strip()+'\n')
 
     def search_titles(self, query):
+        print(f'search_titles: {query}')
         titles = []; articles = []
         for key in self.details.keys():
             for item in self.details[key]:
@@ -131,11 +136,11 @@ class SamInnerVoice():
         # Find closest title by cosine similarity
         cos_sims = spatial.distance.cdist([query_embedding], title_embeddings, "cosine")[0]
         most_similar = cos_sims.argmin()
-        print(f'similar title {titles[most_similar]}')
         return articles[most_similar]
     
     def sentiment_analysis(self, profile_text):
-       if self.docEs is not None:
+       short_profile = profile_text.split('\n')[0]
+       if self.docEs is not None: # only do this once a session
           return None
        try:
           with open('SamInputLog.txt', 'r') as log:
@@ -143,12 +148,12 @@ class SamInnerVoice():
 
           #lines = inputLog.split('\n')
           lines = inputLog[-4000:]
-          prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, max_tokens=150)
+          prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=150)
         
           analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own."""
 
           analysis_prompt = Prompt([
-             SystemMessage(profile_text),
+             SystemMessage(short_profile),
              SystemMessage(analysis_prompt_text),
              UserMessage("Doc's input: {{$input}}\n"),
              #AssistantMessage(' ')
@@ -158,17 +163,18 @@ class SamInnerVoice():
                                   logRepairs=False, validator=DefaultResponseValidator())
 
           if type(analysis) is dict and 'status' in analysis.keys() and analysis['status'] == 'success':
-             es = analysis['message']['content']
-             print(f'analysis {es}')
-             return "Doc's emotional state analysis:\n"+es
+             self.docEs = analysis['message']['content'].strip().split('\n')[0] # just use the first pp
+             #print(f'analysis {self.docEs}')
+             return self.docEs
        except Exception as e:
           traceback.print_exc()
           print(f' sentiment analysis exception {str(e)}')
        return None
 
-    def sentiment_response(self):
+    def sentiment_response(self, profile):
+       short_profile = profile.split('\n')[0]
        # breaking this out separately from sentiment analysis
-       prompt_text = f"""Given who you are:\n{profile_text}\nand your analysis of doc's emotional state\n{es}\nWhat would you say to him? If so, pick only the one or two most salient emotions. Remember he has not seen the analysis, so you need to explicitly include the names of any emotions you want to discuss. You have only about 100 words.\n"""
+       prompt_text = f"""Given who you are:\n{short_profile}\nand your analysis of doc's emotional state\n{es}\nWhat would you say to him? If so, pick only the one or two most salient emotions. Remember he has not seen the analysis, so you need to explicitly include the names of any emotions you want to discuss. You have only about 100 words.\n"""
        prompt = Prompt([
           UserMessage(prompt_text),
           #AssistantMessage(' ')
@@ -187,22 +193,16 @@ class SamInnerVoice():
           print(f' idle loop exception {str(e)}')
        return None
 
-    def recall(self, tags, query, retrieval_count=2, retrieval_threshold=.8):
-        if tags =='cancel':
-            return []
-        if tags is None or len(tags) == 0:
-            query_tags = ''
-        else:
-            query_tags = tags.lower().split(',')
+    def recall(self, topic, query, profile=None, history= None, retrieval_count=2, retrieval_threshold=.8):
         query_embed = self.embedder.encode(query)
 
         # gather docs matching tag filter
         candidate_ids = []
         vectors = []
-        # gather all docs with matching tags
+        # gather all docs with matching topic tags
         for id in self.metaData.keys():
             # gather all potential docs
-            if len(query_tags) == 0 or any(tag in query_tags for tag in self.metaData[id]['tags']):
+            if topic == None or topic in self.metaData[id]['tags']:
                 candidate_ids.append(id)
                 vectors.append(self.metaData[id]['embed'])
 
@@ -222,13 +222,13 @@ class SamInnerVoice():
             scores.append((id, score))
         # Sort by combined score
         results = sorted(scores, key=lambda x: x[1])
-        print(results)
         
         texts = []
-        for idx in range(min(len(results), retrieval_count)):
-            if (len(texts) < retrieval_count):
-                texts.append(self.docHash[results[idx][0]])
-        return texts
+        for idx in range(len(results)):
+           if len(texts) < retrieval_count:
+              texts.append(self.docHash[results[idx][0]])
+
+        return str(texts)
     
     def remember(self, tags, text):
         if tags =='cancel':
@@ -256,26 +256,30 @@ class SamInnerVoice():
         return tags
                         
 
-    def action_selection(self, input, profile, history):
+    def action_selection(self, input, profile, history, widget):
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
-        print(f'action selection profile len {len(profile)}')
-        
+        print(f'action selection input {input}')
+        self.action_selection_occurred = True
+        short_profile = profile.split('\n')[0]
         self.articles = []
         for key in self.details.keys():
             for item in self.details[key]:
-                self.articles.append({"title": item['title'],
-                                      #"abstract": item['abstract']
-                                      })
-        prompt_text = f"""Given the following user-provided recent exchange, your task is to determine if profile\n{profile}\n should act at this time. Only select an action if explicity called for by the user in the recent exchange, or use action <ask> if you need more information. Your priorities are as follows: 
-1. Monitor doc's mental and emotional state. This can be inferred from analyzing his input, or using <ask> to ask doc directly how he is feeling.
-2. Respond to doc's input.
-3. Continue to explore your interest in the arts, sciences, and philosophy.
+                self.articles.append({"title": item['title'] })
+        prompt_text = f"""{short_profile}
+Given the following user input, determine if an agent with the following profile should act at this time.
+User input:
+{input}
 
-The usual default action should be to choose 'none'
-The following New York Times articles are available:
+Look first for actions specifically requested in the input. 
+If you need more information you can use the action 'ask'.
+The usual default action should be to choose 'none'.
+
+New York Times news headlines for today:
 {self.articles}
+
+full articles can be retrieved using the action 'article'.
 
 Respond using the following TOML format:
 [RESPONSE]
@@ -290,7 +294,8 @@ none\t'none'\t no action is needed.\t[RESPONSE]\naction=none\nvalue=none\n[STOP]
 ask\t<question>\t ask doc a question.\t[RESPONSE]\naction=ask\nvalue=how are you feeling, doc?\n[STOP]
 article\t<article title>\t retrieve a NYTimes article.\t[RESPONSE]\naction=article\nvalue=To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use\n[STOP]
 gpt4\t<question>\t ask gpt4 a question\t[RESPONSE]\naction=gpt4\nvalue=in python on linux, how can I list all the subdirectory names in a directory?\n[STOP]
-web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t[RESPONSE]\naction=web\nvalue=Weather forecast for Berkeley,Ca for <today's date>\n[STOP]
+recall\t<subject matter string>\t recall items from semantic memory, using the <subject matter string> as the subject of the search.\t[RESPONSE]\naction=recall\nvalue=Cognitive Architecture>\n[STOP]
+web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t[RESPONSE]\naction=web\nvalue=Weather forecast for Berkeley,Ca for <today - eg Jan 1, 2023>\n[STOP]
 wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\naction=wiki\nvalue=Want is the EPR paradox in quantum physics?\n[STOP]
 """
         action_validation_schema={
@@ -309,17 +314,17 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
 
         #print(f'action_selection {input}\n{response}')
         prompt = Prompt([
-            SystemMessage(prompt_text),
-            UserMessage('Exchange:\n{{$input}}'),
+           SystemMessage(prompt_text),
+           UserMessage(f'User Input:\n{{$input}}'),
         ])
-        prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, max_tokens=50)
+        prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
 
         text = self.format_conversation(history, 4)
-        analysis = ut.run_wave (self.client, {"input": text}, prompt, prompt_options,
+        print(f'action_selection starting analysis')
+        analysis = ut.run_wave (self.client, {"input": input}, prompt, prompt_options,
                               self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
                               logRepairs=False, validator=TOMLResponseValidator(action_validation_schema))
       
-
 
         summary_prompt_text = f"""Summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
 
@@ -330,7 +335,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
         ])
         summary_prompt_options = PromptCompletionOptions(completion_type='chat', model='gpt-3.5-turbo', max_tokens=240)
 
-        print(f'SamCoT analysis {analysis}')
+        print(f'action_selection analysis: {analysis}')
         if type(analysis) == dict and 'status' in analysis and analysis['status'] == 'success':
             content = analysis['message']['content']
             print(f'SamCoT content {content}')
@@ -339,10 +344,10 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
                 print(f'Sam wants to read article {title}')
                 ok = self.confirmation_popup(f'Sam want to retrieve {title}')
                 if not ok: return {"none": ''}
-                article = self.search_titles(title, self.details)
+                article = self.search_titles(title)
                 url = article['url']
                 print(f' requesting url from server {title} {url}')
-                response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}')
+                response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=15)
                 data = response.json()
                 summary = ut.run_wave(self.openAIClient, {"input":data['result']}, summary_prompt, summary_prompt_options,
                                       self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
@@ -356,6 +361,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
             elif type(content) == dict and 'action' in content.keys() and content['action']=='web':
                 ok = self.confirmation_popup(content)
                 if ok:
+                   self.web(content['value'], widget, short_profile, history)
                    return {"web":content['value']}
             elif type(content) == dict and 'action' in content.keys() and content['action']=='wiki':
                 ok = self.confirmation_popup(content)
@@ -369,39 +375,74 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
             elif type(content) == dict and 'action' in content.keys() and content['action']=='gpt4':
                 ok = self.confirmation_popup(content)
                 if ok:
-                   return {"gpt4":content['value']}
+                   text = self.gpt4(content['value'], short_profile, history)
+                   return {"gpt4":text}
+            elif type(content) == dict and 'action' in content.keys() and content['action']=='recall':
+                ok = self.confirmation_popup(content)
+                if ok:
+                   # need to expand to allow first arg, topic
+                   text = self.recall(None, content['value'], profile=short_profile, history=history)
+                   return {"recall":text}
             else:
                return {"none": ''}
 
+    def service_check(self, url, data=None, timeout_seconds=5):
+       response = None
+       try:
+          if data:
+             response = requests.post(url, json=data)
+          else:
+             response = requests.get(url, timeout=timedelta(seconds=timeout_seconds))
+       except Exception as e:
+          print("Error checking status of", url, ":", str(e))
+          return False
+       else:
+          if response.status_code == 200:
+             print(f"{url} is alive")
+             return True
+          else:
+             print(f"{url} returned status {response.status_code}")
+             return False
+
     def wakeup_routine(self):
-        self.nytimes = nyt.NYTimes()
-        self.news, self.details = self.nytimes.headlines()
-        city, state = get_city_state()
-        print(f"My city and state is: {city}, {state}")
-        local_time = time.localtime()
-        year = local_time.tm_year
-        day_name = ['Monday', 'Tuesday', 'Wednesday', 'thursday','friday','saturday','sunday'][local_time.tm_wday]
-        month_num = local_time.tm_mon
-        month_name = ['january','february','march','april','may','june','july','august','september','october','november','december'][month_num-1]
-        month_day = local_time.tm_mday
-        hour = local_time.tm_hour
-        if hour < 12:
-            return 'Good morning Doc!'
-        if hour < 17:
-            return 'Good afternoon Doc!'
-        else:
-            return 'Hi Doc.'
-        # check news for anything interesting.
-        # check todos
-        # etc
-        pass
+       
+       city, state = get_city_state()
+       print(f"My city and state is: {city}, {state}")
+       local_time = time.localtime()
+       year = local_time.tm_year
+       day_name = ['Monday', 'Tuesday', 'Wednesday', 'Thursday','Friday','Saturday','Sunday'][local_time.tm_wday]
+       month_num = local_time.tm_mon
+       month_name = ['january','february','march','april','may','june','july','august','september','october','november','december'][month_num-1]
+       month_day = local_time.tm_mday
+       hour = local_time.tm_hour
+
+       # do wakeup checks and assemble greeting
+       wakeup_messages = ''
+       if hour < 12:
+          wakeup_messages += 'Good morning Doc!\n'
+       elif hour < 17:
+          wakeup_messages += 'Good afternoon Doc!\n'
+       else:
+          wakeup_messages += 'Hi Doc.\n'
+       self.nytimes = nyt.NYTimes()
+       self.news, self.details = self.nytimes.headlines()
+       if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'model':'gpt-3.5-turbo'}, timeout_seconds=20):
+          wakeup_messages += f' - is web search service started?\n'
+       if not self.service_check("http://192.168.1.195:5004", data={'prompt':'You are an AI','query':'who are you?','max_tokens':10}):
+          wakeup_messages += f' - is llm service started?\n'
+       if self.details == None:
+          wakeup_messages += f' - NYT news unavailable'
+          
+       # check todos
+       # etc
+       return wakeup_messages
 
     def get_keywords(self, text):
        prompt = Prompt([SystemMessage("Assignment: Extract keywords and named-entities from the conversation below.\nConversation:\n{{$input}}\n."),
                         #AssistantMessage('')
                         ])
        
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, max_tokens=50)
+       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
        response = ut.run_wave(self.client, {"input":text}, prompt, options,
                                       self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
                                       logRepairs=False, validator=DefaultResponseValidator())
@@ -433,7 +474,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
                         UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
                         #AssistantMessage('')
                         ])
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, max_tokens=50)
+       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=50)
        response = ut.run_wave(self.client, {"input":keys_ents}, prompt, options,
                                       self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
                                       logRepairs=False, validator=DefaultResponseValidator())
@@ -446,18 +487,50 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
 
     def reflect(self, profile_text, history):
        global es
+       results = {}
+       print('reflection begun')
        es = self.sentiment_analysis(profile_text)
-       self.current_topics = self.topic_analysis(profile_text, history)
-       print(f'topic-analysis {self.current_topics}')
-       return es
-
+       if es is not None:
+          results['sentiment_analysis'] = es
+       if self.current_topics is None:
+          self.current_topics = self.topic_analysis(profile_text, history)
+          print(f'topic-analysis {self.current_topics}')
+          results['current_topics'] = self.current_topics
+       now = int(time.time())
+       if self.action_selection_occurred and now-self.last_tell_time > random.random()*60+60 :
+          self.action_selection_occurred = False # reset action selection so no more tells till user input
+          print('do I have anything to say?')
+          self.last_tell_time = now
+          prompt = Prompt([
+             SystemMessage(profile_text.split('\n')[0:4]),
+             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\nself.get_conv_history(history, 4),\nDoc is feeling:\n{self.docEs}\nLimit your response to 200 words.""")
+          ])
+          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=3000, max_tokens=300)
+          response = None
+          try:
+             response = ut.run_wave(self.client, {"input":''}, prompt, options,
+                                 self.memory, self.functions, self.tokenizer)
+          except Exception as e:
+             traceback.print_exc()
+          print(f'LLM tell response {response}')
+          if type(response) == dict and 'status' in response and response['status'] == 'success':
+             answer = response['message']['content'].strip()
+             # now parse. Stop at first question or end of first pp
+             #answer = answer.split('?')
+             #if len(answer) <=1:
+             #   answer.split('\n')
+             #answer = answer[0]
+             results['tell'] = answer
+             
+       return results
+ 
 
     def summarize(self, query, response, profile, history):
       prompt = Prompt([
          SystemMessage(profile),
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
       ])
-      options = PromptCompletionOptions(completion_type='chat', model=self.model, max_tokens=400)
+      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
       response = ut.run_wave(self.client, {"input":response}, prompt, options,
                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
                              logRepairs=False, validator=DefaultResponseValidator())
@@ -467,33 +540,74 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
       else: return 'unknown'
 
     def wiki(self, query, profile, history):
-      query = query.strip()
-      if len(query)> 0:
-         wiki_lookup_response = self.op.search(query)
-         wiki_lookup_summary=self.summarize(query, wiki_lookup_response, profile, history)
-         return wiki_lookup_summary
+       short_profile = profile.split('\n')[0]
+       query = query.strip()
+       if len(query)> 0:
+          wiki_lookup_response = self.op.search(query)
+          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile, history)
+          return wiki_lookup_summary
 
-    def web(self, query=None):
-      query = query.strip()
-      if len(query)> 0:
-         self.web_query = query
-         self.worker = WebSearch(selectedText)
-         self.worker.finished.connect(self.web_search_finished)
-         self.worker.start()
+    def gpt4(self, query, profile, history):
+       short_profile = profile.split('\n')[0]
+       query = query.strip()
+       if len(query)> 0:
+          prompt = Prompt([
+             SystemMessage(short_profile),
+             UserMessage(self.format_conversation(history, 4)),
+             UserMessage(f'{query}'),
+          ])
+       options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=200)
+       response = ut.run_wave(self.openAIClient, {"input":query}, prompt, options,
+                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
+                             logRepairs=False, validator=DefaultResponseValidator())
+       if type(response) == dict and 'status' in response and response['status'] == 'success':
+          answer = response['message']['content']
+          print(f'gpt4 answered')
+          return answer
+       else: return {'none':''}
+
+    def web(self, query='', widget=None, profile='', history=[]):
+       query = query.strip()
+       self.web_widget = widget
+       if len(query)> 0:
+          self.web_query = query
+          self.web_profile = profile.split('\n')[0]
+          self.web_history = history
+          self.worker = WebSearch(query)
+          self.worker.finished.connect(self.web_search_finished)
+          self.worker.start()
      
     def web_search_finished(self, search_result):
       if 'result' in search_result:
          response = ''
          if type(search_result['result']) == list:
             for item in search_result['result']:
-               self.display_response('* '+item['source']+'\n')
-               self.display_response('     '+item['text']+'\n\n')
+               if self.web_widget is not None:
+                  self.web_widget.display_response('* '+item['source']+'\n')
+                  self.web_widget.display_response('     '+item['text']+'\n\n')
                response += item['text']+'\n'
          elif type(search_result['result']) is str:
-            self.display_response('\nWeb result:\n'+search_result['result']+'\n')
-            self.add_exchange(self.web_query, response)
-            
-    
+            if self.web_widget is not None:
+               self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
+            response = self.summarize(self.web_query, search_result['result']+'\n', self.web_profile, self.web_history)
+         return response
+
+class WebSearch(QThread):
+   finished = pyqtSignal(dict)
+   def __init__(self, query):
+      super().__init__()
+      self.query = query
+      
+   def run(self):
+      with concurrent.futures.ThreadPoolExecutor() as executor:
+         future = executor.submit(self.long_running_task)
+         result = future.result()
+         self.finished.emit(result)  # Emit the result string.
+         
+   def long_running_task(self):
+      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model=gpt-3.5-turbo')
+      data = response.json()
+      return data
 
 if __name__ == '__main__':
     sam = SamInnerVoice(model='alpaca')

@@ -88,7 +88,7 @@ class OSClient(PromptCompletionClient):
         rendered_prompt = prompt.renderAsMessages(memory, functions, tokenizer, max_input_tokens)
         
         if rendered_prompt.tooLong:
-            return {'status': 'too_long', 'message': f"The generated chat completion prompt had a length of {result.length} tokens which exceeded the max_input_tokens of {max_input_tokens}."}
+            return {'status': 'too_long', 'message': f"The generated chat completion prompt had a length of {rendered_prompt.length} tokens which exceeded the max_input_tokens of {max_input_tokens}."}
         if self.options.logRequests:
             print(Colorize.title('CHAT PROMPT:'))
             for msg in rendered_prompt.output:

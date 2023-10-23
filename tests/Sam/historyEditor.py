@@ -10,7 +10,13 @@ class Editor(QWidget):
         self.load()
         layout = QVBoxLayout()
         self.edit = QTextEdit()
-        string_history = [json.dumps(d) for d in self.history]
+        string_history = []
+        for d in self.history:
+            try:
+                string_history.append(json.dumps(d))
+            except Exception as e:
+                print(f' problem with this form, skipping {d}')
+            
         self.edit.setPlainText("\n".join(string_history))
         layout.addWidget(self.edit)
 

@@ -379,7 +379,7 @@ register_conv_template(
         roles=("### Instruction", "### Response"),
         messages=(),
         offset=0,
-        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
+        sep_style=SeparatorStyle.ADD_COLON_SPACE_SINGLE,
         sep="\n\n",
         response_prime=True,
     )
