@@ -42,7 +42,7 @@ class TOMLResponseValidator(PromptResponseValidator):
             #print(f'***** find_toml no start')
             return {}
         elif start < 0:
-            print(f'looking for {list(self.schema.keys())}')
+            #print(f'looking for {list(self.schema.keys())}')
             min_start = 9999
             for key in list(self.schema.keys()): #scan to find first key in response, may not be in same order as schema!
                 start = s.find(key)
@@ -75,7 +75,7 @@ class TOMLResponseValidator(PromptResponseValidator):
                 new_toml = line+'\n'
                 continue
             if line.find('=') > 0:
-                print(f'  {line}')
+                #print(f'  {line}')
                 if in_key_pair:
                     new_toml += '"\n' # close value for prev key
                 key = line[:line.find('=')]
@@ -140,7 +140,7 @@ class TOMLResponseValidator(PromptResponseValidator):
             toml_extract = self.find_toml(text)
         except Exception as e:
             traceback.print_exc()
-        print(f'\n***** TOMLResponseValidator toml_extract \n{toml_extract}\n')
+        #print(f'\n***** TOMLResponseValidator toml_extract \n{toml_extract}\n')
         if toml_extract is None or len(toml_extract) < 5:
             #print(f'***** TOMLResponseValidator failure no toml', file=sys.stderr)
             return {

@@ -32,6 +32,8 @@ class NYTimes():
         """
         news = {}
         newsj = self.stories('home')
+        if type(newsj) != dict or 'results' not in newsj.keys():
+            return news
         for item in newsj['results']:
             if item['section'] in sections:
                 i_section = item['section']

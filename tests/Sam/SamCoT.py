@@ -503,7 +503,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
           self.last_tell_time = now
           prompt = Prompt([
              SystemMessage(profile_text.split('\n')[0:4]),
-             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\nself.get_conv_history(history, 4),\nDoc is feeling:\n{self.docEs}\nLimit your response to 200 words.""")
+             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\n{self.format_conversation(history, 4)},\nDoc is feeling:\n{self.docEs}\nLimit your response to 200 words.""")
           ])
           options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=3000, max_tokens=300)
           response = None
@@ -520,7 +520,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
              #if len(answer) <=1:
              #   answer.split('\n')
              #answer = answer[0]
-             results['tell'] = answer
+             results['tell'] = '\n'+answer+'\n'
              
        return results
  
@@ -542,6 +542,9 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
     def wiki(self, query, profile, history):
        short_profile = profile.split('\n')[0]
        query = query.strip()
+       #
+       #TODO rewrite query as answer (HyDE)
+       #
        if len(query)> 0:
           wiki_lookup_response = self.op.search(query)
           wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile, history)

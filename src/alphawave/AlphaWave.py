@@ -77,7 +77,7 @@ class AlphaWave(AsyncIOEventEmitter):
         try:
             self.emit('beforePrompt', memory, functions, tokenizer, prompt, prompt_options)
             response = client.completePrompt(memory, functions, tokenizer, prompt, prompt_options)
-            print(f'***** Alphawave completePrompt {response}')
+            #print(f'***** Alphawave completePrompt {response}')
             self.emit('afterPrompt', memory, functions, tokenizer, prompt, prompt_options, response)
             if response['status'] != 'success':
                 return response
@@ -172,7 +172,7 @@ class AlphaWave(AsyncIOEventEmitter):
         # Append repair history to prompt
         repair_prompt = Prompt([
             prompt,
-            ConversationHistory(f"{self.options.history_variable}-repair"),
+            ConversationHistory(f"{self.options.history_variable}-repair", 1000),
             AssistantMessage('')       # not sure all models need this, but some do, maybe doesn't hurt?
         ])
 
