@@ -503,7 +503,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
           self.last_tell_time = now
           prompt = Prompt([
              SystemMessage(profile_text.split('\n')[0:4]),
-             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\n{self.format_conversation(history, 4)},\nDoc is feeling:\n{self.docEs}\nLimit your response to 200 words.""")
+             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\n{self.format_conversation(history, 4)},\nDoc is feeling:\n{self.docEs}\nAvoid repeating commentary from Recent Conversations. Limit your response to 200 words.""")
           ])
           options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=3000, max_tokens=300)
           response = None

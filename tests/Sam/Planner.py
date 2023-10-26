@@ -72,27 +72,50 @@ hour = local_time.tm_hour
 host = '127.0.0.1'
 port = 5004
 
+action_primitive_names = \
+["none",
+ "append",
+ "article",
+ "ask",
+ "block",
+ "choose",
+ "concatenate"
+ "difference",
+ "empty",
+ "extract",
+ "gpt4",
+ "integrate",
+ "recall",
+ "remember"
+ "request",
+ "sort",
+ "web",
+ "wiki",
+ ]
+
 action_primitive_descriptions = \
 """
-action_name\naction_argument\tdescription
-none\t'none'\tno action is needed.
-ask\t<question>\task doc a question.
-article\t<article title>\t retrieve a NYTimes article.
-block\t<action>, <action>\na a group of two actions to be performed in order
-gpt4\t<question>\t ask gpt4 a question.
-recall\t<subject matter string>\t recall items from semantic memory, using the <subject matter string> as the subject of the search.
-request\t<url>\trequest a specific resource from a web site.
-web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.
-wiki\t<search query string>\t search the local wikipedia database.
-choose\t<criteria>\tchoose an item from a list, accoring to <criteria>
-empty\t<list>\ttest if the given <list> is empty
-integrate\t<text1>,<text2>\tcombine text1 and text2 into a single coherent text
-extract\t<query>, <text>\textract information related to <query> from <text>
-append\t<list>,<item>\nadd <item> to <list> and return resulting list
-<concatenate>\t<list1>,<list2>\tappend <list2> to <list1> and return the resulting list
+action_name \t argument(s) \t result \t description
+none \t None \t None \t no action is needed.
+append \t <list>,<item> \t add <item> to <list> and return resulting list
+article \t <article title> \t <article body> \t retrieve the bodyof a NYTimes article with title <article title>.
+ask \t <question> \t <answer> \t presents doc a <question>, returns an <answer> provided by doc.
+block \t <action>, <action>\t <block action> \t returns a block action containing two actions to be performed in order
+choose \t <list>, <criteria> \t <choice> \t choose an item from a <list>, accoring to <criteria>
+concatenate \t <list1>,<list2> \t <append <list2> to <list1> and return the resulting list
+difference \t <text1>, text2> \t <difference text> \t removes content related to <text2> from <text1>, and returns the remainder.
+empty \t <list> \t boolean \t test if the given <list> is empty
+extract \t <query>, <text> \t <extracted text> extract content related to <query> from <text>
+extractList \t <query>, <list> \t <list of extracted entries> \t extract items related to <query> from <list>
+gpt4 \t <question> \t <answer> \t ask gpt4 a <question>, returns the gpt4 response.
+integrate \t <text1> ,<text2> \t <text3> \t combine text1 and text2 into a single coherent text
+recall \t <key> \t <semantic memory text> \t recall and return texts from semantic memory, using the <eky> as the search string.
+remember \t <key>, <text> \t store <text> in semantic memory under recall address <key>.
+request \t <url> \t <url text> \t request a specific resource from a web site.
+sort \t <list>, <criteria> \t <sorted list> \t rank the items in <list> by criteria. Returns the tems as a list in ranked order, best first.
+web \t <query> \t <search result> \t perform a web search, using the <search query>, and return integrated content from relevant urls.
+wiki \t <query> \t <search result> \t wiki search the local wikipedia database and return integrated content from retrieved entries.
 """
-action_primitive_names = \
-["none","ask","article","block","choose","empty","gpt4","recall","request", "web","wiki","integrate","extract","append","concatenate"]
 
 def generate_faiss_id(document):
     hash_object = hashlib.sha256()
@@ -158,7 +181,7 @@ class PlanInterpreter():
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
         self.profile = self.personality
-        # self.op = op.OpenBook() # comment out for testing.
+        self.op = op.OpenBook() # comment out for testing.
 
         self.nytimes = nyt.NYTimes()
         self.news, self.details = self.nytimes.headlines()
@@ -264,25 +287,37 @@ Your conversation style is warm, gentle, humble, and engaging. """
         #    pickle.dump(data, f)
         return value
 
-    def choose(self, list):
-        pass
+    def choose(self, criterion, List):
+       prompt = Prompt([
+          SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
+          UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
+       ])
+       
+       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
+       response = ut.run_wave(self.client, {"input":''}, prompt, options,
+                              self.memory, self.functions, self.tokenizer)
+       if type(response) == dict and 'status' in response and response['status'] == 'success':
+          answer = response['message']['content']
+          return answer
+       else: return 'unknown'
 
-
-    def choose(self, context, choices):
-      prompt = Prompt([
-         SystemMessage(self.profile),
-          UserMessage('Following is a Context and a Choices set. Select one choice from within Choices that best aligns with Context. Use the following TOML format for your response:\n{"item":<choice from choice set>}'),
-          UserMessage(f'Context:\n{context}\nChoices:\n{choices}')
-      ])
+       
+    def difference(self, list1, list2):
+       # tbd
+       prompt = Prompt([
+         SystemMessage('Following is a Context and a List. Select one Item from List that best aligns with Context. Use the following JSON format for your response:\n{"choice":Item}. Include the entire Item in your response'),
+          UserMessage(f'Context:\n{context}\nList:\n{choices}')
+       ])
                       
-      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
-      response = ut.run_wave(self.client, {"input":''}, prompt, options,
-                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                             logRepairs=False, validator=DefaultResponseValidator())
-      if type(response) == dict and 'status' in response and response['status'] == 'success':
-         answer = response['message']['content']
-         return answer
-      else: return 'unknown'
+       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
+       response = ut.run_wave(self.client, {"input":''}, prompt, options,
+                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
+                              logRepairs=False, validator=JSONResponseValidator())
+       if type(response) == dict and 'status' in response and response['status'] == 'success':
+          answer = response['message']['content']
+          return answer
+       else: return 'unknown'
+
 
     def summarize(self, query, response):
       prompt = Prompt([
@@ -366,7 +401,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
 {action_primitive_descriptions}
 
 """
-       
 
        prompt_text = """Given the following form, determine if it can be performed by one or more of the actions provided above. Do not attempt to perform the form. Respond yes or no only.
 
@@ -409,14 +443,17 @@ explanation="<explanation of reason for value>"
        
        executable = analysis['message']['content']['value']
        if executable == 'no':
-          pass#return False
+          return False
 
        ### ok, llm thinks executable, let's try a plan.
 
-       planner = Planner(model = self.model)
-       plan = planner.plan(value)
-       return plan
-       
+       #planner = Planner(model = self.model)
+       #analysis = planner.analyze(None, value)
+       #plan = planner.plan()
+       #return plan
+       return True
+
+    
 class WebSearch(QThread):
    finished = pyqtSignal(dict)
    def __init__(self, query):
@@ -454,7 +491,7 @@ class Planner():
        self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
-       #self.interpreter = PlanInterpreter(self, model=self.model)
+       self.interpreter = PlanInterpreter(self, model=self.model)
 
     def analyze(self, prefix, form):
        if prefix is None:
@@ -518,13 +555,15 @@ Your conversation style is warm, gentle, humble, and engaging. """
     
        plan_prompt=\
 """
-Reason step by step to create a detailed and concise plan in json format for a Driver agent who will lead in fulfilling the request. 
-Respond only with the plan in json format.
-The concise plan will include four agents: 
+Reason step by step to create a concise plan for a Driver agent who will lead in fulfilling the request. 
+The plan should consist of a list of steps, where each step is either (where possible) one of the available actions, or a simple text statement of a task. Respond only with the plan and any commentary.
+
+
+The concise plan will include four agents:
   i Driver, who will execute the plan, 
-  ii User, who will play the role of User in the plan, 
-  iii Assistant, who will play the role of assistant in the plan, 
-  iv State, which will maintain the state of an instance of the plan. 
+  ii State, which will maintain the state of an instance of the plan. 
+  iii Assistant, an AI who will play the role of assistant in the plan, 
+  iv User, the user interacting during plan execution.
 At the end of each step Driver must ask State to store any new information generated. 
 """
        print(f'******* Developing Plan for {self.prefix}')
@@ -532,12 +571,13 @@ At the end of each step Driver must ask State to store any new information gener
        revision_prompt=\
 """
 Reason step by step to analyze the above concise plan with respect to above user Critique. 
-The concise plan will include four agents: 
+The plan should consist of a list of steps, where each step is either (where possible) one of the available actions, or a simple text statement of a task. Respond only with the plan and any commentary.
+
+The concise plan can include four agents:
   i Driver, who will execute the plan, 
-  ii User, who will play the role of User in the plan, 
-  iii Assistant, who will play the role of assistant in the plan, 
-  iv State, which will maintain the state of an instance of the plan. 
-Respond only with the revised Driver plan in json format.
+  ii State, which will maintain the state of an instance of the plan. 
+  iii Assistant, an AI who will play the role of assistant in the plan, 
+  iv User, the user interacting during plan execution.
 """
        user_satisfied = False
        user_critique = '123'
@@ -557,7 +597,7 @@ Respond only with the revised Driver plan in json format.
              messages.append(UserMessage(revision_prompt))
           
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask(self.client, self.model, messages, max_tokens=2000, temp=0.01)
+          plan = self.llm.ask(self.client, self.model, messages, max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
           print(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
@@ -568,82 +608,23 @@ Respond only with the revised Driver plan in json format.
              break
           else:
              print('***** user not satisfield, retrying')
+         
+       #print(plan)
+       # experiment - did we get an understandable plan?
+       print(self.interpreter.choose('Step 1:', plan))
+       
        return plan     
-
-    def plan_bak (self, form):
-       print(f'planning {form}')
-
-       plan_validation_schema={
-          "$schema": "http://json-schema.org/draft-07/schema#",
-          "definitions": {
-             "recursiveNode": {
-                "type": "object",
-                "properties": {
-                   "action": {
-                      "type": "string",
-                      "enum": action_primitive_names
-                   },
-                   "arguments": {
-                      "type": "array",
-                      "items": {
-                         "anyOf": [
-                            {
-                               "$ref": "#/definitions/recursiveNode"
-                            },
-                            {
-                               "type": "string"
-                            }
-                         ]
-                      }
-                   }
-                },
-                "required": ["action"]
-             }
-          },
-          "$ref": "#/definitions/recursiveNode"
-       }
-
-       plan_prompt =f"""A 'concise plan' refers to a brief plan that lists the necessary steps to achieve a specific goal. 
-It focuses on the most important aspects of the goal. 
-It includes key tasks, resources needed, and potential challenges, all presented in a clear and concise manner.
-
-Available Actions:
-
-{action_primitive_descriptions}
-
-Given the following Form, reason step by step to create a concise plan for achieving it.
-Use one or more of the Actions provided above whenever possible, but when necessary create additional actions. 
-Use the following JSON schema to express the plan:
-
-{plan_validation_schema}
-
-"""
-
-       prompt = Prompt([
-          SystemMessage(plan_prompt),
-          UserMessage('Form:\n{{$input}}'),
-       ])
-       prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
-       
-       print(f'planning starting planning')
-       analysis = ut.run_wave (self.client, {"input": form}, prompt, prompt_options,
-                               self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                               logRepairs=False, validator=JSONResponseValidator(plan_validation_schema))
-       
-       print(f'planning result: {analysis}')
-       if type(analysis) is not dict or 'status' not in analysis.keys() or analysis['status'] != 'success':
-          return False
 
 if __name__ == '__main__':
     pi = PlanInterpreter(None)
-    #p.wmWrite('outline', 'one, two, three')
-    #p.wmWrite('chapter1', 'On monday I went to the store')
-    #p.wmWrite('chapter 2', 'On tuesday I went to the dentist')
-    #p.wmWrite('news', '')
-    #print(p.wmRead('outline'))
-    #article = p.choose('gaza', p.articles)
+    #pi.wmWrite('outline', 'one, two, three')
+    #pi.wmWrite('chapter1', 'On monday I went to the store')
+    #pi.wmWrite('chapter 2', 'On tuesday I went to the dentist')
+    #pi.wmWrite('news', '')
+    #print(pi.wmRead('outline'))
+    #article = pi.choose('gaza', pi.articles)
     #print(f'PI article {article}')
-    #chris = p.wiki('christopher columbus')
+    #chris = pi.wiki('christopher columbus')
     #print(f'PI columbus {chris}')
 
     plan_request="""Sam, please create a plan to scan a list of news headlines and report the ones of interest to Doc."""
@@ -708,18 +689,17 @@ def display_results(summaries, doc):
 if __name__ == "__main__":
     scan_news(profile)
 """
-    print('****************************************')
+    #print('****************************************')
+    #print(pi.test_executable("Compile a list of reliable news websites, blogs, and social media accounts that cover diverse topics of interest to Doc."))
 
-    #print(p.test_executable("Compile a list of reliable news websites, blogs, and social media accounts that cover diverse topics of interest to Doc."))
-
-    print('****************************************')
-    #print(p.test_executable("""fetch_headlines(source):
+    #print('****************************************')
+    #print(pi.test_executable("""fetch_headlines(source):
     # retrieve latest headlines from specified source
 #"""))
 
-    print('****************************************')
-    #print(p.test_executable("""Search the web for latest news"""))
-    print('****************************************')
+    #print('****************************************')
+    #print(pi.test_executable("""Search the web for latest news"""))
+    #print('****************************************')
     pl = Planner()
     pl.analyze('TicTacToe',"let's play tic tac toe")
     pl.plan()
