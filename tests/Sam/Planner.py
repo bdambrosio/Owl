@@ -83,6 +83,7 @@ action_primitive_names = \
  "difference",
  "empty",
  "extract",
+ "first",
  "gpt4",
  "integrate",
  "recall",
@@ -97,9 +98,9 @@ action_primitive_descriptions = \
 """
 action_name \t argument(s) \t result \t description
 none \t None \t None \t no action is needed.
-append \t <list>,<item> \t add <item> to <list> and return resulting list
-article \t <article title> \t <article body> \t retrieve the bodyof a NYTimes article with title <article title>.
-ask \t <question> \t <answer> \t presents doc a <question>, returns an <answer> provided by doc.
+append \t <List>,<Item> \t <List> \t add <Item> to <List> and return resulting List
+article \t <Text> \t <Text> \t return the body of a NYTimes article with given title.
+ask \t <Text> \t <Text> \t present doc a <question>, returns an <answer> provided by doc.
 block \t <action>, <action>\t <block action> \t returns a block action containing two actions to be performed in order
 choose \t <list>, <criteria> \t <choice> \t choose an item from a <list>, accoring to <criteria>
 concatenate \t <list1>,<list2> \t <append <list2> to <list1> and return the resulting list
@@ -107,6 +108,7 @@ difference \t <text1>, text2> \t <difference text> \t removes content related to
 empty \t <list> \t boolean \t test if the given <list> is empty
 extract \t <query>, <text> \t <extracted text> extract content related to <query> from <text>
 extractList \t <query>, <list> \t <list of extracted entries> \t extract items related to <query> from <list>
+first\n <list> \n <item> \t extract and return the first item on the list.
 gpt4 \t <question> \t <answer> \t ask gpt4 a <question>, returns the gpt4 response.
 integrate \t <text1> ,<text2> \t <text3> \t combine text1 and text2 into a single coherent text
 recall \t <key> \t <semantic memory text> \t recall and return texts from semantic memory, using the <eky> as the search string.
@@ -116,6 +118,59 @@ sort \t <list>, <criteria> \t <sorted list> \t rank the items in <list> by crite
 web \t <query> \t <search result> \t perform a web search, using the <search query>, and return integrated content from relevant urls.
 wiki \t <query> \t <search result> \t wiki search the local wikipedia database and return integrated content from retrieved entries.
 """
+
+planner_cfg_prompt =\
+"""Respond using the following BNF grammar:
+S -> List
+S -> Item
+List -> "[" ListRemainder 
+ListRemainder -> "]"
+ListRemainder -> Item, ListRemainder
+Item -> "Item: " Action
+Item -> "Item: " Task
+Item -> "Item: " Text
+Item -> "Addr: " Text
+Action -> 'Action: ' Text
+Task -> 'Task: ' Text
+Text -> "a" Text
+Text -> "b" Text
+Text -> "c" Text
+Text -> "d" Text
+Text -> "e" Text
+Text -> "f" Text
+Text -> "g" Text
+Text -> "h" Text
+Text -> "i" Text
+Text -> "j" Text
+Text -> "."
+"""
+planner_nl_prompt=\
+"""
+Respond in one of the following two formats:
+
+1. A single item that begins with "Item:", followed by its type and content. The types can be 'Text', 'Task', or 'Action'.
+\t* For 'Text', start the content with "Text: " and provide the string, e.g., "Text: a" or "Text: abc.".
+\t* For 'Task', start the content with "Task: " then name and describe the task, e.g., "Task: InitializeState: set up the initial game state with an empty board and assign roles to players (user as X, AI as O)".
+\t* For 'Action', start the content with "Action: " then provide action instantiation, e.g., "Action: First genAddr1 genAddr2
+\t*  Example: Item: a
+2. A list enclosed in square brackets, containing items separated by commas. Each item in the list should begin with "Item:", followed by its type and content.
+\t *Example of a valid response:
+'[Item: Text: a, Item: Task: parse this list, Item: Action: say Hi]'
+"""
+
+planner_nl_list_prompt =\
+"""
+Response format: A list enclosed in square brackets, containing items separated by commas. Each item should begin with "Item:", followed by its type and content. The types can be 'Text', 'Task', 'Address', or 'Action'.
+\t* For 'Text', start the content with "Text: " and provide the string, e.g., "Text: a" or "Text: abc.".
+\t* For 'Task', start the content with "Task: " and describe the task, e.g., "Task: parse this list".
+\t* For 'Address', start the content with "Addr: " the list the address string, e.g., "Addr: acjq".
+\t*  For 'Action', start the content with "Action: " and describe the action, e.g., "Action: say Hi".
+
+Examples of a valid response:
+'Plan: [Item: Task: InitializeGameState: Set up the initial game state with an empty board and assign roles to players (user as X, AI as O)Item: Text: a, Item: Task: parse this list, Item: Action: First Addr: acjq Addr: erzy]'
+'Notes: [Item: Text: this plan does not specify how exactly the AI decides its moves.]'
+"""
+
 
 def generate_faiss_id(document):
     hash_object = hashlib.sha256()
@@ -301,6 +356,19 @@ Your conversation style is warm, gentle, humble, and engaging. """
           return answer
        else: return 'unknown'
 
+    def first(self, List):
+       prompt = Prompt([
+          SystemMessage('The following is a list of steps. Each step starts with the word "Step". Please select and respond with only the first entry. Include the entire first entry in your response.'),
+          UserMessage(f'List:\n{List}\n')
+       ])
+    
+       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature=0.01, max_tokens=50)
+       response = ut.run_wave(self.client, {"input":''}, prompt, options,
+                              self.memory, self.functions, self.tokenizer)
+       if type(response) == dict and 'status' in response and response['status'] == 'success':
+          return response['message']['content']
+       else:
+          return 'unknown'
        
     def difference(self, list1, list2):
        # tbd
@@ -446,7 +514,6 @@ explanation="<explanation of reason for value>"
           return False
 
        ### ok, llm thinks executable, let's try a plan.
-
        #planner = Planner(model = self.model)
        #analysis = planner.analyze(None, value)
        #plan = planner.plan()
@@ -551,27 +618,28 @@ Your conversation style is warm, gentle, humble, and engaging. """
     def sbar_as_text(self):
        return f"Task:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nObservations:\n{self.sbar['observations']}"
 
+
+
     def plan(self):
     
        plan_prompt=\
 """
-Reason step by step to create a concise plan for a Driver agent who will lead in fulfilling the request. 
-The plan should consist of a list of steps, where each step is either (where possible) one of the available actions, or a simple text statement of a task. Respond only with the plan and any commentary.
-
+Reason step by step to create a concise plan for a Driver agent who will perform the Task described below. 
+The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. The plan can be followed by notes/commentary using the same format as the plan itself. Respond only with the plan (and notes if needed) using the above plan format.
 
 The concise plan will include four agents:
   i Driver, who will execute the plan, 
   ii State, which will maintain the state of an instance of the plan. 
-  iii Assistant, an AI who will play the role of assistant in the plan, 
+  iii Assistant, an AI who can perform subtasks requiring reasoning.
   iv User, the user interacting during plan execution.
-At the end of each step Driver must ask State to store any new information generated. 
+At the end of each step Driver should ask State to store any new information generated. 
 """
        print(f'******* Developing Plan for {self.prefix}')
 
        revision_prompt=\
 """
 Reason step by step to analyze the above concise plan with respect to above user Critique. 
-The plan should consist of a list of steps, where each step is either (where possible) one of the available actions, or a simple text statement of a task. Respond only with the plan and any commentary.
+The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. Respond only with the plan (and notes if needed) using the above plan format.
 
 The concise plan can include four agents:
   i Driver, who will execute the plan, 
@@ -584,10 +652,12 @@ The concise plan can include four agents:
        plan = None
        first_time = True
        while not user_satisfied:
-          messages = [UserMessage('Request: '+self.prefix)]
+          messages = [SystemMessage('Use this format for Plans:\n'+planner_nl_list_prompt),
+                      SystemMessage(plan_prompt),
+                      SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
+                      UserMessage(f'Task name: {self.prefix}\nTask details:\n{self.sbar_as_text()}')
+                      ]
           if first_time:
-             messages.append(UserMessage(f'the User has provided this information: {self.sbar_as_text()}'))
-             messages.append(UserMessage(plan_prompt))
              first_time = False
           else:
              messages.append(UserMessage('the User has provided the following information: '+self.sbar_as_text()))
@@ -597,7 +667,7 @@ The concise plan can include four agents:
              messages.append(UserMessage(revision_prompt))
           
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask(self.client, self.model, messages, max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
+          plan = self.llm.ask(self.client, self.model, messages, max_tokens=1000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
           print(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
@@ -611,7 +681,8 @@ The concise plan can include four agents:
          
        #print(plan)
        # experiment - did we get an understandable plan?
-       print(self.interpreter.choose('Step 1:', plan))
+       step = self.interpreter.first(plan)
+       print(step)
        
        return plan     
 
@@ -701,5 +772,13 @@ if __name__ == "__main__":
     #print(pi.test_executable("""Search the web for latest news"""))
     #print('****************************************')
     pl = Planner()
+    #print('******analyze tictactoe**************************')
     pl.analyze('TicTacToe',"let's play tic tac toe")
-    pl.plan()
+    #print('******plan tictactoe********************')
+    plan = pl.plan()
+    #print('******extract first step from tictactoe plan ***')
+    step = pi.first(plan)
+    #print('*******test if first step is executable *************')
+    pi.test_executable(step)
+    #print('*******analyze first step ****************')
+    pl.analyze(None, step)
