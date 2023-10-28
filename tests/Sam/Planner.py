@@ -11,6 +11,7 @@ import numpy as np
 import faiss
 import pickle
 import hashlib
+import readline
 import nltk
 from datetime import datetime, date, timedelta
 import openai
@@ -108,13 +109,14 @@ difference \t <text1>, text2> \t <difference text> \t removes content related to
 empty \t <list> \t boolean \t test if the given <list> is empty
 extract \t <query>, <text> \t <extracted text> extract content related to <query> from <text>
 extractList \t <query>, <list> \t <list of extracted entries> \t extract items related to <query> from <list>
-first\n <list> \n <item> \t extract and return the first item on the list.
+first\t <list> \t <item> \t extract and return the first item on the list.
 gpt4 \t <question> \t <answer> \t ask gpt4 a <question>, returns the gpt4 response.
 integrate \t <text1> ,<text2> \t <text3> \t combine text1 and text2 into a single coherent text
 recall \t <key> \t <semantic memory text> \t recall and return texts from semantic memory, using the <eky> as the search string.
 remember \t <key>, <text> \t store <text> in semantic memory under recall address <key>.
 request \t <url> \t <url text> \t request a specific resource from a web site.
 sort \t <list>, <criteria> \t <sorted list> \t rank the items in <list> by criteria. Returns the tems as a list in ranked order, best first.
+tell \t <Text> \t None \t present <Text> to the user.
 web \t <query> \t <search result> \t perform a web search, using the <search query>, and return integrated content from relevant urls.
 wiki \t <query> \t <search result> \t wiki search the local wikipedia database and return integrated content from retrieved entries.
 """
@@ -129,7 +131,6 @@ ListRemainder -> Item, ListRemainder
 Item -> "Item: " Action
 Item -> "Item: " Task
 Item -> "Item: " Text
-Item -> "Addr: " Text
 Action -> 'Action: ' Text
 Task -> 'Task: ' Text
 Text -> "a" Text
@@ -149,26 +150,32 @@ planner_nl_prompt=\
 Respond in one of the following two formats:
 
 1. A single item that begins with "Item:", followed by its type and content. The types can be 'Text', 'Task', or 'Action'.
-\t* For 'Text', start the content with "Text: " and provide the string, e.g., "Text: a" or "Text: abc.".
-\t* For 'Task', start the content with "Task: " then name and describe the task, e.g., "Task: InitializeState: set up the initial game state with an empty board and assign roles to players (user as X, AI as O)".
-\t* For 'Action', start the content with "Action: " then provide action instantiation, e.g., "Action: First genAddr1 genAddr2
-\t*  Example: Item: a
-2. A list enclosed in square brackets, containing items separated by commas. Each item in the list should begin with "Item:", followed by its type and content.
+\t* For 'Text', start with "Text: " and follow with the text string.
+\t\te.g., 'Text: a' or 'Text: abc.'.
+\t* For 'Task', start the content with "Task: " then name and describe the task.
+\t\te.g., "Task: InitializeState: set up the initial game state with an empty board and assign roles to players (user as X, AI as O)".
+\t* For 'Action', start with "Action: " then provide action name, it's argument name(s), and it's result name.
+\t\t e.g., "Action: first genList1 genItem1
+
+2. A list enclosed in square brackets, containing items separated by commas. Each item in the list should begin with "Item:", followed by its content.
 \t *Example of a valid response:
-'[Item: Text: a, Item: Task: parse this list, Item: Action: say Hi]'
+'[ Item: Text: a, Item: Task: monitor the web for news about OpenAI, Item: Action: tell: Hi ]'
 """
 
 planner_nl_list_prompt =\
 """
-Response format: A list enclosed in square brackets, containing items separated by commas. Each item should begin with "Item:", followed by its type and content. The types can be 'Text', 'Task', 'Address', or 'Action'.
-\t* For 'Text', start the content with "Text: " and provide the string, e.g., "Text: a" or "Text: abc.".
-\t* For 'Task', start the content with "Task: " and describe the task, e.g., "Task: parse this list".
-\t* For 'Address', start the content with "Addr: " the list the address string, e.g., "Addr: acjq".
-\t*  For 'Action', start the content with "Action: " and describe the action, e.g., "Action: say Hi".
+A list is enclosed in square brackets, containing Items separated by '\n'. 
+Each Item in a List begins with "Item:", followed by its type and value. The types can be 'Text', 'Task', or 'Action'.
+\t* For 'Text', start with "Text: " and provide the text string.
+\t\t Example: 'Item: Text: abc 123' or 'Item: Text: this is a short text string.'.
+\t* For 'Task', start  with "Task: " and provide a text string describing the task.
+\t\tExample: 'Item: Task: build a short list of reliable, fact-checked, world news sources".
+\t* For 'Action', start with "Action: " then provide action name, it's argument name(s), and it's result name.
+\t\tExample: 'Item: Action: first genList1 genItem1'
 
 Examples of a valid response:
-'Plan: [Item: Task: InitializeGameState: Set up the initial game state with an empty board and assign roles to players (user as X, AI as O)Item: Text: a, Item: Task: parse this list, Item: Action: First Addr: acjq Addr: erzy]'
-'Notes: [Item: Text: this plan does not specify how exactly the AI decides its moves.]'
+'Plan: [Item: Task: InitializeGameState -  Set up the initial game state with an empty board and assign roles to players (user as X, AI as O, )\nItem: Text: a silly text string\n Item: Task: find the weather forecast and summarize it for Doc, \nItem: Action: first genList45 genItem23 ]'
+'Notes: [Item: Text: this plan does not specify how exactly the AI decides its moves.\n ]'
 """
 
 
@@ -570,20 +577,17 @@ Your conversation style is warm, gentle, humble, and engaging. """
              prefix = prefix_json['name']
           print(f'******* task prefix: {prefix}')
        else:
-          use_file = input('use existing SBAR?')
-          if use_file.strip().lower() == 'yes':
-             try:
-                with open(prefix+'UserRequirements.json', 'r') as pf:
-                   user_responses = json.load(pf)
+          try:
+             with open(prefix+'UserRequirements.json', 'r') as pf:
+                user_responses = json.load(pf)
                 self.prefix = prefix
                 self.sbar = user_responses
-                return prefix, user_responses
-             except Exception as e:
-                print(f'attempt to load {prefix} SBAR failed {str(e)}')
-                traceback.print_exc()
-                
-       user_responses = {'needs':'', 'background':''}
-    
+                if input('Use existing sbar?').strip().lower() == 'yes':
+                   return prefix, user_responses
+          except Exception as e:
+             print(f'no {prefix} SBAR found')
+
+       user_responses = {}
        # Loop for obtaining user responses
        # Generate interview questions for the remaining steps using GPT-4
        interview_instructions = [
@@ -594,17 +598,26 @@ Your conversation style is warm, gentle, humble, and engaging. """
        messages = [SystemMessage("Reason step by step"),
                    UserMessage("The task is to "+form)]
        for step, instruction in interview_instructions:
-          previous_step = user_responses[list(user_responses.keys())[-1]]
           messages.append(UserMessage(instruction))
           if step != 'observations':
              user_prompt = self.llm.ask(self.client, self.model, messages, temp = 0.05)
              print(f"\nAI : {step}, {user_prompt}")
-             user_response = input("User: ")
-             user_responses[step] = user_response
-             messages.append(UserMessage(user_response))
-          else:
+             past = ''
+             if self.sbar is not None and type(self.sbar) is dict and step in self.sbar.keys():
+                past = self.sbar[step] # prime user response with last time
+             readline.set_startup_hook(lambda: readline.insert_text(past))
+             try:
+                user_input = input(user_prompt)
+             finally:
+                readline.set_startup_hook()
+             user_responses[step] = user_input
+             messages.append(UserMessage(user_input))
+          else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
              observations = self.llm.ask(self.client, self.model, messages, max_tokens=150,temp = 0.05)
              user_responses['observations']=observations
+             print(f"\nAI : {step}, {observations}")
+             user_response = input("User: ")
+             user_responses['response'] = user_response
        print(f"Requirements \n{user_responses}")
        try:
           with open(prefix+'UserRequirements.json', 'w') as pf:
@@ -616,7 +629,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
        return prefix, user_responses
 
     def sbar_as_text(self):
-       return f"Task:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nObservations:\n{self.sbar['observations']}"
+       return f"Task:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nObservations:\n{self.sbar['observations']}\nResponse:\n{self.sbar['response']}"
 
 
 
@@ -638,8 +651,8 @@ At the end of each step Driver should ask State to store any new information gen
 
        revision_prompt=\
 """
-Reason step by step to analyze the above concise plan with respect to above user Critique. 
-The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. Respond only with the plan (and notes if needed) using the above plan format.
+Reason step by step to analyze the above plan with respect to above user Critique, and update the plan. 
+The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. Respond only with the updated plan (and notes if needed) using the above plan format.
 
 The concise plan can include four agents:
   i Driver, who will execute the plan, 
@@ -653,9 +666,9 @@ The concise plan can include four agents:
        first_time = True
        while not user_satisfied:
           messages = [SystemMessage('Use this format for Plans:\n'+planner_nl_list_prompt),
-                      SystemMessage(plan_prompt),
                       SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
-                      UserMessage(f'Task name: {self.prefix}\nTask details:\n{self.sbar_as_text()}')
+                      SystemMessage(plan_prompt),
+                      UserMessage(f'Task name: {self.prefix}\n{self.sbar_as_text()}')
                       ]
           if first_time:
              first_time = False

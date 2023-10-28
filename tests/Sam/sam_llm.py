@@ -119,6 +119,7 @@ async def get_stream(request: Request):
 
     prompt = message_j['prompt']
     input_ids = tokenizer.encode(prompt)
+    print(f'input_ids {input_ids.shape}')
     generator.set_stop_conditions(stop_conditions)
     generator.begin_stream(input_ids, settings)
     

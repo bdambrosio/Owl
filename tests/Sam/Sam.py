@@ -379,11 +379,11 @@ class ChatApp(QtWidgets.QWidget):
       self.web_button.clicked.connect(self.web)
       control_layout.addWidget(self.web_button)
       
-      self.remember_button = QPushButton("Remember")
-      self.remember_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.remember_button.setFont(self.widgetFont)
-      self.remember_button.clicked.connect(self.remember)
-      control_layout.addWidget(self.remember_button)
+      self.store_button = QPushButton("Store")
+      self.store_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.store_button.setFont(self.widgetFont)
+      self.store_button.clicked.connect(self.store)
+      control_layout.addWidget(self.store_button)
       
       self.history_button = QPushButton("History")
       self.history_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
@@ -512,9 +512,10 @@ Background:\n{get_profile('Bhagavan', 'Story')}
       elif input_text == "Sam":
          # note many activities will use first paragraph only. Keep it relevant!
          self.load_conv_history()  # load state for Sam 
-         input_text = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. You feel a sense of warmth and safety when you're with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
-You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. When User says 'you' he refers to Samantha. When Samantha says 'you' she refers to Doc.
+         input_text = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
+Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
+In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
+In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
 
 Background:\n{get_profile('Sam', 'Story')}\n{get_profile('Sam', 'Story')}
 
@@ -531,27 +532,6 @@ Your task is to:
 3. analyze each solution alternative for consistency with the problem statement, then select the solution alternative most consistent with all the information in the problem statement.
 """
 
-      elif input_text == "React":
-         input_text =\
-            """Define steps as:
-orient: identify the task
-thought: think step by step about the task. Identify ambiguities or logical consequences in the problem statement that impact your response to the task.
-action: act to further progress on the task. Your available acts are:
-i. answer: if the answer is available, respond with answer then respond STOP
-ii. logic: use known fact or logical reasoning based on known fact to expand on thought, then respond with reasoning.
-iii. ask: ask user a question to clarify the task. Display: question, Display: STOP
-iv. search: use the llmsearch plugin to search the web for question based on thought
-observation: revise or refine the task given thought and results of action
-
-Define react as:
-For step in steps: perform step
-askUser 'should we continue?'
-Display STOP
-
-Assistant will concisely display all orient, thought, action, and observation
-Assistant will follow the instructions in react above to respond to all questions and tasks.
-"""
-           
       memory.set('prompt_text', input_text)
       CURRENT_PROFILE_PROMPT_TEXT = input_text
       PROMPT = Prompt([
@@ -718,21 +698,18 @@ Assistant will follow the instructions in react above to respond to all question
             self.display_response('\nWeb result:\n'+search_result['result']+'\n')
             self.add_exchange(self.web_query, response)
             
-   def remember(self):
+   def store(self):
       global PREV_LEN, op#, vmem, vmem_clock
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
          selectedText = cursor.selectedText()
+         print(f'cursor has selected, len {len(selectedText)}')
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
       selectedText = selectedText.strip()
       if len(selectedText) > 0:
-         self.tagEntryWidget = TagEntryWidget(samInnerVoice.get_all_tags())
-         self.tagEntryWidget.show()
-         self.tagEntryWidget.tagComplete.connect(lambda tag: self.remember_onTag(tag, selectedText))
-
-   def remember_onTag(self, tag, selectedText):
-      samInnerVoice.remember(tag, selectedText)
+         print(f'cursor has selected, len {len(selectedText)}')
+         samInnerVoice.store(selectedText)
          
    def get_conv_history(self):
       return memory.get('history')

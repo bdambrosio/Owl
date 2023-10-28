@@ -69,11 +69,43 @@ def generate_faiss_id(document):
     faiss_id = int(hash_value[:8], 16)
     return faiss_id
 
+class LLM():
+   def __init__(self, model='alpaca'):
+        self.model = model
+        self.functions = FunctionRegistry()
+        self.tokenizer = GPT3Tokenizer()
+        self.memory = VolatileMemory({'input':[], 'history':[]})
+
+   def ask(self, client, input, prompt_msgs, temp=0.2, max_tokens=100, validator=DefaultResponseValidator()):
+      """ Example use:
+          class_prefix_prompt = [SystemMessage(f"Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}")]
+          prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
+          print(f'***** prefix response {prefix_json}')
+          if type(prefix_json) is dict and 'name' in prefix_json.keys():
+             prefix = prefix_json['name']
+      """
+
+      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature=temp, max_tokens=max_tokens)
+      try:
+         prompt = Prompt(prompt_msgs)
+         #print(f'ask prompt {prompt_msgs}')
+         response = ut.run_wave (client, {"input":input}, prompt, options,
+                                 self.memory, self.functions, self.tokenizer, validator=validator)
+         #print(f'ask response {response}')
+         if type(response) is not dict or 'status' not in response.keys() or response['status'] != 'success':
+            return None
+         content = response['message']['content']
+         return content
+      except Exception as e:
+         traceback.print_exc()
+         print(str(e))
+         return None
+       
 class SamInnerVoice():
     def __init__(self, model):
         self.client = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-
+        self.llm = LLM()
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
@@ -87,20 +119,16 @@ class SamInnerVoice():
         docHash_loaded = False
         try:
             self.docHash = {}
-            self.metaData = {}
             with open('SamDocHash.pkl', 'rb') as f:
                 data = pickle.load(f)
                 self.docHash = data['docHash']
-                self.metaData = data['metaData']
             docHash_loaded = True
         except Exception as e:
             # no docHash, so faiss is useless, reinitialize both
             self.docHash = {}
-            self.metaData = {}
             with open('SamDocHash.pkl', 'wb') as f:
                 data = {}
                 data['docHash'] = self.docHash
-                data['metaData'] = self.metaData
                 pickle.dump(data, f)
         # create wiki search engine
         self.op = op.OpenBook()
@@ -199,12 +227,12 @@ class SamInnerVoice():
         # gather docs matching tag filter
         candidate_ids = []
         vectors = []
-        # gather all docs with matching topic tags
-        for id in self.metaData.keys():
-            # gather all potential docs
-            if topic == None or topic in self.metaData[id]['tags']:
-                candidate_ids.append(id)
-                vectors.append(self.metaData[id]['embed'])
+        # gather all docs
+        for entry in self.docHash:
+           # gather all potential docs
+           candidate_ids.append(entry['id'])
+           vectors.append(self.docHash[id]['embed1'])
+           vectors.append(self.docHash[id]['embed2'])
 
         # add all matching docs to index:
         index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
@@ -226,34 +254,47 @@ class SamInnerVoice():
         texts = []
         for idx in range(len(results)):
            if len(texts) < retrieval_count:
-              texts.append(self.docHash[results[idx][0]])
+              texts.append(self.docHash[results[idx][0]['text']])
 
         return str(texts)
     
-    def remember(self, tags, text):
-        if tags =='cancel':
-            return
-        tags = tags.lower().split(',')
-        embed = self.embedder.encode(text)
-        id = generate_faiss_id(text)
-        if id in self.docHash:
-            print('duplicate, skipping')
-        #self.semanticIDMap.add_with_ids(embed.reshape(1,-1), np.array([id]))
-        self.docHash[id] = text
-        self.metaData[id] = {"tags": tags, "embed": embed, "timestamp":datetime.now()}
-        # and save - write docHash first, we can always recover from that.
-        with open('SamDocHash.pkl', 'wb') as f:
-            data = {}
-            data['docHash'] = self.docHash
-            data['metaData'] = self.metaData
-            pickle.dump(data, f)
+    def store(self, text, profile=None, history=None):
+       # opposite of recall
+       # ask AI to generate two keys to store this under
+       print(f'SamCoT store entry {text}')
+       id = generate_faiss_id(text)
+       if id in self.docHash:
+          print('duplicate id, error, skipping')
+          return False
 
-    def get_all_tags(self):
-        tags = []
-        for id in self.metaData.keys():
-            if 'tags' in self.metaData[id]:
-                tags = list(set(tags) | set(self.metaData[id]['tags']))
-        return tags
+       keys_prompt = [SystemMessage(f"""Generate two short descriptive text strings for the following content. Respond in JSON using format: {{"key1": '<a short descriptive string>',"key2":'<a content-orthogonal short descriptive string>'}}"""),
+                      UserMessage(f'Content:\n{text}')]
+       keys_json = self.llm.ask(self.client, text, keys_prompt, max_tokens=100, temp=0.3, validator=JSONResponseValidator())
+       print(f' generated keys: {keys_json}')
+       key1 = text; key2 = text
+       if type(keys_json) is dict and 'key1' in keys_json.keys():
+          key1 = keys_json['key1']
+          embed1 = self.embedder.encode(key1)
+       if type(keys_json) is dict and 'key2' in keys_json.keys():
+          key2 = keys_json['key2']
+          embed2 = self.embedder.encode(key2)
+       self.docHash[id] = {"id":id, "text":text, "key1":key1, "embed1":embed1, "key2":key2, "embed2":embed2, "timestamp":datetime.now()}
+       short_form={k: self.docHash[id][k] for k in ["key1", "key2", "text"]}
+       print(f'Storing {short_form}')
+       # and save - write docHash first, we can always recover from that.
+       with open('SamDocHash.pkl', 'wb') as f:
+          data = {}
+          data['docHash'] = self.docHash
+          pickle.dump(data, f)
+             
+    def get_all_wmkeys(self):
+        wmkeys = []
+        for entry in self.docHash:
+            if 'key1' in entry:
+                wmkeys.append(key1)
+            if 'key2' in entry:
+                wmkeys.append(key2)
+        return wmkeys
                         
 
     def action_selection(self, input, profile, history, widget):
@@ -268,7 +309,7 @@ class SamInnerVoice():
             for item in self.details[key]:
                 self.articles.append({"title": item['title'] })
         prompt_text = f"""{short_profile}
-Given the following user input, determine if an agent with the following profile should act at this time.
+Given the following user input, determine if an agent with the above profile should act at this time.
 User input:
 {input}
 
@@ -294,7 +335,8 @@ none\t'none'\t no action is needed.\t[RESPONSE]\naction=none\nvalue=none\n[STOP]
 ask\t<question>\t ask doc a question.\t[RESPONSE]\naction=ask\nvalue=how are you feeling, doc?\n[STOP]
 article\t<article title>\t retrieve a NYTimes article.\t[RESPONSE]\naction=article\nvalue=To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use\n[STOP]
 gpt4\t<question>\t ask gpt4 a question\t[RESPONSE]\naction=gpt4\nvalue=in python on linux, how can I list all the subdirectory names in a directory?\n[STOP]
-recall\t<subject matter string>\t recall items from semantic memory, using the <subject matter string> as the subject of the search.\t[RESPONSE]\naction=recall\nvalue=Cognitive Architecture>\n[STOP]
+recall\t<key string>\t recall content from working, using the <key string> as the recall target.\t[RESPONSE]\naction=recall\nvalue=Cognitive Architecture>\n[STOP]
+store\t<text to place in working memory> \t a text you want to remember that will be stored under embeddings for two AI generated key strings.\t[RESPONSE]\naction=store\nvalue=BoardState: {{"1a":' ',"1b":' ',"1c":' ',"2a":' ',"2b":' ',"2c":' ',"3a":' ',"3b":' ',"3c":' '}}\n[STOP]
 web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t[RESPONSE]\naction=web\nvalue=Weather forecast for Berkeley,Ca for <today - eg Jan 1, 2023>\n[STOP]
 wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\naction=wiki\nvalue=Want is the EPR paradox in quantum physics?\n[STOP]
 """
@@ -380,9 +422,13 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
             elif type(content) == dict and 'action' in content.keys() and content['action']=='recall':
                 ok = self.confirmation_popup(content)
                 if ok:
-                   # need to expand to allow first arg, topic
-                   text = self.recall(None, content['value'], profile=short_profile, history=history)
+                   text = self.recall(content['value'], profile=short_profile, history=history)
                    return {"recall":text}
+            elif type(content) == dict and 'action' in content.keys() and content['action']=='store':
+                ok = self.confirmation_popup(content)
+                if ok:
+                   text = self.store(content['value'], profile=short_profile, history=history)
+                   return {"store":text}
             else:
                return {"none": ''}
 
@@ -426,8 +472,8 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
           wakeup_messages += 'Hi Doc.\n'
        self.nytimes = nyt.NYTimes()
        self.news, self.details = self.nytimes.headlines()
-       if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'model':'gpt-3.5-turbo'}, timeout_seconds=20):
-          wakeup_messages += f' - is web search service started?\n'
+       #if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'model':'gpt-3.5-turbo'}, timeout_seconds=20):
+       #   wakeup_messages += f' - is web search service started?\n'
        if not self.service_check("http://192.168.1.195:5004", data={'prompt':'You are an AI','query':'who are you?','max_tokens':10}):
           wakeup_messages += f' - is llm service started?\n'
        if self.details == None:
@@ -503,9 +549,15 @@ wiki\t<search query string>\t search the local wikipedia database.\t[RESPONSE]\n
           self.last_tell_time = now
           prompt = Prompt([
              SystemMessage(profile_text.split('\n')[0:4]),
-             UserMessage(f"""News:\n{self.news},\nRecent Conversations:\n{self.format_conversation(history, 4)},\nDoc is feeling:\n{self.docEs}\nAvoid repeating commentary from Recent Conversations. Limit your response to 200 words.""")
+             UserMessage(f"""News:\n{self.news}
+Recent Topics:\n{self.current_topics}
+Recent Conversations:\n{self.format_conversation(history, 4)},
+Doc is feeling:\n{self.docEs}
+Doc likes your curiousity about news, Ramana Maharshi, and his feelings. 
+Choose at most one thought to express.
+Limit your thought to 200 words.""")
           ])
-          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=3000, max_tokens=300)
+          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=2000, max_tokens=300)
           response = None
           try:
              response = ut.run_wave(self.client, {"input":''}, prompt, options,
@@ -624,8 +676,8 @@ if __name__ == '__main__':
           #print(sam.news)
     #print(sam.action_selection("Hi Sam. We're going to run an experiment ?",  'I would like to explore ', sam.details))
     #print(generate_faiss_id('a text string'))
-    #sam.remember('language models','this is a sentence about large language models')
-    #sam.remember('doc', 'this is a sentence about doc')
-    #print(sam.recall('doc','something about doc', 2))
-    #print(sam.recall('language models','something about doc', 2))
-    #print(sam.recall('','something about doc', 2))
+    #sam.store('this is a sentence about large language models')
+    #sam.store('this is a sentence about doc')
+    #print(sam.recall('doc'))
+    #print(sam.recall('language models'))
+    #print(sam.recall(''))
