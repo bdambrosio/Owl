@@ -20,21 +20,20 @@ class MainWindow(QMainWindow):
         self.setGeometry(300, 300, 800, 600)
 
         self.tableWidget = QTableWidget(self)
-        self.tableWidget.setColumnCount(6)
-        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key1", "Key2", "Timestamp", "Text", "Delete"])
+        self.tableWidget.setColumnCount(5)
+        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key", "Timestamp", "Item", "Delete"])
         self.tableWidget.setRowCount(len(self.docHash))
 
         idx = 0
         for id in self.docHash.keys():
            entry = self.docHash[id]
            self.tableWidget.setItem(idx, 0, QTableWidgetItem(str(entry['id'])))
-           self.tableWidget.setItem(idx, 1, QTableWidgetItem(str(entry["key1"])))
-           self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry["key2"])))
-           self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry["timestamp"])))
-           self.tableWidget.setItem(idx, 4, QTableWidgetItem(str(entry['text'])))
+           self.tableWidget.setItem(idx, 1, QTableWidgetItem(str(entry["key"])))
+           self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry["timestamp"])))
+           self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry['item'])))
            deleteButton = QPushButton("Delete")
            deleteButton.clicked.connect(lambda _, row=idx: self.deleteRow(row))
-           self.tableWidget.setCellWidget(idx, 5, deleteButton)
+           self.tableWidget.setCellWidget(idx, 4, deleteButton)
            
            idx += 1
 
@@ -53,10 +52,10 @@ class MainWindow(QMainWindow):
 
     def deleteRow(self, row):
         buttonReply = QMessageBox.question(self, 'Delete Confirmation', "Are you sure you want to delete this row?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        id = self.tableWidget.item(row, 0)
+        id = int(self.tableWidget.item(row, 0).text())
         if buttonReply == QMessageBox.Yes:
            self.tableWidget.removeRow(row)
-           del self.docHash[str(id)]
+           del self.docHash[id]
            
     def saveDocument(self):
         buttonReply = QMessageBox.question(self, 'Save Confirmation', "Are you sure you want to save the entire document?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)

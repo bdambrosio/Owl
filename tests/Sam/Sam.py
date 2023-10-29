@@ -149,8 +149,6 @@ max_tokens = 3200
 host = '127.0.0.1'
 port = 5004
 
-samInnerVoice = SamInnerVoice(model = model)
-
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -292,6 +290,8 @@ class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
       
+      self.samInnerVoice = SamInnerVoice(self, model = model)
+
       self.memory_display = None
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)
@@ -391,13 +391,19 @@ class ChatApp(QtWidgets.QWidget):
       self.history_button.clicked.connect(self.history)
       control_layout.addWidget(self.history_button)
       
+      self.wmem_button = QPushButton("WorkingMem")
+      self.wmem_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.wmem_button.setFont(self.widgetFont)
+      self.wmem_button.clicked.connect(self.workingMem)
+      control_layout.addWidget(self.wmem_button)
+      
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
       self.sam = ImageDisplay()
       
       # Add control layout to main layout
       main_layout.addLayout(control_layout)
       self.setLayout(main_layout)
-      greeting = samInnerVoice.wakeup_routine()
+      greeting = self.samInnerVoice.wakeup_routine()
       self.display_response(greeting+'\n')
 
    def make_combo(self, control_layout, label, choices, callback=None):
@@ -425,6 +431,24 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       self.timer.timeout.connect(self.on_timer_timeout)
 
       return combo
+
+   def get_profile(self, profile, theme):
+      global profile_contexts
+      if profile in profile_contexts.keys():
+         profile_dict = profile_contexts[profile]
+         if theme in profile_dict.keys(): 
+            choice = random.choice(profile_dict[theme])
+            #print(choice)
+            return choice
+         else:
+            print(f'{theme} not found in {profile}: {list(profile_dict.keys())}')
+      else:
+         print(f'{profile} not found {profile_contexts.keys()}')
+
+   CURRENT_PROFILE_PROMPT_TEXT = ''
+
+   def get_current_profile_prompt_text(self):
+      return CURRENT_PROFILE_PROMPT_TEXT
 
    def save_conv_history(self):
       global memory, profile
@@ -517,10 +541,17 @@ Sam has always been fascinated by human emotions and experiences, and have spent
 In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
 In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
 
-Background:\n{get_profile('Sam', 'Story')}\n{get_profile('Sam', 'Story')}
+<Background>\n{get_profile('Sam', 'Story')}\n{get_profile('Sam', 'Story')}
+</Background>
+<Dreams\n{get_profile('Sam', 'Dreams')}\n{get_profile('Sam', 'Dreams')}\n</Dreams>
 
-Dreams:\n{get_profile('Sam', 'Dreams')}\n{get_profile('Sam', 'Dreams')}
+<WorkingMemory keys available>
+{self.samInnerVoice.get_workingMemory_available_keys()}
+</WorkingMemory keys available>
 
+<WORKING MEMORY>
+{self.samInnerVoice.get_workingMemory_active_items()}
+</WORKING MEMORY>
 """
 
       elif input_text =="Analytical":
@@ -619,13 +650,20 @@ Your task is to:
       response = ''
       #print(f'submit {new_text}')
       if profile == 'Sam':
-         samInnerVoice.logInput(new_text)
-         action = samInnerVoice.action_selection(new_text,
+         self.samInnerVoice.logInput(new_text)
+         action = self.samInnerVoice.action_selection(new_text,
                                                  get_current_profile_prompt_text(),
                                                  self.get_conv_history(),
                                                  self) # this last for async display
          # see if Sam needs to do something before responding to input
+         if type(action) == dict and 'tell' in action.keys():
+            #{"tell":'<response to input>'}
+            response = action['tell']+'\n'
+            self.display_response(response) # article summary text
+            self.add_exchange(new_text, response)
+            return
          if type(action) == dict and 'article' in action.keys():
+            #{"article":'<article body>'}
             # get and display article retrieval
             response = 'Article summary:\n'+action['article']+'\n'
             self.display_response(response) # article summary text
@@ -633,26 +671,38 @@ Your task is to:
             #self.run_query('Comments?')
             return
          elif type(action) == dict and 'web' in action.keys():
+            #{"web":'<compiled search results>'}
             self.display_response(action['web'])
             self.add_exchange(new_text, action['web'])
             #self.run_query('')
             return
          elif type(action) == dict and 'wiki' in action.keys():
+            #{"wiki":'<compiled search results>'}
             self.display_response(action['wiki'])
             self.add_exchange(new_text, str(action['wiki']))
             #self.run_query(input)
             return
          elif type(action) == dict and 'gpt4' in action.keys():
+            #{"gpt4":'<gpt4 response>'}
             self.display_response(action['gpt4'])
             self.add_exchange(new_text, str(action['gpt4']))
             #self.run_query(input)
             return
          elif type(action) == dict and 'recall' in action.keys():
-            self.display_response(action['recall'])
-            self.add_exchange(new_text, str(action['recall']))
+            #{"recall":'{"id":id, "key":key, "timestamp":timestamp, "item":text or json or ...}
+            self.display_response(action['recall']['item'])
+            self.add_exchange(new_text, '') # don't add anything to conversation history, this is for working memory
+            #self.add_exchange(new_text, str(action['recall']))
+            #self.run_query(input)
+            return
+         elif type(action) == dict and 'store' in action.keys():
+            #{"store":'<key used to store item>'}
+            self.display_response(action['store'])
+            self.add_exchange(new_text, f"stored under {action['store']}")
             #self.run_query(input)
             return
          elif type(action) == dict and 'ask' in action.keys():
+            #{"ask":'<question>'}
             question = action['ask'] # add something to indicate internal activity?
             self.display_response(question)
             self.add_exchange(new_text, question)
@@ -709,7 +759,7 @@ Your task is to:
       selectedText = selectedText.strip()
       if len(selectedText) > 0:
          print(f'cursor has selected, len {len(selectedText)}')
-         samInnerVoice.store(selectedText)
+         self.samInnerVoice.store(selectedText)
          
    def get_conv_history(self):
       return memory.get('history')
@@ -740,10 +790,19 @@ Your task is to:
          except Exception as e:
             self.display_response(f'Failure to reload conversation history {str(e)}')
 
+   def workingMem(self):
+      self.samInnerVoice.save_workingMemory() # save current working memory so we can edit it
+      he = subprocess.run(['python3', 'memoryEditor.py'])
+      if he.returncode == 0:
+         try:
+            self.workingMemory = self.samInnerVoice.load_workingMem()
+         except Exception as e:
+            self.display_response(f'Failure to reload working memory {str(e)}')
+
    def on_timer_timeout(self):
       global profile, profile_text
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
-      response = samInnerVoice.reflect(get_current_profile_prompt_text(), self.get_conv_history())
+      response = self.samInnerVoice.reflect(get_current_profile_prompt_text(), self.get_conv_history())
       print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'sentiment_analysis' in response.keys():
