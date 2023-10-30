@@ -1,5 +1,6 @@
 from promptrix.promptrixTypes import PromptMemory
 from promptrix.VolatileMemory import VolatileMemory
+import json
 
 class MemoryFork(PromptMemory):
     def __init__(self, memory):

@@ -39,20 +39,21 @@ google_key = os.getenv("GOOGLE_KEY")
 google_cx = os.getenv("GOOGLE_CX")
 GOOGLE = 'google'
 
-def ask_LLM(model, gpt_message, max_tokens=100, temp=0.7, top_p=1.0, host = None, port = None, choice_set=None, display=None):
+def ask_LLM(model, gpt_message, max_tokens=100, temp=0.3, top_p=1.0, host = None, port = None,
+            stop=None, stop_on_json=False, choice_set=[], display=None):
     completion = None
     response = ''
     #print(f'***** utility ask_LLL temperature {temp}')
     try:
       if not model.lower().startswith('gpt'):
           completion = llm.run_query(model, gpt_message, max_tokens, temp, top_p,
-                                     choice_set=choice_set, host=host, port=port, display=display)
+                                     stop=stop, stop_on_json=stop_on_json, choice_set=choice_set, host=host, port=port, display=display)
           if completion is not None:
               response = completion
 
       else:
         stream= openai.ChatCompletion.create(
-            model=model, messages=gpt_message, max_tokens=max_tokens, temperature=temp, top_p=1, stop='STOP', stream=True)
+            model=model, messages=gpt_message, max_tokens=max_tokens, temperature=temp, top_p=1, stop=stop, stream=True)
         response = ''
         if stream is None:
           return response
@@ -102,7 +103,8 @@ def run_wave (client, input, prompt, prompt_options, memory, functions, tokenize
     fork = MemoryFork(memory)
     for key, value in input.items():
       fork.set(key, value)
-
+    if prompt_options.stop_on_json:
+        print('util stop_on_json')
     wave = AlphaWave(client=client,
                      prompt=prompt,
                      prompt_options=prompt_options,

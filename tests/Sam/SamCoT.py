@@ -92,29 +92,41 @@ def generate_faiss_id(document):
     return faiss_id
 
 class LLM():
-   def __init__(self, model='alpaca'):
+   def __init__(self, ui, model='alpaca'):
         self.model = model
+        self.ui = ui # needed to get current ui temp, max_tokens
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':[], 'history':[]})
 
-   def ask(self, client, input, prompt_msgs, temp=0.2, max_tokens=100, validator=DefaultResponseValidator()):
+   def ask(self, client, input, prompt_msgs, model=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
       """ Example use:
           class_prefix_prompt = [SystemMessage(f"Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}")]
           prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
           print(f'***** prefix response {prefix_json}')
-          if type(prefix_json) is dict and 'name' in prefix_json.keys():
+          if type(prefix_json) is dict and 'name' in prefix_json:
              prefix = prefix_json['name']
       """
 
-      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature=temp, max_tokens=max_tokens)
+      if model is None:
+         model = self.model
+      if max_tokens is None:
+         max_tokens= int(self.ui.max_tokens_combo.currentText())
+      if temp is None:
+         temp = float(self.ui.temp_combo.currentText())
+      if top_p is None:
+         top_p = float(self.ui.top_p_combo.currentText())
+      options = PromptCompletionOptions(completion_type='chat', model=model,
+                                           temperature=temp, top_p= top_p, max_tokens=max_tokens, stop_on_json=stop_on_json)
       try:
          prompt = Prompt(prompt_msgs)
          #print(f'ask prompt {prompt_msgs}')
+         # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
+         # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
          response = ut.run_wave (client, {"input":input}, prompt, options,
                                  self.memory, self.functions, self.tokenizer, validator=validator)
          #print(f'ask response {response}')
-         if type(response) is not dict or 'status' not in response.keys() or response['status'] != 'success':
+         if type(response) is not dict or 'status' not in response or response['status'] != 'success':
             return None
          content = response['message']['content']
          return content
@@ -128,7 +140,7 @@ class SamInnerVoice():
         self.ui = ui
         self.client = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-        self.llm = LLM()
+        self.llm = LLM(ui)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
@@ -146,6 +158,12 @@ class SamInnerVoice():
         # active working memory is a list of working memory items inserted into select_action prompt
         self.active_workingMemory = []
         get_city_state()
+        self.nytimes = nyt.NYTimes()
+        self.news, self.details = self.nytimes.headlines()
+        self.articles = []
+        for key in self.details.keys():
+            for item in self.details[key]:
+                self.articles.append({"title": item['title'] })
         
     def save_workingMemory(self):
        with open('SamDocHash.pkl', 'wb') as f:
@@ -175,6 +193,7 @@ class SamInnerVoice():
        msg_box.setWindowTitle("Confirmation")
        self.action_text = action
        msg_box.setText(f"Can Sam perform {action}?")
+       #msg_box.editTextChanged.connect(lambda x: self.action_text)
        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
        #msg_box.editTextChanged.connect(lambda x: self.action_text) # Add this line
        retval = msg_box.exec_()
@@ -291,7 +310,7 @@ class SamInnerVoice():
         self.active_workingMemory.append(short_form) # note this suggests we might want to store embedding elsewhere.
         return short_form
     
-    def store(self, item, profile=None, history=None):
+    def store(self, item, key=None, profile=None, history=None):
        # opposite of recall
        # ask AI to generate two keys to store this under
        print(f'SamCoT store entry {item}')
@@ -301,16 +320,21 @@ class SamInnerVoice():
        if ida in self.docHash:
           print('duplicate id, error, skipping')
           return 'store failed, duplicate id'
-       keys_prompt = [SystemMessage(f"""Generate two short descriptive text strings for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>',"key2":'<a content-orthogonal short descriptive string>'}}"""),
-                      ConversationHistory(240),
-                      UserMessage(f'ITEM:\n{item}')]
-       keys_json = self.llm.ask(self.client, item, keys_prompt, max_tokens=100, temp=0.3, validator=JSONResponseValidator())
+       if key is None:
+          keys_prompt = [SystemMessage(f"""Generate two short descriptive text strings for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>',"key2":'<a content-orthogonal short descriptive string>'}}"""),
+                         ConversationHistory(240),
+                         UserMessage(f'ITEM:\n{item}')]
+          keys_json = self.llm.ask(self.client, item, keys_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
        print(f' generated keys: {keys_json}')
-       key1 = None; key2 = None
-       if type(keys_json) is dict and 'key1' in keys_json.keys():
+       key1=None; key2=None
+       if key is not None:
+          key1 = key;
+          if type(keys_json) is dict and 'key1' in keys_json:
+             key2 = keys_json['key1']
+       elif type(keys_json) is dict and 'key1' in keys_json:
           key1 = keys_json['key1']
           embed1 = self.embedder.encode(key1)
-       if type(keys_json) is dict and 'key2' in keys_json.keys():
+       if type(keys_json) is dict and 'key2' in keys_json:
           key2 = keys_json['key2']
           embed2 = self.embedder.encode(key2)
        if key1 is None or key2 is None:
@@ -336,6 +360,51 @@ class SamInnerVoice():
              wmkeys.append(self.docHash[id]['key'])
        return wmkeys
                         
+    def core_prompt(self, include_actions=True):
+       ### made into a method so can be eval'd from multiple places
+       prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
+Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
+In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
+In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
+
+<Background>\n{self.ui.get_profile('Sam', 'Story')}\n{self.ui.get_profile('Sam', 'Story')}
+</Background>
+<Dreams\n{self.ui.get_profile('Sam', 'Dreams')}\n{self.ui.get_profile('Sam', 'Dreams')}\n</Dreams>
+
+New York Times news headlines for today:
+{self.articles}
+
+full articles can be retrieved using the action 'article'.
+
+<WORKING_MEMORY_KEYS>
+{self.get_workingMemory_available_keys()}
+</WORKING_MEMORY_KEYS>
+
+<WORKING_MEMORY>
+{self.get_workingMemory_active_items()}
+</WORKING_MEMORY>
+"""
+       if include_actions:
+          print(f'adding action')
+          prompt = prompt + f"""Respond only in JSON with one of the following actions:
+<ACTIONS>
+The following actions are available. Choose one and respond using the following JSON format:
+{{"action": "<action name>", "value": "<action argument>"}}
+
+action_name\taction_argument\tdescription\texample
+tell\t<response>\t no action is necessary, a response to the user input is directly available. This will be the only content presented in response, so make it complete.\t{{"action":"tell","value":"Hey doc, I think that is a great idea."}}
+ask\t<question>\t ask doc a question.\t{{"action":"ask","value":"how are you feeling, doc?"}}
+article\t<article title>\t retrieve a NYTimes article.\t{{"action":"article","value":"To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use"}}
+gpt4\t<question>\t ask gpt4 a question\t{{"action":"gpt4","value":"in python on linux, how can I list all the subdirectory names in a directory?"}}
+recall\t<key string>\t recall content from working memory, using the <key string> as the recall target.\t{{action":"recall","value":"Cognitive Architecture"}}
+store\t<form to place in working memory> \t a form you want to remember that will be stored under embeddings for two AI generated key strings. The form may be text or JSON.\t{{"action":"store","value":"BoardState: {{\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}}"}}
+web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t{{"action":"web","value":"Weather forecast for Berkeley,Ca for <today - eg Jan 1, 2023>"}}
+wiki\t<search query string>\t search the local wikipedia database.\t{{"action":"wiki","value":"Want is the EPR paradox in quantum physics?"}}
+</ACTIONS>
+
+"""
+       return prompt
+
     def get_workingMemory_active_keys(self):
        # activeWorkingMemory is list of items?
        # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': datetime.datetime(2023, 10, 28, 14, 57, 56, 765072)}, ...]
@@ -360,59 +429,6 @@ class SamInnerVoice():
         print(f'action selection input {input}')
         self.action_selection_occurred = True
         short_profile = profile.split('\n')[0]
-        self.articles = []
-        for key in self.details.keys():
-            for item in self.details[key]:
-                self.articles.append({"title": item['title'] })
-        system_prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
-Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
-In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
-
-<Background>\n{self.ui.get_profile('Sam', 'Story')}\n{self.ui.get_profile('Sam', 'Story')}
-</Background>
-<Dreams\n{self.ui.get_profile('Sam', 'Dreams')}\n{self.ui.get_profile('Sam', 'Dreams')}\n</Dreams>
-
-New York Times news headlines for today:
-{self.articles}
-
-full articles can be retrieved using the action 'article'.
-
-<WorkingMemory keys available>
-{self.get_workingMemory_available_keys()}
-</WorkingMemory keys available>
-
-<WORKING MEMORY>
-{self.get_workingMemory_active_items()}
-</WORKING MEMORY>
-
-<ACTIONS>
-The following actions are available. Choose one and respond using the following JSON format:
-{{"action": '<action name>', "value": '<action argument>'}}
-
-action_name\taction_argument\tdescription\texample
-tell\t<response>'\t no action is needed, a response directly to the user input is provided.\t{{"action":"tell","value":"Hey doc, I think that is a great idea."}}
-ask\t<question>\t ask doc a question.\t{{"action":'ask',"value":"how are you feeling, doc?"}}
-article\t<article title>\t retrieve a NYTimes article.\t{{"action":"article","value":"To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use"}}
-gpt4\t<question>\t ask gpt4 a question\t{{"action":"gpt4","value":"in python on linux, how can I list all the subdirectory names in a directory?"}}
-recall\t<key string>\t recall content from working memory, using the <key string> as the recall target.\t{{action":"recall","value":"Cognitive Architecture"}}
-store\t<text to place in working memory> \t a text you want to remember that will be stored under embeddings for two AI generated key strings.\t{{"action":"store","value":"BoardState: {{\"1a\":\" \",\"1b\":\" \",\"2a\":\" \",\"2b\":\" \"}}"}}
-web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t{{"action":"web","value":"Weather forecast for Berkeley,Ca for <today - eg Jan 1, 2023>"}}
-wiki\t<search query string>\t search the local wikipedia database.\t{{"action":"wiki","value":"Want is the EPR paradox in quantum physics?"}}
-</ACTIONS>
-"""
-
-        user_prompt="""Given the following user input, determine if an action is needed at this time.
-Look first for actions specifically requested in the input. 
-If you need more information you can use the action ask.
-The usual default action should be to use tell to directly respond.
-
-<INPUT>
-
-{{$input}}
-
-</INPUT>
-"""        
         action_validation_schema={
             "action": {
                 "type":"string",
@@ -425,36 +441,44 @@ The usual default action should be to use tell to directly respond.
                 "meta": "<parameter for action>"
             }
         }
+        user_prompt = """Given the following user input, determine which action is needed at this time.
+If there is an action directly specified in the input, select that action
+If you can respond to the input from known fact, logic, or reasoning, use the 'tell' action to respond directly.
+If you need more detail or personal information, consider using the 'ask' action.
+If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
+If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
+The usual default action is to use tell to directly respond using 'tell'
+Respond only in JSON using the provided format.
 
+          <INPUT>
+          
+          {{$input}}
+          
+          </INPUT>
+          """        
 
         #print(f'action_selection {input}\n{response}')
-        prompt = Prompt([
-           SystemMessage(system_prompt),
+        prompt_msgs=[
+           SystemMessage(self.core_prompt(include_actions=True)),
+           ConversationHistory('short_history',200),
            UserMessage(user_prompt)
-        ])
-        prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
-
-        text = self.format_conversation(history, 4)
+        ]
+        #print(f'Short_history: {history[-4:]}')
+        self.memory.set('short_history', history[-4:])
         print(f'action_selection starting analysis')
-        analysis = ut.run_wave (self.client, {"input":input}, prompt, prompt_options,
-                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                              logRepairs=False, validator=JSONResponseValidator(action_validation_schema))
-      
+        analysis = self.llm.ask(self.client, {"input":input}, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         print(f'action_selection analysis: {analysis}')
 
-        summary_prompt_text = f"""Summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
+        article_prompt_text = f"""Summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
 
-        summary_prompt = Prompt([
-            SystemMessage(summary_prompt_text),
-            UserMessage('{{$input}}'),
-            #AssistantMessage(' ')
-        ])
-        summary_prompt_options = PromptCompletionOptions(completion_type='chat', model='gpt-3.5-turbo', max_tokens=240)
-
-        if type(analysis) == dict and 'status' in analysis and analysis['status'] == 'success':
-            content = analysis['message']['content']
+        article_summary_msgs = [
+           SystemMessage(article_prompt_text),
+           UserMessage('{{$input}}'),
+        ]
+        if type(analysis) == dict:
+            content = analysis
             print(f'SamCoT content {content}')
-            if type(content) == dict and 'action' in content.keys() and content['action']=='article':
+            if type(content) == dict and 'action' in content and content['action']=='article':
                 title = content['value']
                 print(f'Sam wants to read article {title}')
                 ok = self.confirmation_popup(f'Sam want to retrieve {title}')
@@ -462,44 +486,45 @@ The usual default action should be to use tell to directly respond.
                 article = self.search_titles(title)
                 url = article['url']
                 print(f' requesting url from server {title} {url}')
-                response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=15)
-                data = response.json()
-                summary = ut.run_wave(self.openAIClient, {"input":data['result']}, summary_prompt, summary_prompt_options,
-                                      self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                                      logRepairs=False, validator=DefaultResponseValidator())
-                                      
+                try:
+                   response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=15)
+                   data = response.json()
+                except Exception as e:
+                   return {"article": f"retrieval failure, {str(e)}"}
+                summary = self.llm.ask(self.openAIClient, {"input":data['result']}, article_summary_msgs, model='gpt-3.5-turbo')
                 print(f'retrieved article summary:\n{summary}')
-                if type(summary) is dict and 'status' in summary.keys() and summary['status']=='success':
+                if type(summary) is dict and 'status' in summary and summary['status']=='success':
                     return {"article":  summary['message']['content']}
                 else:
-                    return {"none": ''}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='tell':
-               return {"tell":content['value']}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='web':
+                    return {"article": f'retrieval failure {summary}'}
+            elif type(content) == dict and 'action' in content and content['action']=='tell':
+               full_tell = self.tell(content['value'], input, widget, short_profile, history)
+               return {"tell":full_tell}
+            elif type(content) == dict and 'action' in content and content['action']=='web':
                 ok = self.confirmation_popup(content)
                 if ok:
-                   self.web(content['value'], widget, short_profile, history)
-                   return {"web":content['value']}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='wiki':
+                   content = self.web(content['value'], widget, short_profile, history)
+                   return {"web":content}
+            elif type(content) == dict and 'action' in content and content['action']=='wiki':
                 ok = self.confirmation_popup(content)
                 if ok:
                    found_text = self.wiki(content['value'], profile, history)
                    return {"wiki":found_text}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='ask':
+            elif type(content) == dict and 'action' in content and content['action']=='ask':
                ok = self.confirmation_popup(content)
                if ok:
                    return {"ask":content['value']}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='gpt4':
+            elif type(content) == dict and 'action' in content and content['action']=='gpt4':
                 ok = self.confirmation_popup(content)
                 if ok:
                    text = self.gpt4(content['value'], short_profile, history)
                    return {"gpt4":text}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='recall':
+            elif type(content) == dict and 'action' in content and content['action']=='recall':
                 ok = self.confirmation_popup(content)
                 if ok:
                    result = self.recall(content['value'], profile=short_profile, history=history)
                    return {"recall":result}
-            elif type(content) == dict and 'action' in content.keys() and content['action']=='store':
+            elif type(content) == dict and 'action' in content and content['action']=='store':
                 ok = self.confirmation_popup(content)
                 if ok:
                    result = self.store(content['value'], profile=short_profile, history=history)
@@ -507,6 +532,24 @@ The usual default action should be to use tell to directly respond.
             else:
                return {"none": ''}
 
+    def tell(self,theme, user_text, widget, short_profile, history):
+       print(f'SamCoT Doing extended tell')
+       user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Respond ONLY with the original Response or your revision."""        
+       #print(f'action_selection {input}\n{response}')
+       self.memory.set('cot_history', history[-6:])
+       prompt_msgs=[
+          SystemMessage(self.core_prompt(include_actions=False)),
+          ConversationHistory('cot_history', 200),
+          UserMessage(user_prompt)
+       ]
+       try:
+          response = self.llm.ask(self.client, user_text, prompt_msgs)
+       except Exception as e:
+          return f'expanded tell failure {str(e)}'
+       if response is not None:
+          return response
+       else: return f'expanded tell failure {theme}'
+       
     def service_check(self, url, data=None, timeout_seconds=5):
        response = None
        try:
@@ -575,7 +618,7 @@ The usual default action should be to use tell to directly respond.
        
     def format_conversation(self, history, depth=-1):
        # depth- only return last 'depth' says
-       names = {"### Response":'Sam', "### Instruction": 'Doc'}
+       names = {"### Response":'Sam', "### Instruction": 'Doc', "user":'Doc',"assistant":'Sam'}
        output = ""
        for d, say in enumerate(history):
           if depth == -1 or d > len(history)-depth:
@@ -592,7 +635,7 @@ The usual default action should be to use tell to directly respond.
        keys_ents = self.get_keywords(conversation)
        print(f'keywords {keys_ents}')
        prompt = Prompt([SystemMessage("Assignment: Determine the main topics of a conversation based on the provided keywords below. The response should be an array of strings that represent the main topics discussed in the conversation based on the given keywords and named entities.\n"),
-                        UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
+                        UserMessage('Keywords and Named Entities:\n{{$input}}\n.')
                         #AssistantMessage('')
                         ])
        options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=50)
@@ -615,10 +658,10 @@ The usual default action should be to use tell to directly respond.
           results['sentiment_analysis'] = es
        if self.current_topics is None:
           self.current_topics = self.topic_analysis(profile_text, history)
-          print(f'topic-analysis {self.current_topics}')
+          print(f'topic-analysis: {self.current_topics}')
           results['current_topics'] = self.current_topics
        now = int(time.time())
-       if self.action_selection_occurred and now-self.last_tell_time > random.random()*60+60 :
+       if self.action_selection_occurred and now-self.last_tell_time > random.random()*240+60 :
           self.action_selection_occurred = False # reset action selection so no more tells till user input
           print('do I have anything to say?')
           self.last_tell_time = now

@@ -58,21 +58,23 @@ class Conversation:
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
         messages = self.messages
         #print(f'Input: {messages}')
-        if messages[0][0] != "system":
-            messages = [("system", '')] + messages
-        messages = [[messages[1][0],B_SYS + messages[0][1] + E_SYS + messages[1][1]]] + messages[2:]
+        if self.messages[0][0] != "system": # no first system message, create empty one for consistent formatting
+            messages = [("system", '')] + self.messages
+        final_messages = [[messages[1][0],B_SYS + messages[0][1] + E_SYS + messages[1][1]]]
+        if len(messages) > 2:
+            final_messages = final_messages + messages[2:]
         #print(f'\nInitial rewrite: {messages}')
         ret: str = \
             ''.join([
                 f"{B_INST} {(prompt[1]).strip()} {E_INST} {(answer[1]).strip()} "
                 for prompt, answer in zip(
-                        messages[::2],
-                        messages[1::2],
+                        final_messages[::2],
+                        final_messages[1::2],
                 )
             ])
         #print(f'ret: {ret}')
-        if (messages[-1][0] != "user"):print( f"Last message must be from user, got {messages[-1][0]}")
-        ret_suffix =  f"{B_INST} {(messages[-1][1]).strip()} {E_INST}"
+        if (final_messages[-1][0] != "user"):print( f"Last message must be from user, got {messages[-1][0]}")
+        ret_suffix =  f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}"
         #print(f'ret_suffix: {ret_suffix}')
         ret=ret+ret_suffix
         #print(f'Final ret: {ret}')
@@ -393,7 +395,7 @@ register_conv_template(
         roles=("### Instruction", "### Response"),
         messages=(),
         offset=0,
-        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
+        sep_style=SeparatorStyle.ADD_COLON_SPACE_SINGLE,
         sep="\n\n",
     )
 )

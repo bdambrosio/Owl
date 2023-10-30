@@ -20,7 +20,7 @@ port = 5004
 def get_available_models():
     return list(cv.conv_templates.keys())
 
-def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port, choice_set=None, display=None, format=True): 
+def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port, stop=None, stop_on_json=False, choice_set=None, display=None, format=True): 
     global USER_PREFIX, ASSISTANT_PREFIX, SYSTEM_PREFIX
 
     conv=cv.get_conv_template(model)
@@ -68,6 +68,10 @@ def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port
     server_message = {'prompt':prompt, 'temp': temp, 'top_p':top_p, 'max_tokens':max_tokens, 'user_prompt':USER_PREFIX}
     if choice_set:
         server_message['choice_set']=choice_set
+    if stop:
+        server_message['stop']=stop
+    if stop_on_json:
+        server_message['stop_on_json']=stop_on_json
 
     response = requests.post('http://127.0.0.1:5004/', json=server_message, stream=True)
     if response.status_code == 200:

@@ -78,8 +78,11 @@ class OSClient(PromptCompletionClient):
                                               top_p = argoptions['top_p'],
                                               max_tokens = argoptions['max_tokens'],
                                               stop = argoptions['stop'],
+                                              stop_on_json = argoptions['stop_on_json'],
                                               choice_set = argoptions['choice_set']
                                               )
+        if options.stop_on_json:
+            print('OSClient stop_on_json')
         startTime = time.time()
         max_input_tokens = 1500
         if hasattr(options, 'max_input_tokens') and getattr(options, 'max_input_tokens') is not None:
@@ -137,6 +140,8 @@ class OSClient(PromptCompletionClient):
                                 top_p=options.top_p,
                                 host=self.options.endpoint,
                                 port=self.options.port,
+                                stop_on_json=options.stop_on_json,
+                                stop=options.stop,
                                 choice_set=options.choice_set
                                 )
         except Exception as e:

@@ -250,41 +250,6 @@ class MemoryDisplay(QtWidgets.QWidget):
    def clear_list(self):
        self.list_widget.clear()
 
-class WebSearch(QThread):
-   finished = pyqtSignal(dict)
-   def __init__(self, query):
-      super().__init__()
-      self.query = query
-      
-   def run(self):
-      with concurrent.futures.ThreadPoolExecutor() as executor:
-         future = executor.submit(self.long_running_task)
-         result = future.result()
-         self.finished.emit(result)  # Emit the result string.
-         
-   def long_running_task(self):
-      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={model}')
-      data = response.json()
-      return data
-
-class WebRetrieve(QThread):
-   finished = pyqtSignal(dict)
-   def __init__(self, title, url):
-      super().__init__()
-      self.title = title
-      self.url = url
-      
-   def run(self):
-      with concurrent.futures.ThreadPoolExecutor() as executor:
-         future = executor.submit(self.retrieve)
-         result = future.result()
-         self.finished.emit(result)  # Emit the result string.
-         
-   def retrieve(self):
-      response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={self.title}&url={url}')
-      data = response.json()
-      return data['result']
-
 
 class ChatApp(QtWidgets.QWidget):
    def __init__(self):
@@ -372,12 +337,6 @@ class ChatApp(QtWidgets.QWidget):
       self.prompt_combo.setCurrentText('Sam')
       self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
       self.on_prompt_combo_changed('Sam')
-      
-      self.web_button = QPushButton("Web")
-      self.web_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.web_button.setFont(self.widgetFont)
-      self.web_button.clicked.connect(self.web)
-      control_layout.addWidget(self.web_button)
       
       self.store_button = QPushButton("Store")
       self.store_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
@@ -541,9 +500,12 @@ Sam has always been fascinated by human emotions and experiences, and have spent
 In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
 In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
 
-<Background>\n{get_profile('Sam', 'Story')}\n{get_profile('Sam', 'Story')}
+<Background>\n{self.get_profile('Sam', 'Story')}\n{self.get_profile('Sam', 'Story')}
 </Background>
-<Dreams\n{get_profile('Sam', 'Dreams')}\n{get_profile('Sam', 'Dreams')}\n</Dreams>
+<Dreams\n{self.get_profile('Sam', 'Dreams')}\n{self.get_profile('Sam', 'Dreams')}\n</Dreams>
+
+New York Times news headlines for today:
+{self.samInnerVoice.articles}
 
 <WorkingMemory keys available>
 {self.samInnerVoice.get_workingMemory_available_keys()}
@@ -553,7 +515,6 @@ In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you
 {self.samInnerVoice.get_workingMemory_active_items()}
 </WORKING MEMORY>
 """
-
       elif input_text =="Analytical":
            input_text = f"""We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. 
 The user will present a problem and ask for a solution.
@@ -584,6 +545,7 @@ Your task is to:
       PREV_LEN=len(self.input_area.toPlainText())-1
       
    def query(self, msgs, display=True):
+      #msgs have already been run thru prompt completion
       global model,  memory#, vmem, vmem_clock
       if display:
          display = self.display_response
@@ -598,26 +560,7 @@ Your task is to:
          traceback.print_exc()
          return ''
         
-   def run_query(self, query):
-      global model,  memory#, vmem, vmem_clock
-      try:
-         memory.set('input', query)
-         max_tokens= int(self.max_tokens_combo.currentText())
-         temperature = float(self.temp_combo.currentText())
-         top_p = float(self.top_p_combo.currentText())
-         
-         if FORMAT:
-            response = self.run_messages_completion()
-            self.add_exchange(query, response)
-            return response
-         else:
-            # just send the raw input text to server
-            llm.run_query(model, query, int(max_tkns.get()), float(temperature.get()), float(top_p.get()), host, port, tkroot=root, tkdisplay=input_area, format=False)
-            self.display_response('\n')
-      except Exception:
-         traceback.print_exc()
-           
-   # Render the prompt for a Text Completion call
+   # Render the prompt and run a text completion call to llm
    def run_messages_completion(self):
       as_msgs = PROMPT.renderAsMessages(memory, functions, tokenizer, max_tokens)
       msgs = []
@@ -626,21 +569,21 @@ Your task is to:
          response = self.query(msgs)
       return response
 
-
-   def run_web_summary(self, query, response):
-      prompt = Prompt([
-         SystemMessage('{{$prompt_text}}'),
-         ConversationHistory('history', .5),
-         UserMessage(f'Following is a question and a response from the web. Respond to the Question, using the web information as well as known fact, logic, and reasoning, guided by the initial prompt, in the context of this conversation. Be aware that the web response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
-      ])
-      as_msgs = prompt.renderAsMessages(memory, functions, tokenizer, max_tokens)
-      msgs = []
-      response = 'web summary request length maximum exceeded during prompt formatting'
-      if not as_msgs.tooLong:
-         msgs = as_msgs.output
-         response = ut.ask_LLM(model, msgs, max_tokens, temperature, top_p, host, port, display=self.display_response)
-      return response
-   
+   def run_query(self, query):
+      global model,  memory#, vmem, vmem_clock
+      try:
+         memory.set('input', query)
+         max_tokens= int(self.max_tokens_combo.currentText())
+         temperature = float(self.temp_combo.currentText())
+         top_p = float(self.top_p_combo.currentText())
+         
+         # render prompt and do llm call
+         response = self.run_messages_completion()
+         self.add_exchange(query, response)
+         return response
+      except Exception:
+         traceback.print_exc()
+           
    def submit(self):
       global PREV_LEN
       self.timer.stop()
@@ -657,11 +600,11 @@ Your task is to:
                                                  self) # this last for async display
          # see if Sam needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
-            #{"tell":'<response to input>'}
+            print(f'Sam tell return {action}')
             response = action['tell']+'\n'
             self.display_response(response) # article summary text
             self.add_exchange(new_text, response)
-            return
+
          if type(action) == dict and 'article' in action.keys():
             #{"article":'<article body>'}
             # get and display article retrieval
@@ -707,9 +650,9 @@ Your task is to:
             self.display_response(question)
             self.add_exchange(new_text, question)
             return
-
          
-      response = self.run_query(new_text)
+      # response = self.run_query(new_text)
+      # no need to display, query does in while streaming.
       return
 
    def clear(self):
@@ -719,35 +662,6 @@ Your task is to:
       PREV_LEN=0
       #memory.set('history', [])
    
-   def web(self, query=None):
-      global PREV_LEN, op#, vmem, vmem_clock
-      cursor = self.input_area.textCursor()
-      selectedText = ''
-      if query is not None:
-         selectedText = query
-      elif cursor.hasSelection():
-         selectedText = cursor.selectedText()
-      elif PREV_LEN < len(self.input_area.toPlainText())+2:
-         selectedText = self.input_area.toPlainText()[PREV_LEN:]
-      selectedText = selectedText.strip()
-      if len(selectedText)> 0:
-         self.web_query = query
-         self.worker = WebSearch(selectedText)
-         self.worker.finished.connect(self.web_search_finished)
-         self.worker.start()
-     
-   def web_search_finished(self, search_result):
-      if 'result' in search_result:
-         response = ''
-         if type(search_result['result']) == list:
-            for item in search_result['result']:
-               self.display_response('* '+item['source']+'\n')
-               self.display_response('     '+item['text']+'\n\n')
-               response += item['text']+'\n'
-         elif type(search_result['result']) is str:
-            self.display_response('\nWeb result:\n'+search_result['result']+'\n')
-            self.add_exchange(self.web_query, response)
-            
    def store(self):
       global PREV_LEN, op#, vmem, vmem_clock
       cursor = self.input_area.textCursor()
@@ -795,7 +709,7 @@ Your task is to:
       he = subprocess.run(['python3', 'memoryEditor.py'])
       if he.returncode == 0:
          try:
-            self.workingMemory = self.samInnerVoice.load_workingMem()
+            self.workingMemory = self.samInnerVoice.load_workingMemory()
          except Exception as e:
             self.display_response(f'Failure to reload working memory {str(e)}')
 

@@ -1,4 +1,5 @@
 import sys, os
+#add local dir to search path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import socket
 from fastapi import FastAPI, Request
@@ -24,7 +25,7 @@ models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower())]
-"""
+""" not needed any more, above collects all in Downloads/models
 models = ["Mistral-7B-OpenOrca-exl2",
           "mistral-airoboros-7b-GPTQ",
           "Nous-Hermes-70b-GPTQ",
@@ -77,19 +78,33 @@ generator.warmup()
 
 host = socket.gethostname()
 host = ''
-port = 5004  # initiate port no above 1024
+port = 5004  # use port above 1024
 
 app = FastAPI()
 print(f"starting server")
 
-async def stream_data(query: Dict[Any, Any], max_new_tokens):
+async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False):
     generated_tokens = 0
+    # this is a very sloppy heuristic for complete json form, but since chunks are short, maybe ok?
+    # or maybe they aren't so short? Think they are, at least for first json form...
+    open_braces = 0
+    open_brace_seen = False
+    complete_json_seen = False
     while True:
         chunk, eos, _ = generator.stream()
         generated_tokens += 1
+        if stop_on_json:
+            open_braces += chunk.count('{')
+            if open_braces > 0:
+                open_brace_seen = True
+            close_braces = chunk.count('}')
+            open_braces -= close_braces
+            if open_brace_seen and open_braces == 0:
+                complete_json_seen = True
         print (chunk, end = "")
+        
         yield chunk
-        if eos or generated_tokens == max_new_tokens:
+        if eos or generated_tokens == max_new_tokens or (stop_on_json and complete_json_seen):
             print('\n')
             break
 
@@ -117,11 +132,18 @@ async def get_stream(request: Request):
     if 'eos' in message_j.keys():
         stop_conditions = message_j['eos']
 
+    stop_on_json = False
+    if 'json' in stop_conditions:
+        stop_on_json=True
+        stop_conditions = stop_conditions.remove('json') # s/b no exceptions, since we know 'json' is in the list
+    if 'stop_on_json' in message_j.keys() and message_j['stop_on_json']==True:
+        stop_on_json=True
+
     prompt = message_j['prompt']
     input_ids = tokenizer.encode(prompt)
     print(f'input_ids {input_ids.shape}')
     generator.set_stop_conditions(stop_conditions)
     generator.begin_stream(input_ids, settings)
     
-    return StreamingResponse(stream_data(query, max_new_tokens = max_tokens))
+    return StreamingResponse(stream_data(query, max_new_tokens = max_tokens, stop_on_json=stop_on_json))
 
