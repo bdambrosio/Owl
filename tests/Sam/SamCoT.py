@@ -306,14 +306,26 @@ class SamInnerVoice():
             scores.append((id, score))
         # Sort by combined score
         results = sorted(scores, key=lambda x: x[1])
-        short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "timestamp"]}
+        short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
         self.active_workingMemory.append(short_form) # note this suggests we might want to store embedding elsewhere.
         return short_form
     
-    def store(self, item, key=None, profile=None, history=None):
+    def store(self, item, key=None, notes=None, profile=None, history=None):
        # opposite of recall
        # ask AI to generate two keys to store this under
        print(f'SamCoT store entry {item}')
+       if item is None:
+          return "failure, can't store None"
+       elif type(item) is dict:
+          type='json'
+       else:
+          try:
+             json_form = json.loads(item)
+             item = json_form
+             type='json'
+          except:
+             type= 'str'
+             pass
        id = generate_faiss_id(item)
        ida = id
        idb = id+1
@@ -321,30 +333,19 @@ class SamInnerVoice():
           print('duplicate id, error, skipping')
           return 'store failed, duplicate id'
        if key is None:
-          keys_prompt = [SystemMessage(f"""Generate two short descriptive text strings for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>',"key2":'<a content-orthogonal short descriptive string>'}}"""),
+          keys_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>'}}"""),
                          ConversationHistory(240),
-                         UserMessage(f'ITEM:\n{item}')]
+                         UserMessage(f'ITEM:\n{str(item)}')]
           keys_json = self.llm.ask(self.client, item, keys_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
-       print(f' generated keys: {keys_json}')
-       key1=None; key2=None
-       if key is not None:
-          key1 = key;
+          print(f' generated key: {keys_json}')
           if type(keys_json) is dict and 'key1' in keys_json:
-             key2 = keys_json['key1']
-       elif type(keys_json) is dict and 'key1' in keys_json:
-          key1 = keys_json['key1']
-          embed1 = self.embedder.encode(key1)
-       if type(keys_json) is dict and 'key2' in keys_json:
-          key2 = keys_json['key2']
-          embed2 = self.embedder.encode(key2)
-       if key1 is None or key2 is None:
-          return 'Store failure'
-       self.docHash[ida] = {"id":ida, "item":item, "key":key1, "embed":embed1, "timestamp":datetime.now()}
-       self.docHash[idb] = {"id":idb, "item":item, "key":key2, "embed":embed2, "timestamp":datetime.now()}
-       short_forma={k: self.docHash[ida][k] for k in ["key"]}
-       print(f'Storing {short_forma}', end=', ')
-       short_formb={k: self.docHash[idb][k] for k in ["key", "item"]}
-       print(f' {short_formb}')
+             key = keys_json['key1']
+       if key1 is None:
+          return 'Store key generation failure'
+       embed = self.embedder.encode(key)
+       self.docHash[ida] = {"id":ida, "item":item, "type": type, "key":key1, "notes":notes, "embed":embed, "timestamp":datetime.now()}
+       short_forma={k: self.docHash[ida][k] for k in ["key", "type", "item", "notes"]}
+       print(f'Storing {short_forma}')
        # and save - write docHash first, we can always recover from that.
        with open('SamDocHash.pkl', 'wb') as f:
           data = {}
@@ -393,7 +394,7 @@ The following actions are available. Choose one and respond using the following 
 
 action_name\taction_argument\tdescription\texample
 tell\t<response>\t no action is necessary, a response to the user input is directly available. This will be the only content presented in response, so make it complete.\t{{"action":"tell","value":"Hey doc, I think that is a great idea."}}
-ask\t<question>\t ask doc a question.\t{{"action":"ask","value":"how are you feeling, doc?"}}
+question\t<question text>\t ask doc a question.\t{{"action":"question","value":"how are you feeling, doc?"}}
 article\t<article title>\t retrieve a NYTimes article.\t{{"action":"article","value":"To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use"}}
 gpt4\t<question>\t ask gpt4 a question\t{{"action":"gpt4","value":"in python on linux, how can I list all the subdirectory names in a directory?"}}
 recall\t<key string>\t recall content from working memory, using the <key string> as the recall target.\t{{action":"recall","value":"Cognitive Architecture"}}
@@ -444,7 +445,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t{{"action":"
         user_prompt = """Given the following user input, determine which action is needed at this time.
 If there is an action directly specified in the input, select that action
 If you can respond to the input from known fact, logic, or reasoning, use the 'tell' action to respond directly.
-If you need more detail or personal information, consider using the 'ask' action.
+If you need more detail or personal information, consider using the 'question' action.
 If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
 If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
 The usual default action is to use tell to directly respond using 'tell'
@@ -492,12 +493,12 @@ Respond only in JSON using the provided format.
                 except Exception as e:
                    return {"article": f"retrieval failure, {str(e)}"}
                 summary = self.llm.ask(self.openAIClient, {"input":data['result']}, article_summary_msgs, model='gpt-3.5-turbo')
-                print(f'retrieved article summary:\n{summary}')
                 if type(summary) is dict and 'status' in summary and summary['status']=='success':
                     return {"article":  summary['message']['content']}
                 else:
                     return {"article": f'retrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
+               print(f"calling self.tell with (content['value']")
                full_tell = self.tell(content['value'], input, widget, short_profile, history)
                return {"tell":full_tell}
             elif type(content) == dict and 'action' in content and content['action']=='web':
@@ -510,10 +511,10 @@ Respond only in JSON using the provided format.
                 if ok:
                    found_text = self.wiki(content['value'], profile, history)
                    return {"wiki":found_text}
-            elif type(content) == dict and 'action' in content and content['action']=='ask':
+            elif type(content) == dict and 'action' in content and content['action']=='question':
                ok = self.confirmation_popup(content)
                if ok:
-                   return {"ask":content['value']}
+                   return {"question":content['value']}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
                 ok = self.confirmation_popup(content)
                 if ok:
@@ -534,7 +535,15 @@ Respond only in JSON using the provided format.
 
     def tell(self,theme, user_text, widget, short_profile, history):
        print(f'SamCoT Doing extended tell')
-       user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Respond ONLY with the original Response or your revision."""        
+       #if widget is not None:
+       #   self.ui.display_response(theme+'\n')
+       user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Reasons for revision include:
+1. Adding more detail to an incomplete informational response.
+2. Occasionally including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions
+3. Occasionally inquire or comment on the user's state as per your instructions. 
+Respond ONLY with the original response or your revision. Use this JSON format for your response:
+{{"response":"<revision or original response text>"}}
+"""        
        #print(f'action_selection {input}\n{response}')
        self.memory.set('cot_history', history[-6:])
        prompt_msgs=[
@@ -543,11 +552,17 @@ Respond only in JSON using the provided format.
           UserMessage(user_prompt)
        ]
        try:
-          response = self.llm.ask(self.client, user_text, prompt_msgs)
+          response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
        except Exception as e:
           return f'expanded tell failure {str(e)}'
-       if response is not None:
-          return response
+       if type(response) is dict:
+          new_text = response['response']
+          if len(new_text) > len(theme):
+             #self.ui.display_response(new_text+'\n')
+             return new_text+'\n'
+          else:
+             #self.ui.display_response(theme+'\n')
+             return theme
        else: return f'expanded tell failure {theme}'
        
     def service_check(self, url, data=None, timeout_seconds=5):
@@ -729,7 +744,7 @@ Limit your thought to 200 words.""")
              UserMessage(self.format_conversation(history, 4)),
              UserMessage(f'{query}'),
           ])
-       options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=200)
+       options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=400)
        response = ut.run_wave(self.openAIClient, {"input":query}, prompt, options,
                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
                              logRepairs=False, validator=DefaultResponseValidator())
@@ -749,7 +764,8 @@ Limit your thought to 200 words.""")
           self.worker = WebSearch(query)
           self.worker.finished.connect(self.web_search_finished)
           self.worker.start()
-     
+       return f"search started for {query}"
+
     def web_search_finished(self, search_result):
       if 'result' in search_result:
          response = ''
@@ -762,8 +778,9 @@ Limit your thought to 200 words.""")
          elif type(search_result['result']) is str:
             if self.web_widget is not None:
                self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
-            response = self.summarize(self.web_query, search_result['result']+'\n', self.web_profile, self.web_history)
-         return response
+            #response = self.summarize(self.web_query, search_result['result']+'\n', self.web_profile, self.web_history)
+         return "web search succeded"
+         # return response
       else:
          return 'web search failed'
 

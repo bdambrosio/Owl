@@ -7,7 +7,8 @@ class Response:
         objects = []
         if text is None:
             return objects
-        lines = text.split('\n')
+        lines = text
+        #lines = text.split('\n')
         if len(lines) > 1:
             for line in lines:
                 obj = Response.parse_json(line)
@@ -25,8 +26,8 @@ class Response:
     @staticmethod
     def parse_json(text):
         text = ''.join(c for c in text if c.isprintable())
-        text = text.replace('{\n', '{')
-        text = text.replace('}\n', '}')
+        #text = text.replace('{\n', '{')
+        #text = text.replace('}\n', '}')
         #text = re.sub(r"'([^\"']+)'", r'"\1"', text) # all pairs as doublequote
         text = re.sub(r"'([^\"']+)':", r'"\1":', text) # keys as doublequote
         #text = re.sub(r'"([^\'"]+)":', r"'\1':", text) # keys as singlequote

@@ -644,9 +644,9 @@ Your task is to:
             self.add_exchange(new_text, f"stored under {action['store']}")
             #self.run_query(input)
             return
-         elif type(action) == dict and 'ask' in action.keys():
+         elif type(action) == dict and 'question' in action.keys():
             #{"ask":'<question>'}
-            question = action['ask'] # add something to indicate internal activity?
+            question = action['question'] # add something to indicate internal activity?
             self.display_response(question)
             self.add_exchange(new_text, question)
             return
