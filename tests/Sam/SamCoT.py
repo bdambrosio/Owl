@@ -10,6 +10,8 @@ import time
 import numpy as np
 import faiss
 import pickle
+from collections import defaultdict 
+import subprocess
 import hashlib
 import nltk
 from datetime import datetime, date, timedelta
@@ -39,7 +41,7 @@ from PyQt5.QtGui import QFont, QKeySequence
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec
 import concurrent.futures
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
-from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
+from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 import signal
 # Encode titles to vectors using SentenceTransformers 
@@ -92,12 +94,12 @@ def generate_faiss_id(document):
     return faiss_id
 
 class LLM():
-   def __init__(self, ui, model='alpaca'):
+   def __init__(self, ui, memory, model='alpaca'):
         self.model = model
         self.ui = ui # needed to get current ui temp, max_tokens
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-        self.memory = VolatileMemory({'input':[], 'history':[]})
+        self.memory = memory
 
    def ask(self, client, input, prompt_msgs, model=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
       """ Example use:
@@ -135,18 +137,65 @@ class LLM():
          print(str(e))
          return None
        
+
+class TextEditDialog(QDialog):
+    def __init__(self, static_text, editable_text, parent=None):
+        super(TextEditDialog, self).__init__(parent)
+        
+        self.init_ui(static_text, editable_text)
+        
+    def init_ui(self, static_text, editable_text):
+        layout = QVBoxLayout(self)
+        
+        self.static_label = QLabel(static_text, self)
+        layout.addWidget(self.static_label)
+        
+        self.text_edit = QTextEdit(self)
+        self.text_edit.setText(editable_text)
+        layout.addWidget(self.text_edit)
+        
+        self.yes_button = QPushButton('Yes', self)
+        self.yes_button.clicked.connect(self.accept)
+        layout.addWidget(self.yes_button)
+        
+        self.no_button = QPushButton('No', self)
+        self.no_button.clicked.connect(self.reject)
+        layout.addWidget(self.no_button)
+        
+class ListDialog(QDialog):
+    def __init__(self, items, parent=None):
+        super(ListDialog, self).__init__(parent)
+        
+        self.setWindowTitle('Choose an Item')
+        
+        self.list_widget = QListWidget(self)
+        for item in items:
+            self.list_widget.addItem(item)
+        
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.list_widget)
+        layout.addWidget(self.button_box)
+        
+    def selected_index(self):
+        return self.list_widget.currentRow()
+
 class SamInnerVoice():
     def __init__(self, ui, model):
         self.ui = ui
+        self.model = model
         self.client = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-        self.llm = LLM(ui)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
+        self.load_conv_history()
+        self.llm = LLM(ui, self.memory)
         self.max_tokens = 4000
         self.keys_of_interest = ['title', 'abstract', 'uri']
-        self.model = model
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
         self.docEs = None # docs feelings
         self.current_topics = None # topics under discussion - mostly a keyword list
@@ -157,6 +206,7 @@ class SamInnerVoice():
         self.load_workingMemory()
         # active working memory is a list of working memory items inserted into select_action prompt
         self.active_workingMemory = []
+        self.reflect_thoughts = ''
         get_city_state()
         self.nytimes = nyt.NYTimes()
         self.news, self.details = self.nytimes.headlines()
@@ -165,6 +215,66 @@ class SamInnerVoice():
             for item in self.details[key]:
                 self.articles.append({"title": item['title'] })
         
+    def save_conv_history(self):
+      global memory, profile
+      data = defaultdict(dict)
+      history = self.memory.get('history')
+      h_len = 0
+      save_history = []
+      for item in range(len(history)-1, -1, -1):
+         if h_len+len(str(history[item])) < 8000:
+            h_len += len(str(history[item]))
+            save_history.append(history[item])
+      save_history.reverse()
+      data['history'] = save_history
+      # Pickle data dict with all vars  
+      with open('Sam.pkl', 'wb') as f:
+         pickle.dump(data, f)
+
+    def load_conv_history(self):
+       global memory
+       try:
+          with open('Sam.pkl', 'rb') as f:
+             data = pickle.load(f)
+             history = data['history']
+             print(f'loading conversation history')
+             self.memory.set('history', history)
+       except Exception as e:
+          print(f'Failure to load conversation history {str(e)}')
+          self.memory.set('history', [])
+
+    def add_exchange(self, input, response):
+       print(f'add_exchange {input} {response}')
+       history = self.memory.get('history')
+       history.append({'role':llm.USER_PREFIX, 'content': input})
+       response = response.replace(llm.ASSISTANT_PREFIX+':', '')
+       history.append({'role': llm.ASSISTANT_PREFIX, 'content': response})
+       self.memory.set('history', history)
+
+    def historyEditor(self):
+       self.save_conv_history() # save current history so we can edit it
+       he = subprocess.run(['python3', 'historyEditor.py'])
+       if he.returncode == 0:
+          try:
+             print(f'reloading conversation history')
+             with open('Sam.pkl', 'rb') as f:
+                data = pickle.load(f)
+                history = data['history']
+                # test each form for sanity
+                sanitized_history = [
+                   {"role": "### Instruction", "content": "What is the meaning of life?"},
+                   {"role": "### Response", "content": "I don't know. I've read that some believe that life's purpose lies in self-discovery and growth, while others think it's about contributing positively to society. There's also the idea that perhaps there isn't a single 'purpose', but rather opportunities for meaningful experiences. What do you think?"},
+                ]
+                for d in history:
+                   try:
+                      s = json.dumps(d) # only doing this to test form, don't really care about result
+                      sanitized_history.append(d)
+                   except Exception as e:
+                      print(f' problem with this form in conversation history, skipping {d}')
+                      self.memory.set('history', sanitized_history)
+          except Exception as e:
+             self.ui.display_response(f'Failure to reload conversation history {str(e)}')
+
     def save_workingMemory(self):
        with open('SamDocHash.pkl', 'wb') as f:
           data = {}
@@ -188,7 +298,16 @@ class SamInnerVoice():
              pickle.dump(data, f)
        return self.get_workingMemory_available_keys()
       
-    def confirmation_popup(self, action):
+
+    def confirmation_popup(self, action, argument):
+       dialog = TextEditDialog(action, argument)
+       result = dialog.exec_()
+       if result == QDialog.Accepted:
+          return dialog.text_edit.toPlainText()
+       else:
+          return False
+
+    def confirmation_popupb(self, action):
        msg_box = QMessageBox()
        msg_box.setWindowTitle("Confirmation")
        self.action_text = action
@@ -276,39 +395,52 @@ class SamInnerVoice():
           print(f' idle loop exception {str(e)}')
        return None
 
-    def recall(self, query, profile=None, history= None, retrieval_count=2, retrieval_threshold=.8):
-        query_embed = self.embedder.encode(query)
-
-        # gather docs matching tag filter
-        candidate_ids = []
-        vectors = []
-        # gather all docs
-        for id in self.docHash:
-           # gather all potential docs
-           candidate_ids.append(id)
-           vectors.append(self.docHash[id]['embed'])
-
-        # add all matching docs to index:
-        index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
-        vectors_np = np.array(vectors)
-        ids_np = np.array(candidate_ids)
-        print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
-        index.add_with_ids(vectors_np, ids_np)
-        distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
-        print("Distances:", distances)
-        print("Id:",ids)
-        timestamps = [self.docHash[i]['timestamp'] for i in ids[0]]
-        # Compute score combining distance and recency
-        scores = []
-        for dist, id, ts in zip(distances[0], ids[0], timestamps):
-            age = (datetime.now() - ts).days
-            score = dist + age * 0.1 # Weighted
-            scores.append((id, score))
-        # Sort by combined score
-        results = sorted(scores, key=lambda x: x[1])
-        short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
-        self.active_workingMemory.append(short_form) # note this suggests we might want to store embedding elsewhere.
-        return short_form
+    def recall(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
+       #
+       ## this sloppy initial version builds the faiss index every time! pbly should move to weaviate
+       #
+       query_embed = self.embedder.encode(query)
+       
+       # gather docs matching tag filter
+       candidate_ids = []
+       vectors = []
+       # gather all docs
+       for id in self.docHash:
+          # gather all potential docs
+          candidate_ids.append(id)
+          vectors.append(self.docHash[id]['embed'])
+          
+       # add all matching docs to index:
+       index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
+       vectors_np = np.array(vectors)
+       ids_np = np.array(candidate_ids)
+       print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
+       index.add_with_ids(vectors_np, ids_np)
+       distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
+       print("Distances:", distances)
+       print("Id:",ids)
+       timestamps = [self.docHash[i]['timestamp'] for i in ids[0]]
+       # Compute score combining distance and recency
+       scores = []
+       for dist, id, ts in zip(distances[0], ids[0], timestamps):
+          age = (datetime.now() - ts).days
+          score = dist + age * 0.1 # Weighted
+          scores.append((id, score))
+       # Sort by combined score
+       results = sorted(scores, key=lambda x: x[1])
+       #short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
+       items=[f"{item[0]},{self.docHash[item[0]]['key']}, {self.docHash[item[0]]['item'][:60]}" for item in results]
+       picker = ListDialog(items)
+       result = picker.exec()
+       if result == QDialog.Accepted:
+          selected_index = picker.selected_index()
+          if selected_index != -1:  # -1 means no selection
+             fullitem = {k: self.docHash[results[selected_index][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
+             self.active_workingMemory.append(short_form) # note this suggests we might want to store embedding elsewhere.
+             print(f'Selected Item Index: {selected_index}') 
+       else:
+         return
+       return short_form
     
     def store(self, item, key=None, notes=None, profile=None, history=None):
        # opposite of recall
@@ -363,19 +495,21 @@ class SamInnerVoice():
                         
     def core_prompt(self, include_actions=True):
        ### made into a method so can be eval'd from multiple places
-       prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
-Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
-In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
+       prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 
-<Background>\n{self.ui.get_profile('Sam', 'Story')}\n{self.ui.get_profile('Sam', 'Story')}
+In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. When Doc refers to "you," he's speaking to you, Samantha. When you mention "you," you're addressing Doc.
+
+<Background>
+{self.ui.get_profile('Sam', 'Story')}
 </Background>
-<Dreams\n{self.ui.get_profile('Sam', 'Dreams')}\n{self.ui.get_profile('Sam', 'Dreams')}\n</Dreams>
+<Dreams>
+{self.ui.get_profile('Sam', 'Dreams')}
+</Dreams>
 
 New York Times news headlines for today:
 {self.articles}
 
-full articles can be retrieved using the action 'article'.
+To access full articles, use the action 'article'.
 
 <WORKING_MEMORY_KEYS>
 {self.get_workingMemory_available_keys()}
@@ -384,26 +518,25 @@ full articles can be retrieved using the action 'article'.
 <WORKING_MEMORY>
 {self.get_workingMemory_active_items()}
 </WORKING_MEMORY>
+
+Please respond only in JSON format.
 """
        if include_actions:
-          print(f'adding action')
-          prompt = prompt + f"""Respond only in JSON with one of the following actions:
-<ACTIONS>
-The following actions are available. Choose one and respond using the following JSON format:
-{{"action": "<action name>", "value": "<action argument>"}}
-
-action_name\taction_argument\tdescription\texample
-tell\t<response>\t no action is necessary, a response to the user input is directly available. This will be the only content presented in response, so make it complete.\t{{"action":"tell","value":"Hey doc, I think that is a great idea."}}
-question\t<question text>\t ask doc a question.\t{{"action":"question","value":"how are you feeling, doc?"}}
-article\t<article title>\t retrieve a NYTimes article.\t{{"action":"article","value":"To Combat the Opiod Epidemic, Cities Ponder Facilities for Drug Use"}}
-gpt4\t<question>\t ask gpt4 a question\t{{"action":"gpt4","value":"in python on linux, how can I list all the subdirectory names in a directory?"}}
-recall\t<key string>\t recall content from working memory, using the <key string> as the recall target.\t{{action":"recall","value":"Cognitive Architecture"}}
-store\t<form to place in working memory> \t a form you want to remember that will be stored under embeddings for two AI generated key strings. The form may be text or JSON.\t{{"action":"store","value":"BoardState: {{\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}}"}}
-web\t<search query string>\t perform a web search, using the <search query string> as the subject of the search.\t{{"action":"web","value":"Weather forecast for Berkeley,Ca for <today - eg Jan 1, 2023>"}}
-wiki\t<search query string>\t search the local wikipedia database.\t{{"action":"wiki","value":"Want is the EPR paradox in quantum physics?"}}
-</ACTIONS>
-
+          prompt +=\
 """
+Available actions include:
+<ACTIONS>
+- tell: Provide a direct response. Use phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","value":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
+- question: Ask Doc a question. Example: {"action":"question","value":"How are you feeling today, Doc?"}
+- article: Retrieve a NYTimes article. Example: {"action":"article","value":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
+- gpt4: Pose a question to GPT-4. Example: {"action":"gpt4","value":"In Python on Linux, how can I list all subdirectories in a directory?"}
+- recall: Fetch content from working memory using a key string. Example: {"action":"recall","value":"Cognitive Architecture"}
+- store: Save a form in working memory. Example: {"action":"store","value":"BoardState: {\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}"}
+- web: Conduct a web search. Example: {"action":"web","value":"Weather forecast for Berkeley, CA for January 1, 2023"}
+- wiki: Search the local Wikipedia database. Example: {"action":"wiki","value":"What is the EPR paradox in quantum physics?"}
+</ACTIONS>
+"""
+
        return prompt
 
     def get_workingMemory_active_keys(self):
@@ -423,7 +556,7 @@ wiki\t<search query string>\t search the local wikipedia database.\t{{"action":"
        return workingMemory_str
                         
 
-    def action_selection(self, input, profile, history, widget):
+    def action_selection(self, input, profile, widget):
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
@@ -461,16 +594,14 @@ Respond only in JSON using the provided format.
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
            SystemMessage(self.core_prompt(include_actions=True)),
-           ConversationHistory('short_history',200),
+           ConversationHistory(200),
            UserMessage(user_prompt)
         ]
-        #print(f'Short_history: {history[-4:]}')
-        self.memory.set('short_history', history[-4:])
         print(f'action_selection starting analysis')
-        analysis = self.llm.ask(self.client, {"input":input}, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
-        print(f'action_selection analysis: {analysis}')
+        analysis = self.llm.ask(self.client, input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
+        print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
-        article_prompt_text = f"""Summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
+        article_prompt_text = f"""In about 500 words, summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
 
         article_summary_msgs = [
            SystemMessage(article_prompt_text),
@@ -482,7 +613,7 @@ Respond only in JSON using the provided format.
             if type(content) == dict and 'action' in content and content['action']=='article':
                 title = content['value']
                 print(f'Sam wants to read article {title}')
-                ok = self.confirmation_popup(f'Sam want to retrieve {title}')
+                ok = self.confirmation_popup(f'Sam wants to retrieve', title)
                 if not ok: return {"none": ''}
                 article = self.search_titles(title)
                 url = article['url']
@@ -492,71 +623,82 @@ Respond only in JSON using the provided format.
                    data = response.json()
                 except Exception as e:
                    return {"article": f"retrieval failure, {str(e)}"}
-                summary = self.llm.ask(self.openAIClient, {"input":data['result']}, article_summary_msgs, model='gpt-3.5-turbo')
+                summary = self.llm.ask(self.openAIClient, {"input":data['result']}, article_summary_msgs, max_tokens=650, model='gpt-3.5-turbo')
                 if type(summary) is dict and 'status' in summary and summary['status']=='success':
-                    return {"article":  summary['message']['content']}
+                   self.add_exchange(input, summary['message']['content'])
+                   return {"article":  summary['message']['content']}
                 else:
-                    return {"article": f'retrieval failure {summary}'}
+                   self.add_exchange(input, f'retrieval failure {summary}')
+                   return {"article": f'retrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
                print(f"calling self.tell with (content['value']")
-               full_tell = self.tell(content['value'], input, widget, short_profile, history)
+               full_tell = self.tell(content['value'], input, widget, short_profile)
+               self.add_exchange(input, full_tell)
                return {"tell":full_tell}
             elif type(content) == dict and 'action' in content and content['action']=='web':
-                ok = self.confirmation_popup(content)
-                if ok:
-                   content = self.web(content['value'], widget, short_profile, history)
+                query = self.confirmation_popup('Web Search', content['value'])
+                if query:
+                   content = self.web(query, widget, short_profile)
+                   self.add_exchange(query, content)
                    return {"web":content}
             elif type(content) == dict and 'action' in content and content['action']=='wiki':
-                ok = self.confirmation_popup(content)
-                if ok:
-                   found_text = self.wiki(content['value'], profile, history)
+                query = self.confirmation_popup(content['action'], content['value'])
+                if query:
+                   found_text = self.wiki(query, short_profile)
+                   self.add_exchange(query, found_text)
                    return {"wiki":found_text}
             elif type(content) == dict and 'action' in content and content['action']=='question':
-               ok = self.confirmation_popup(content)
-               if ok:
-                   return {"question":content['value']}
+                query = self.confirmation_popup(content['action'], content['value'])
+                self.add_exchange(input, query)
+                if query:
+                   return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
-                ok = self.confirmation_popup(content)
-                if ok:
-                   text = self.gpt4(content['value'], short_profile, history)
+                query = self.confirmation_popup(content['action'], content['value'])
+                if query:
+                   text = self.gpt4(query, short_profile)
+                   self.add_exchange(query, text)
                    return {"gpt4":text}
             elif type(content) == dict and 'action' in content and content['action']=='recall':
-                ok = self.confirmation_popup(content)
-                if ok:
-                   result = self.recall(content['value'], profile=short_profile, history=history)
+                query = self.confirmation_popup(content['action'], content['value'])
+                if query:
+                   result = self.recall(query, profile=short_profile)
+                   self.add_exchange(query, result)
                    return {"recall":result}
             elif type(content) == dict and 'action' in content and content['action']=='store':
-                ok = self.confirmation_popup(content)
-                if ok:
-                   result = self.store(content['value'], profile=short_profile, history=history)
+                value = self.confirmation_popup(content['action'], content['value'])
+                if value:
+                   result = self.store(value, profile=short_profile)
+                   self.add_exchange(input, value)
                    return {"store":result}
             else:
                return {"none": ''}
 
-    def tell(self,theme, user_text, widget, short_profile, history):
+    def tell(self,theme, user_text, widget, short_profile):
        print(f'SamCoT Doing extended tell')
        #if widget is not None:
        #   self.ui.display_response(theme+'\n')
        user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Reasons for revision include:
 1. Adding more detail to an incomplete informational response.
-2. Occasionally including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions
-3. Occasionally inquire or comment on the user's state as per your instructions. 
+2. Including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions, to make the conversation more personal and engaging.
+3. Inquiring or commenting on the user's mental or emotional state, to make the conversation more personal and engaging.
+Choose at most one of the above reasons for revision, with choice 1 the highest priority.
+Limit your response to approximately 120 tokens if possible without degrading the content responding directly to user input.
 Respond ONLY with the original response or your revision. Use this JSON format for your response:
 {{"response":"<revision or original response text>"}}
 """        
        #print(f'action_selection {input}\n{response}')
-       self.memory.set('cot_history', history[-6:])
        prompt_msgs=[
           SystemMessage(self.core_prompt(include_actions=False)),
-          ConversationHistory('cot_history', 200),
+          ConversationHistory(600),
           UserMessage(user_prompt)
        ]
        try:
           response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
+          #response = self.llm.ask(self.client, user_text, prompt_msgs)
        except Exception as e:
           return f'expanded tell failure {str(e)}'
-       if type(response) is dict:
-          new_text = response['response']
+       if type(response) is not None:
+          new_text = response
           if len(new_text) > len(theme):
              #self.ui.display_response(new_text+'\n')
              return new_text+'\n'
@@ -631,10 +773,11 @@ Respond ONLY with the original response or your revision. Use this JSON format f
           return keywords
        else: return ''
        
-    def format_conversation(self, history, depth=-1):
+    def format_conversation(self, depth=-1):
        # depth- only return last 'depth' says
        names = {"### Response":'Sam', "### Instruction": 'Doc', "user":'Doc',"assistant":'Sam'}
        output = ""
+       history = self.memory.get(history)
        for d, say in enumerate(history):
           if depth == -1 or d > len(history)-depth:
              role = say['role']
@@ -644,10 +787,8 @@ Respond ONLY with the original response or your revision. Use this JSON format f
        return output
 
 
-    def topic_analysis(self,profile_text, history):
-       conversation = self.format_conversation(history)
-       print(f'conversation\n{conversation}')
-       keys_ents = self.get_keywords(conversation)
+    def topic_analysis(self,profile_text):
+       keys_ents = self.get_keywords(self.memory.get('history'))
        print(f'keywords {keys_ents}')
        prompt = Prompt([SystemMessage("Assignment: Determine the main topics of a conversation based on the provided keywords below. The response should be an array of strings that represent the main topics discussed in the conversation based on the given keywords and named entities.\n"),
                         UserMessage('Keywords and Named Entities:\n{{$input}}\n.')
@@ -664,7 +805,7 @@ Respond ONLY with the original response or your revision. Use this JSON format f
        else: return 'unknown'
                                       
 
-    def reflect(self, profile_text, history):
+    def reflect(self, profile_text):
        global es
        results = {}
        print('reflection begun')
@@ -672,7 +813,7 @@ Respond ONLY with the original response or your revision. Use this JSON format f
        if es is not None:
           results['sentiment_analysis'] = es
        if self.current_topics is None:
-          self.current_topics = self.topic_analysis(profile_text, history)
+          self.current_topics = self.topic_analysis(profile_text)
           print(f'topic-analysis: {self.current_topics}')
           results['current_topics'] = self.current_topics
        now = int(time.time())
@@ -684,13 +825,15 @@ Respond ONLY with the original response or your revision. Use this JSON format f
              SystemMessage(profile_text.split('\n')[0:4]),
              UserMessage(f"""News:\n{self.news}
 Recent Topics:\n{self.current_topics}
-Recent Conversations:\n{self.format_conversation(history, 4)},
+Recent Conversations:\n{self.format_conversation(4)},
 Doc is feeling:\n{self.docEs}
 Doc likes your curiousity about news, Ramana Maharshi, and his feelings. 
+Please do not repeat yourself. Your last reflection was:
+{self.reflect_thoughts}
 Choose at most one thought to express.
-Limit your thought to 200 words.""")
+Limit your thought to 180 words.""")
           ])
-          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=2000, max_tokens=300)
+          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=2000, max_tokens=240)
           response = None
           try:
              response = ut.run_wave(self.client, {"input":''}, prompt, options,
@@ -707,10 +850,11 @@ Limit your thought to 200 words.""")
              #answer = answer[0]
              results['tell'] = '\n'+answer+'\n'
              
+       self.reflect_thoughts = results
        return results
  
 
-    def summarize(self, query, response, profile, history):
+    def summarize(self, query, response, profile):
       prompt = Prompt([
          SystemMessage(profile),
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
@@ -724,7 +868,7 @@ Limit your thought to 200 words.""")
          return answer
       else: return 'unknown'
 
-    def wiki(self, query, profile, history):
+    def wiki(self, query, profile):
        short_profile = profile.split('\n')[0]
        query = query.strip()
        #
@@ -732,16 +876,16 @@ Limit your thought to 200 words.""")
        #
        if len(query)> 0:
           wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile, history)
+          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
           return wiki_lookup_summary
 
-    def gpt4(self, query, profile, history):
+    def gpt4(self, query, profile):
        short_profile = profile.split('\n')[0]
        query = query.strip()
        if len(query)> 0:
           prompt = Prompt([
              SystemMessage(short_profile),
-             UserMessage(self.format_conversation(history, 4)),
+             UserMessage(self.format_conversation(4)),
              UserMessage(f'{query}'),
           ])
        options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=400)
@@ -754,13 +898,12 @@ Limit your thought to 200 words.""")
           return answer
        else: return {'gpt4':'query failure'}
 
-    def web(self, query='', widget=None, profile='', history=[]):
+    def web(self, query='', widget=None, profile=''):
        query = query.strip()
        self.web_widget = widget
        if len(query)> 0:
           self.web_query = query
           self.web_profile = profile.split('\n')[0]
-          self.web_history = history
           self.worker = WebSearch(query)
           self.worker.finished.connect(self.web_search_finished)
           self.worker.start()
@@ -778,7 +921,6 @@ Limit your thought to 200 words.""")
          elif type(search_result['result']) is str:
             if self.web_widget is not None:
                self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
-            #response = self.summarize(self.web_query, search_result['result']+'\n', self.web_profile, self.web_history)
          return "web search succeded"
          # return response
       else:

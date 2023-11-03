@@ -78,7 +78,6 @@ action_primitive_names = \
  "append",
  "article",
  "question",
- "block",
  "choose",
  "concatenate"
  "difference",
@@ -88,73 +87,59 @@ action_primitive_names = \
  "gpt4",
  "integrate",
  "recall",
- "remember"
+ "store"
  "request",
  "sort",
+ "tell",
  "web",
  "wiki",
  ]
 
 action_primitive_descriptions = \
 """
-action_name \t argument(s) \t resultName - the name that can be used to refer to the newly created item in subsequent steps \t description
-none \t None \t None \t no action is needed.
-append \t <name1>,<name2> \t <resultName> \t add Item name1 to <List> name2 and return resulting List name.
-article \t <textName> \t <resultName> \t return the body of a NYTimes article with given title.
-ask \t <textName> \t <resultName> \t present doc a <question>, returns the answer  provided by doc.
-assign \t <literal1> \t <resultName> \t create a new working memory item with the name <resultName> and the content literal1
-choose \t <name1 >, <literal> \t <resultName> \t choose an item from a <list>, accoring to <criteria>, and store it under name 
-concatenate \t name1, name2 \t <resultName> \t <append <list2> to <list1> and return the resulting list
-difference \t <text1>, text2> \t <resultName> \t removes content related to <text2> from <text1>, and returns the remainder.
-empty \t <list> \t resultName \t test if the given <list> is empty and returns the boolean True/False.
-extract \t <queryName>, <itemName> \t <resultName> extract content related to <query> from <text>
-extractList \t <query>, <list> \t <resultName> \t extract items related to <query> from <list> and return a list of the extracted items.
-first\t <list> \t <resultName> \t extract and return the first item on the list.
-gpt4 \t <question> \t <resultName> \t ask gpt4 a <question>, return the gpt4 response.
-integrate \t <itemName1> ,<itemName2> \t <resultName> \t combine item1 and item2 into a single coherent item and result it.
-recall \t <key> \t <semantic memory text> \t <resultName>  \t recall and return items from semantic memory, using the key as the search string.
-store \t <key>, <itemName> \t None \t store the item  in semantic memory under recall address <key>.
-request \t <url> \t <resultName> \t request a specific resource from a web site.
-sort \t <list>, <criteria> \t <resultNamet> \t rank the items in <list> by criteria. Returns the items as a list in ranked order, best first.
-tell \t <Text> \t None \t present <Text> to the user.
-web \t <query> \t <resultName> \t perform a web search, using the <query>, and return integrated content from relevant urls.
-wiki \t <query> \t <resultName> \t wiki search the local wikipedia database and return integrated content from retrieved entries.
+[
+    {"action": "initialize", "arguments": "name1, type", "result": "None", "description": "initialize an empty entity of the specified type (List, Item, etc.) with the given name."},
+    {"action": "none", "arguments": "None", "result": "None", "description": "no action is needed."},
+    {"action": "append", "arguments": "name1, name2", "result": "name3", "description": "append the Item name1 to List name2, and assign the resulting list to name3"},
+    {"action": "article", "arguments": "name1", "result": "name2", "description": "access the article title named name1, use it to retrieve the article body, and assign it to name2."},
+    {"action": "assign", "arguments": "literal1", "result": "name1", "description": "create a new Item with value literal1 and assign it to name1"},
+    {"action": "choose", "arguments": "name1, "name2", "result": "name3", "description": "choose an item from the list name1, according to the criteria in name2, and assign it to name3"},
+    {"action": "concatenate", "arguments": "name1, name2", "result": "name3", "description": "append the list named list2 to the list named list1 and assign the resulting list to name3"},
+    {"action": "difference", "arguments": "item1, item2", "result": "item3", "description": "identify content in item1 and not in item2 and assign it to name item3"},
+    {"action": "empty", "arguments": "list1", "result": "item1", "description": "test if list1 is empty and assign the boolean True/False accordingly to item1."},
+    {"action": "extract", "arguments": "item1, item2", "result": "item3", "description": "extract content related to item1 from item2 and assign it to item3"},
+    {"action": "first", "arguments": "list1", "result": "item1", "description": "select the first item in list1 and assign it to item1."},
+    {"action": "gpt4", "arguments": "item1", "result": "item2", "description": "ask gpt4 item1 and assign the response to item2"},
+    {"action": "integrate", "arguments": "item1 ,item2", "result": "item3", "description": "combine item1 and item2 into a single coherent item and assign it to item3."},
+    {"action": "question", "arguments": "name1", "result": "name2", "description": "access the item name1, present it to doc, and assign his response to name2."},
+    {"action": "recall", "arguments": "name1", "result": "item1", "description": "retrieve item named item1 from working memory and assign it to name item1."},
+    {"action": "request", "arguments": "item1", "result": "item2", "description": "request a specific web resource with url item1 and assign the result to name item2."},
+    {"action": "sort", "arguments": "list1, item1", "result": "list2", "description": "rank the items in list1 by criteria item1 and assign the sorted list to name list2. Returns a list in ranked order, best first."},
+    {"action": "tell", "arguments": "item1", "result": "None", "description": "present item1 to the user."},
+    {"action": "web", "arguments": "item1", "result": "item2", "description": "perform a web search, using the item1 as the search string, and assign the resulting  integrated content to name item2."},
+    {"action": "wiki", "arguments": "item1", "result": "item2", "description": "wiki search the local wikipedia database using item1 as the search string, and assign the integrated content to item2."}
+]
 """
 
 planner_nl_list_prompt =\
 """
-A list is enclosed in square brackets, containing Items separated by '\n'. 
-Each Item in a List begins with "Item:" followed by either an action or a short statement of the task to be achieved.
+Plan Format:
+Your plan should be structured as a list of instantiated actions from the above action list. Each action instantiation will include the specified action, the arguments for that action, and the name to assign to the result. 
+All names must appear in a result before the can be referenced as arguments.
+The order of the actions in the plan matters, as it represents the sequence in which they should be executed.
 
-Example:
+Example Plan (1-shot):
 
-TaskName: ticTacToe
-Task: create a plan for a tic tac to player
-
-Plan: [
-Item: Initialize working memory with an initial game state\n
-Item: Loop untill gameState.won or gameState.draw
-Item: ask user for a move.
-Item: update gameState with user move.
-Item: ask AI for a move.
-Item: update gameState with AI move
-Item: endLoop
-Item: tell gameState
+Plan:
+[
+{"action": "assign", "arguments": "'Apple', item1", "result": "item1"},
+{"action": "assign", "arguments": EMPTYLIST, "result": "list1"},
+{"action": "assign", "arguments": "5", "result": "number1"},
+{"action": "append", "arguments": "number1, myList", "result": "updatedList"},
+{"action": "gpt4", "arguments": "What is the meaning of life?", "result": "response1"},
+{"action": "tell", "arguments": "response1", "result": "None"}
 ]
-
-Example:
-TaskName: newsAI
-Task: update Doc with latest news about OpenAI
-
-Plan: [
-Item: web 'latest news about AI' gensym21 
-Item: extract gensym21 'OpenAI' gensym22
-Item: tell gensym22
-]
-
-*** 
 """
-
 
 
 def generate_faiss_id(document):
@@ -182,22 +167,24 @@ class LLM():
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':[], 'history':[]})
 
-   def ask(self, client, input, prompt_msgs, temp=0.2, max_tokens=100, validator=DefaultResponseValidator()):
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature=temp, max_tokens=max_tokens)
-       try:
-          prompt = Prompt(prompt_msgs)
-          #print(f'ask prompt {prompt_msgs}')
-          response = ut.run_wave (client, {"input":input}, prompt, options,
-                                  self.memory, self.functions, self.tokenizer, validator=validator)
-          #print(f'ask response {response}')
-          if type(response) is not dict or 'status' not in response.keys() or response['status'] != 'success':
-             return None
-          content = response['message']['content']
-          return content
-       except Exception as e:
-          traceback.print_exc()
-          print(str(e))
-          return None
+   def ask(self, client, input, prompt_msgs, model=None, temp=0.2, max_tokens=100, validator=DefaultResponseValidator()):
+      if model is None:
+         model = self.model
+      options = PromptCompletionOptions(completion_type='chat', model=model, temperature=temp, max_tokens=max_tokens)
+      try:
+         prompt = Prompt(prompt_msgs)
+         #print(f'ask prompt {prompt_msgs}')
+         response = ut.run_wave (client, {"input":input}, prompt, options,
+                                 self.memory, self.functions, self.tokenizer, validator=validator)
+         #print(f'ask response {response}')
+         if type(response) is not dict or 'status' not in response.keys() or response['status'] != 'success':
+            return None
+         content = response['message']['content']
+         return content
+      except Exception as e:
+         traceback.print_exc()
+         print(str(e))
+         return None
        
 class PlanInterpreter():
     def __init__(self, planner, profile=None, history=None, model='alpaca'):
@@ -283,6 +270,13 @@ Your conversation style is warm, gentle, humble, and engaging. """
             print(f'LLM_1op error {str(e)}')
             return None
 
+
+    def assign(self, literal, addr):
+       pass
+
+    def article(self, titleAddr):
+       pass
+    
     def wmRead(self, addr):
         #
         ## retrieve from working memory
@@ -609,43 +603,41 @@ Your conversation style is warm, gentle, humble, and engaging. """
        return prefix, user_responses
 
     def sbar_as_text(self):
-       return f"\nTASK:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nObservations:\n{self.sbar['observations']}\nEND TASK\n"
+       return f"\nTASK:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nReview:\n{self.sbar['observations']}\nEND TASK\n"
 
 
     def plan(self):
     
        plan_prompt=\
 """
-Reason step by step to create a concise plan for performing the TASK described below. 
+Reason step by step to create a plan for performing the TASK described below. 
 The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a subtask. The plan can be followed by notes/commentary using the same format as the plan itself. Respond only with the plan (and notes) using the above plan format.
 
-The concise plan may include four agents:
-  i Driver, the main actor in the plan.
-  ii State, which will contain any state of an active instance of the plan and include capability to create, read, update, and delete state elements. 
-  iii Assistant, an AI who can perform subtasks requiring reasoning or text operations.
-  iv User, the user who is interacting during plan execution.
-At each step Driver should ensure State has updated with any new or changed information generated. 
+The plan may include four agents:
+  i Driver, the main actor in the plan, can access and update the State, and can perform actions as specified in the plan.
+  ii State: stores all relevant information for the current task, include capability to create, read, update, and delete state elements. 
+  iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
+  iv User: can provide input to the Driver and Assistant, and can interact with the system to review and approve the plan and participate in its execution.
 """
        print(f'******* Developing Plan for {self.prefix}')
 
        revision_prompt=\
 """
-Reason step by step to analyze the above plan with respect to above user Critique, and update the plan. 
+Reason step by step to analyze and improve the above plan with respect to the above Critique. 
 The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. Respond only with the updated plan (and notes if needed) using the above plan format.
 
-The concise plan may include four agents:
-  i Driver, the main actor in the plan.
-  ii State, which will contain any state of an active instance of the plan and include capability to create, read, update, and delete state elements. 
-  iii Assistant, an AI who can perform subtasks requiring reasoning or text operations.
-  iv User, the user who is interacting during plan execution.
-At each step Driver should ensure State has updated with any new or changed information generated. 
+The plan may include four agents:
+  i Driver, the main actor in the plan, can access and update the State, and can perform actions as specified in the plan.
+  ii State: stores all relevant information for the current task, include capability to create, read, update, and delete state elements. 
+  iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
+  iv User: can provide input to the Driver and Assistant, and can interact with the system to review and approve the plan and participate in its execution.
 """
        user_satisfied = False
        user_critique = '123'
        plan = None
        first_time = True
        while not user_satisfied:
-          messages = [SystemMessage('Use this format for Plans:\n'+planner_nl_list_prompt),
+          messages = [SystemMessage("""You're tasked with creating a plan using a set of predefined actions. Each action has specific arguments and results. Below is the structure you should follow:\n'+planner_nl_list_prompt"""),
                       SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
                       SystemMessage(plan_prompt),
                       UserMessage(f'TaskName: {self.prefix}\n{self.sbar_as_text()}')
@@ -660,7 +652,7 @@ At each step Driver should ensure State has updated with any new or changed info
              messages.append(UserMessage(revision_prompt))
           
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask(self.client, self.model, messages, max_tokens=1000, temp=0.1, validator=DefaultResponseValidator())
+          plan = self.llm.ask(self.openAIClient, '', messages, model='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
           print(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
@@ -690,69 +682,6 @@ if __name__ == '__main__':
     #print(f'PI article {article}')
     #chris = pi.wiki('christopher columbus')
     #print(f'PI columbus {chris}')
-
-    plan_request="""Sam, please create a plan to scan a list of news headlines and report the ones of interest to Doc."""
-
-    ### Plan examples
-    plan="""Plan:
-1. Gather relevant news sources: Start by compiling a list of reliable news websites, blogs, and social media accounts that cover diverse topics of interest to Doc.
-2. Set up RSS feeds or email subscriptions: Use tools like Feedly or Google Alerts to set up automatic updates from these sources directly to Doc's inbox or feed reader.
-3. Monitor keywords: Identify specific keywords related to Doc's interests and set up alerts for when articles containing those words are published online.
-4. Regular scanning: Schedule regular intervals throughout the day to manually scan through the collected news items, filtering out irrelevant content and highlighting stories of particular interest.
-5. Summarize and present findings: Once interesting articles have been identified, prepare brief summaries of their main points and present them to Doc either via email or verbal communication.
-6. Follow up on feedback: If Doc expresses interest in delving further into a topic, conduct additional research and share more detailed reports accordingly.
-7. Review and update sources regularly: Stay abreast of new developments in the field and adjust the list of news sources as needed to ensure that Doc receives timely and accurate information.
-8. Encourage discussion: Prompt Doc to discuss what he reads, allowing him to process the information and apply it to his own context. This will not only enrich his understanding but also help identify areas where he might require further exploration or clarification.
-Remember, this plan should be flexible enough to adapt based on Doc's evolving needs and interests. Always prioritize quality over quantity, ensuring that the selected news items align closely with Doc's goals and values.
-"""
-
-    plan_pseudocode = """ 
-def scan_news(doc):
-    # Initialize variables
-    news_headlines = []
-    relevant_articles = []
-    
-    # Collect news sources
-    for source in doc['sources']:
-        news_headlines += fetch_headlines(source)
-        
-    # Filter out irrelevant content
-    filtered_headlines = filter_irrelevant(news_headlines)
-    
-    # Extract keywords from doc['keywords']
-    keywords = extract_keywords(filtered_headlines)
-    
-    # Match keywords with headlines
-    matched_headlines = match_keywords(keywords, filtered_headlines)
-    
-    # Prepare summaries of matching headlines
-    summarized_headlines = generate_summaries(matched_headlines)
-    
-    # Present summarized headlines to Doc
-    display_results(summarized_headlines, doc)
-    
-    return relevant_articles
-def fetch_headlines(source):
-    # Function to retrieve latest headlines from specified source
-    pass
-def filter_irrelevant(headlines):
-    # Function to remove irrelevant headlines based on preset criteria
-    pass
-def extract_keywords(headlines):
-    # Function to identify important phrases/terms from given headlines
-    pass
-def match_keywords(keywords, headlines):
-    # Function to compare extracted keywords with original headlines
-    pass
-def generate_summaries(headlines):
-    # Function to produce short descriptions of matching headlines
-    pass
-def display_results(summaries, doc):
-    # Function to present generated summaries to Doc
-    pass
-if __name__ == "__main__":
-    scan_news(profile)
-"""
     #print('****************************************')
     #print(pi.test_executable("Compile a list of reliable news websites, blogs, and social media accounts that cover diverse topics of interest to Doc."))
 

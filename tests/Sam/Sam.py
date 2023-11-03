@@ -59,11 +59,6 @@ month_name = ['january','february','march','april','may','june','july','august',
 month_day = local_time.tm_mday
 hour = local_time.tm_hour
 
-
-# create vector memory
-#vmem = VLite(collection='Helpful', device='cpu')
-#vmem_clock = 0 # save every n remembers.
-
 global news, news_details
 
 # get profile contexts
@@ -104,14 +99,6 @@ def get_current_profile_prompt_text():
 
 FORMAT=True
 PREV_LEN=0
-prompt_text = 'You are helpful, creative, clever, and very friendly. '
-PROMPT = Prompt([
-   SystemMessage(prompt_text),
-   ConversationHistory('history', .3),
-   UserMessage('{{$input}}')
-])
-
-
 #print(f' models: {llm.get_available_models()}')
 parser = argparse.ArgumentParser()
 #parser.add_argument('model', type=str, default='wizardLM', choices=['guanaco', 'wizardLM', 'zero_shot', 'vicuna_v1.1', 'dolly', 'oasst_pythia', 'stablelm', 'baize', 'rwkv', 'openbuddy', 'phoenix', 'claude', 'mpt', 'bard', 'billa', 'h2ogpt', 'snoozy', 'manticore', 'falcon_instruct', 'gpt_35', 'gpt_4'],help='select prompting based on modelto load')
@@ -139,9 +126,6 @@ def setFormat():
       FORMAT=True
 
 
-functions = FunctionRegistry()
-tokenizer = GPT3Tokenizer()
-memory = VolatileMemory({'input':'', 'history':[]})
 max_tokens = 3200
 # Render the prompt for a Text Completion call
 
@@ -170,58 +154,6 @@ class ImageDisplay(QtWidgets.QWidget):
         self.label.setPixmap(pixmap)
         self.resize(240,240)
         self.show()
-
-        
-class TagEntryWidget(QWidget):
-   tagComplete = pyqtSignal(str)
-   
-   def __init__(self, suggested_tags = None):
-      super().__init__()
-      self.setWindowTitle("Tag")
-      
-      layout = QVBoxLayout()
-      
-      # Display suggested tags
-      if suggested_tags:
-         suggested_tags_str = ", ".join(suggested_tags)
-         self.suggested_tags_label = QLabel(f"Suggested Tags: {suggested_tags_str}")
-         layout.addWidget(self.suggested_tags_label)
-
-      # Text edit field for text entry
-      self.text_edit = QTextEdit()
-      layout.addWidget(self.text_edit)
-      
-      # OK button, closes the widget and prints the entered text
-      self.ok_button = QPushButton("OK")
-      self.ok_button.clicked.connect(self.ok_clicked)
-      layout.addWidget(self.ok_button)
-      
-      # Cancel button, closes the widget without doing anything
-      self.cancel_button = QPushButton("Cancel")
-      self.cancel_button.clicked.connect(self.cancel_clicked)
-      layout.addWidget(self.cancel_button)
-      
-      self.setLayout(layout)
-      
-   def ok_clicked(self):
-      text = self.text_edit.toPlainText()
-      self.tagComplete.emit(text)
-      self.close()
-      
-   def cancel_clicked(self):
-      self.tagComplete.emit('cancel')
-      self.close()
-
-def show_confirmation_popup(action):
-   msg_box = QMessageBox()
-   msg_box.setWindowTitle("Confirmation")
-   msg_box.setText(f"Can Sam perform {action}?")
-   msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-   retval = msg_box.exec_()
-   if retval == QMessageBox.Yes:
-      return True
-   elif retval == QMessageBox.No:
-      return False
 
 class MemoryDisplay(QtWidgets.QWidget):
    def __init__(self):
@@ -255,7 +187,7 @@ class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
       
-      self.samInnerVoice = SamInnerVoice(self, model = model)
+      self.samCoT = SamInnerVoice(self, model = model)
 
       self.memory_display = None
       self.windowCloseEvent = self.closeEvent
@@ -362,7 +294,7 @@ class ChatApp(QtWidgets.QWidget):
       # Add control layout to main layout
       main_layout.addLayout(control_layout)
       self.setLayout(main_layout)
-      greeting = self.samInnerVoice.wakeup_routine()
+      greeting = self.samCoT.wakeup_routine()
       self.display_response(greeting+'\n')
 
    def make_combo(self, control_layout, label, choices, callback=None):
@@ -409,65 +341,22 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
    def get_current_profile_prompt_text(self):
       return CURRENT_PROFILE_PROMPT_TEXT
 
-   def save_conv_history(self):
-      global memory, profile
-      if profile != 'Sam': #only persist for Sam for now
-         return
-      data = defaultdict(dict)
-      history = memory.get('history')
-      h_len = 0
-      save_history = []
-      for item in range(len(history)-1, -1, -1):
-         if h_len+len(str(history[item])) < 8000:
-            h_len += len(str(history[item]))
-            save_history.append(history[item])
-      save_history.reverse()
-      print(f'saving conversation history for {profile}')
-      data['history'] = save_history
-      # Pickle data dict with all vars  
-      with open(profile+'.pkl', 'wb') as f:
-         pickle.dump(data, f)
-
-   def load_conv_history(self):
-      global memory
-      if profile != 'Sam':
-         return
-      try:
-         with open('Sam.pkl', 'rb') as f:
-            data = pickle.load(f)
-            history = data['history']
-            print(f'loading conversation history for {profile}')
-            memory.set('history', history)
-      except Exception as e:
-         print(f'Failure to load conversation history {str(e)}')
-         self.display_response(f'Failure to load conversation history {str(e)}')
-         memory.set('history', [])
 
    def closeEvent(self, event):
-       self.save_conv_history()
-       if self.sam is not None:
+      self.samCoT.save_conv_history()
+      if self.sam is not None:
           self.sam.close()
-       print("Window is closing")
-       event.accept()  # Allow the window to close
+      event.accept()  # Allow the window to close
 
    def controlC(self, signum, frame):
-       self.save_conv_history()
-       if self.sam is not None:
+      self.samCoT.save_conv_history()
+      if self.sam is not None:
           self.sam.close()
-       print("Window is closing")
-       QApplication.exit()
+      QApplication.exit()
 
        
-   def add_exchange(self, input, response):
-      print(f'add_exchange {input} {response}')
-      history = memory.get('history')
-      history.append({'role':llm.USER_PREFIX, 'content': input})
-      response = response.replace(llm.ASSISTANT_PREFIX+':', '')
-      history.append({'role': llm.ASSISTANT_PREFIX, 'content': response})
-      memory.set('history', history)
-
    def on_prompt_combo_changed(self, index):
-      global PROMPT, profile, CURRENT_PROFILE_PROMPT_TEXT
+      global profile, CURRENT_PROFILE_PROMPT_TEXT
       if type(index)==str:
          input_text = index
       else:
@@ -494,7 +383,7 @@ Background:\n{get_profile('Bhagavan', 'Story')}
            
       elif input_text == "Sam":
          # note many activities will use first paragraph only. Keep it relevant!
-         self.load_conv_history()  # load state for Sam 
+         self.samCoT.load_conv_history()  # load state for Sam 
          input_text = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
 Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
@@ -505,14 +394,14 @@ In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you
 <Dreams\n{self.get_profile('Sam', 'Dreams')}\n{self.get_profile('Sam', 'Dreams')}\n</Dreams>
 
 New York Times news headlines for today:
-{self.samInnerVoice.articles}
+{self.samCoT.articles}
 
 <WorkingMemory keys available>
-{self.samInnerVoice.get_workingMemory_available_keys()}
+{self.samCoT.get_workingMemory_available_keys()}
 </WorkingMemory keys available>
 
 <WORKING MEMORY>
-{self.samInnerVoice.get_workingMemory_active_items()}
+{self.samCoT.get_workingMemory_active_items()}
 </WORKING MEMORY>
 """
       elif input_text =="Analytical":
@@ -524,15 +413,8 @@ Your task is to:
 3. analyze each solution alternative for consistency with the problem statement, then select the solution alternative most consistent with all the information in the problem statement.
 """
 
-      memory.set('prompt_text', input_text)
       CURRENT_PROFILE_PROMPT_TEXT = input_text
-      PROMPT = Prompt([
-         SystemMessage('{{$prompt_text}}'),
-         ConversationHistory('history', .5),
-         UserMessage('{{$input}}')
-      ])
       self.prompt_area.clear()
-      #self.prompt_area.insertPlainText(input_text)
 
    def display_response(self, r):
       global PREV_LEN
@@ -544,46 +426,6 @@ Your task is to:
       self.input_area.repaint()
       PREV_LEN=len(self.input_area.toPlainText())-1
       
-   def query(self, msgs, display=True):
-      #msgs have already been run thru prompt completion
-      global model,  memory#, vmem, vmem_clock
-      if display:
-         display = self.display_response
-      try:
-         max_tokens= int(self.max_tokens_combo.currentText())
-         temperature = float(self.temp_combo.currentText())
-         top_p = float(self.top_p_combo.currentText())
-         response = ut.ask_LLM(model, msgs, max_tokens, temperature, top_p, host, port, display=display)
-         return response
-      except Exception as e:
-         print(str(e))
-         traceback.print_exc()
-         return ''
-        
-   # Render the prompt and run a text completion call to llm
-   def run_messages_completion(self):
-      as_msgs = PROMPT.renderAsMessages(memory, functions, tokenizer, max_tokens)
-      msgs = []
-      if not as_msgs.tooLong:
-         msgs = as_msgs.output
-         response = self.query(msgs)
-      return response
-
-   def run_query(self, query):
-      global model,  memory#, vmem, vmem_clock
-      try:
-         memory.set('input', query)
-         max_tokens= int(self.max_tokens_combo.currentText())
-         temperature = float(self.temp_combo.currentText())
-         top_p = float(self.top_p_combo.currentText())
-         
-         # render prompt and do llm call
-         response = self.run_messages_completion()
-         self.add_exchange(query, response)
-         return response
-      except Exception:
-         traceback.print_exc()
-           
    def submit(self):
       global PREV_LEN
       self.timer.stop()
@@ -593,62 +435,51 @@ Your task is to:
       response = ''
       #print(f'submit {new_text}')
       if profile == 'Sam':
-         self.samInnerVoice.logInput(new_text)
-         action = self.samInnerVoice.action_selection(new_text,
+         self.samCoT.logInput(new_text)
+         action = self.samCoT.action_selection(new_text,
                                                  get_current_profile_prompt_text(),
-                                                 self.get_conv_history(),
                                                  self) # this last for async display
          # see if Sam needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
             print(f'Sam tell return {action}')
             response = action['tell']+'\n'
             self.display_response(response) # article summary text
-            self.add_exchange(new_text, response)
 
          if type(action) == dict and 'article' in action.keys():
             #{"article":'<article body>'}
             # get and display article retrieval
             response = 'Article summary:\n'+action['article']+'\n'
             self.display_response(response) # article summary text
-            self.add_exchange(new_text, response)
             #self.run_query('Comments?')
             return
          elif type(action) == dict and 'web' in action.keys():
             #{"web":'<compiled search results>'}
             self.display_response(action['web'])
-            self.add_exchange(new_text, action['web'])
             #self.run_query('')
             return
          elif type(action) == dict and 'wiki' in action.keys():
             #{"wiki":'<compiled search results>'}
             self.display_response(action['wiki'])
-            self.add_exchange(new_text, str(action['wiki']))
             #self.run_query(input)
             return
          elif type(action) == dict and 'gpt4' in action.keys():
             #{"gpt4":'<gpt4 response>'}
             self.display_response(action['gpt4'])
-            self.add_exchange(new_text, str(action['gpt4']))
             #self.run_query(input)
             return
          elif type(action) == dict and 'recall' in action.keys():
             #{"recall":'{"id":id, "key":key, "timestamp":timestamp, "item":text or json or ...}
             self.display_response(action['recall']['item'])
-            self.add_exchange(new_text, '') # don't add anything to conversation history, this is for working memory
-            #self.add_exchange(new_text, str(action['recall']))
-            #self.run_query(input)
             return
          elif type(action) == dict and 'store' in action.keys():
             #{"store":'<key used to store item>'}
             self.display_response(action['store'])
-            self.add_exchange(new_text, f"stored under {action['store']}")
             #self.run_query(input)
             return
          elif type(action) == dict and 'question' in action.keys():
             #{"ask":'<question>'}
             question = action['question'] # add something to indicate internal activity?
             self.display_response(question)
-            self.add_exchange(new_text, question)
             return
          
       # response = self.run_query(new_text)
@@ -656,11 +487,10 @@ Your task is to:
       return
 
    def clear(self):
-      global memory, PREV_POS, PREV_LEN
+      global PREV_POS, PREV_LEN
       self.input_area.clear()
       PREV_POS="1.0"
       PREV_LEN=0
-      #memory.set('history', [])
    
    def store(self):
       global PREV_LEN, op#, vmem, vmem_clock
@@ -673,50 +503,24 @@ Your task is to:
       selectedText = selectedText.strip()
       if len(selectedText) > 0:
          print(f'cursor has selected, len {len(selectedText)}')
-         self.samInnerVoice.store(selectedText)
+         self.samCoT.store(selectedText)
          
-   def get_conv_history(self):
-      return memory.get('history')
-
-   def history(self):
-      self.save_conv_history() # save current history so we can edit it
-      he = subprocess.run(['python3', 'historyEditor.py'])
-      if he.returncode == 0:
-         try:
-            print(f'loading conversation history for {profile}')
-            with open('Sam.pkl', 'rb') as f:
-               data = pickle.load(f)
-               history = data['history']
-               # test each form for sanity
-               sanitized_history = [
-                  {"role": "### Instruction", "content": "What is the meaning of life?"},
-                  {"role": "### Response", "content": "I don't know. I've read that some believe that life's purpose lies in self-discovery and growth, while others think it's about contributing positively to society. There's also the idea that perhaps there isn't a single 'purpose', but rather opportunities for meaningful experiences. What do you think?"},
-                  {"role": "### Instruction", "content": "Hold me?"},
-                  {"role": "### Response", "content": "Oh, I wish we could cuddle."}
-                  ]
-               for d in history:
-                  try:
-                     s = json.dumps(d) # only doing this to test form, don't really care about result
-                     sanitized_history.append(d)
-                  except Exception as e:
-                     print(f' problem with this form in conversation history, skipping {d}')
-            memory.set('history', sanitized_history)
-         except Exception as e:
-            self.display_response(f'Failure to reload conversation history {str(e)}')
-
    def workingMem(self):
-      self.samInnerVoice.save_workingMemory() # save current working memory so we can edit it
+      self.samCoT.save_workingMemory() # save current working memory so we can edit it
       he = subprocess.run(['python3', 'memoryEditor.py'])
       if he.returncode == 0:
          try:
-            self.workingMemory = self.samInnerVoice.load_workingMemory()
+            self.workingMemory = self.samCoT.load_workingMemory()
          except Exception as e:
             self.display_response(f'Failure to reload working memory {str(e)}')
+
+   def history(self):
+      self.samCoT.historyEditor() # save current working memory so we can edit it
 
    def on_timer_timeout(self):
       global profile, profile_text
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
-      response = self.samInnerVoice.reflect(get_current_profile_prompt_text(), self.get_conv_history())
+      response = self.samCoT.reflect(get_current_profile_prompt_text())
       print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'sentiment_analysis' in response.keys():

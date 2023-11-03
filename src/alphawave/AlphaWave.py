@@ -93,8 +93,8 @@ class AlphaWave(AsyncIOEventEmitter):
                 if 'value' in validation:
                     response["message"]["content"] = validation['value']
                 #print(f'***** Alphawave adding input to history \n{history_variable}')
-                self.addInputToHistory(memory, history_variable, input)
-                self.addResponseToHistory(memory, history_variable, response['message'])
+                #self.addInputToHistory(memory, history_variable, input)
+                #self.addResponseToHistory(memory, history_variable, response['message'])
                 #print(f'***** Alphawave memory post wave {memory.get("history")}')
                 #print(f'*****Alphawave returning, no command')
                 return response
@@ -123,8 +123,9 @@ class AlphaWave(AsyncIOEventEmitter):
                     print(Colorize.error('Response Repair Failed'))
 
             if repair['status'] == 'success':
-                self.addInputToHistory(memory, history_variable, input)
-                self.addResponseToHistory(memory,history_variable, repair['message'])
+                #self.addInputToHistory(memory, history_variable, input)
+                #self.addResponseToHistory(memory,history_variable, repair['message'])
+                pass
             return repair
         except Exception as err:
             return {
