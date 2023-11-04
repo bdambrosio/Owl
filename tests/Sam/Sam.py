@@ -186,9 +186,9 @@ class MemoryDisplay(QtWidgets.QWidget):
 class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
-      
-      self.samCoT = SamInnerVoice(self, model = model)
+      global model
 
+      self.samCoT = SamInnerVoice(self, model = model)
       self.memory_display = None
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)
@@ -480,6 +480,11 @@ Your task is to:
             #{"ask":'<question>'}
             question = action['question'] # add something to indicate internal activity?
             self.display_response(question)
+            return
+         elif type(action) == dict and 'unknown' in action.keys():
+            #{"ask":'<question>'}
+            text = action['unknown']
+            self.display_response(text)
             return
          
       # response = self.run_query(new_text)

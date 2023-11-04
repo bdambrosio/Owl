@@ -20,8 +20,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(300, 300, 800, 600)
 
         self.tableWidget = QTableWidget(self)
-        self.tableWidget.setColumnCount(7)
-        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key", "type", "Item", "Notes" "Timestamp", "Delete"])
+        self.tableWidget.setColumnCount(6)
+        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key", "Item", "Notes" "Timestamp", "Delete"])
         self.tableWidget.setRowCount(len(self.docHash))
 
         idx = 0
@@ -29,17 +29,14 @@ class MainWindow(QMainWindow):
            entry = self.docHash[id]
            self.tableWidget.setItem(idx, 0, QTableWidgetItem(str(entry['id'])))
            self.tableWidget.setItem(idx, 1, QTableWidgetItem(str(entry["key"])))
-           if 'type' in entry:
-               self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry["type"])))
-           else: self.tableWidget.setItem(idx, 2, QTableWidgetItem("str"))
-           self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry['item'])))
+           self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry['item'])))
            if 'notes' in entry:
-               self.tableWidget.setItem(idx, 4, QTableWidgetItem(str(entry["notes"])))
-           else: self.tableWidget.setItem(idx, 4, QTableWidgetItem(""))
-           self.tableWidget.setItem(idx, 5, QTableWidgetItem(str(entry['timestamp'])))
+               self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry["notes"])))
+           else: self.tableWidget.setItem(idx, 3, QTableWidgetItem(""))
+           self.tableWidget.setItem(idx, 4, QTableWidgetItem(str(entry['timestamp'])))
            deleteButton = QPushButton("Delete")
            deleteButton.clicked.connect(lambda _, row=idx: self.deleteRow(row))
-           self.tableWidget.setCellWidget(idx, 6, deleteButton)
+           self.tableWidget.setCellWidget(idx, 5, deleteButton)
            
            idx += 1
 

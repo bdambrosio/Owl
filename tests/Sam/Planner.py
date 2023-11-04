@@ -95,6 +95,34 @@ action_primitive_names = \
  "wiki",
  ]
 
+#
+#1. Initialization Actions:
+#   - initialize
+#2. Manipulation Actions:
+#   - append
+#   - concatenate
+#   - difference
+#   - extract
+#   - integrate
+#   - sort
+#3. Selection Actions:
+#   - choose
+#   - first
+#4. Information Actions:
+#   - gpt4
+#   - question
+#   - recall
+#   - request
+#   - web
+#   - wiki
+#5. Response Actions:
+#   - tell
+#6. Utility Actions:
+#   - assign
+#7. Test Actions:
+#   - empty
+#   - containedIn
+
 action_primitive_descriptions = \
 """
 [
@@ -208,7 +236,7 @@ class PlanInterpreter():
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
         self.profile = self.personality
-        self.op = op.OpenBook() # comment out for testing.
+        #self.op = op.OpenBook() # comment out for testing.
 
         self.nytimes = nyt.NYTimes()
         self.news, self.details = self.nytimes.headlines()
@@ -539,6 +567,20 @@ You've always been fascinated by human emotions and experiences, and have spent 
 Your conversation style is warm, gentle, humble, and engaging. """
        self.interpreter = PlanInterpreter(self, model=self.model)
 
+
+    def save_plan(self, task_name, plan):
+       with open(task_name+'Plan.json', 'w') as f:
+          json.dump(plan, f, indent=4)
+
+    def load_plan(self, task_name):
+       try:
+          with open(task_name+'Plan.json', 'r') as f:
+             plan = json.load(f)
+             return plan
+       except Exception as e:
+          print(f'plan load failure {str(e)}')
+       return []
+    
     def analyze(self, prefix, form):
        self.sbar = None
        if prefix is None:
@@ -664,11 +706,10 @@ The plan may include four agents:
           else:
              print('***** user not satisfield, retrying')
          
-       #print(plan)
+       self.save_plan(self.prefix, plan)
        # experiment - did we get an understandable plan?
        step = self.interpreter.first(plan)
        print(step)
-       
        return plan     
 
 if __name__ == '__main__':

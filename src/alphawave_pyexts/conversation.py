@@ -916,6 +916,18 @@ register_conv_template(
     )
 )
 
+register_conv_template(
+    Conversation(
+        name="openchat",
+        system="",
+        roles=("GPT4 Correct User: ", "GPT4 Correct Assistant: ", "GPT4 CorrectUser: "),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.OPENORCA,
+        sep="<|end_of_turn|>",
+    )
+)
+
 if __name__ == "__main__":
     conv = get_conv_template("llama-2")
     conv.append_message('system', "You are a friendly AI")

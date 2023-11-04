@@ -30,7 +30,7 @@ from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave.ChoiceResponseValidator import ChoiceResponseValidator
 from alphawave.TOMLResponseValidator import TOMLResponseValidator
 from alphawave_pyexts import utilityV2 as ut
-from alphawave_pyexts import LLMClient as llm
+from alphawave_pyexts import LLMClient as lc
 from alphawave_pyexts import Openbook as op
 from alphawave.OSClient import OSClient
 from alphawave.OpenAIClient import OpenAIClient
@@ -119,7 +119,8 @@ class LLM():
       if top_p is None:
          top_p = float(self.ui.top_p_combo.currentText())
       options = PromptCompletionOptions(completion_type='chat', model=model,
-                                           temperature=temp, top_p= top_p, max_tokens=max_tokens, stop_on_json=stop_on_json)
+                                        temperature=temp, top_p= top_p, max_tokens=max_tokens,
+                                        stop_on_json=stop_on_json)
       try:
          prompt = Prompt(prompt_msgs)
          #print(f'ask prompt {prompt_msgs}')
@@ -193,7 +194,7 @@ class SamInnerVoice():
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
         self.load_conv_history()
-        self.llm = LLM(ui, self.memory)
+        self.llm = LLM(ui, self.memory, self.model)
         self.max_tokens = 4000
         self.keys_of_interest = ['title', 'abstract', 'uri']
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
@@ -246,9 +247,9 @@ class SamInnerVoice():
     def add_exchange(self, input, response):
        print(f'add_exchange {input} {response}')
        history = self.memory.get('history')
-       history.append({'role':llm.USER_PREFIX, 'content': input})
-       response = response.replace(llm.ASSISTANT_PREFIX+':', '')
-       history.append({'role': llm.ASSISTANT_PREFIX, 'content': response})
+       history.append({'role':lc.USER_PREFIX, 'content': input.strip()+'\n'})
+       response = response.replace(lc.ASSISTANT_PREFIX+':', '')
+       history.append({'role': lc.ASSISTANT_PREFIX, 'content': response.strip()+'\n'})
        self.memory.set('history', history)
 
     def historyEditor(self):
@@ -395,12 +396,13 @@ class SamInnerVoice():
           print(f' idle loop exception {str(e)}')
        return None
 
-    def recall(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
+    def recall(self, query, name=None, profile=None, retrieval_count=5, retrieval_threshold=.8):
        #
        ## this sloppy initial version builds the faiss index every time! pbly should move to weaviate
        #
        query_embed = self.embedder.encode(query)
-       
+       if name is None:
+          name = query.replace(' ', '').strip()
        # gather docs matching tag filter
        candidate_ids = []
        vectors = []
@@ -434,10 +436,11 @@ class SamInnerVoice():
        result = picker.exec()
        if result == QDialog.Accepted:
           selected_index = picker.selected_index()
+          print(f'Selected Item Index: {selected_index}') 
           if selected_index != -1:  # -1 means no selection
-             fullitem = {k: self.docHash[results[selected_index][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
-             self.active_workingMemory.append(short_form) # note this suggests we might want to store embedding elsewhere.
-             print(f'Selected Item Index: {selected_index}') 
+             fullitem = {k: self.docHash[results[selected_index][0]][k] for k in ["id", "key", "item", "notes", "timestamp"]}
+             print(f'fullitem: {fullitem}')
+             self.active_workingMemory.append(full_item) # note this suggests we might want to store embedding elsewhere.
        else:
          return
        return short_form
@@ -466,7 +469,7 @@ class SamInnerVoice():
           return 'store failed, duplicate id'
        if key is None:
           keys_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>'}}"""),
-                         ConversationHistory(240),
+                         ConversationHistory('history', 1000),
                          UserMessage(f'ITEM:\n{str(item)}')]
           keys_json = self.llm.ask(self.client, item, keys_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
           print(f' generated key: {keys_json}')
@@ -526,14 +529,14 @@ Please respond only in JSON format.
 """
 Available actions include:
 <ACTIONS>
-- tell: Provide a direct response. Use phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","value":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
+- tell: Provide a direct response to user input. Uses phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","value":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
 - question: Ask Doc a question. Example: {"action":"question","value":"How are you feeling today, Doc?"}
 - article: Retrieve a NYTimes article. Example: {"action":"article","value":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
-- gpt4: Pose a question to GPT-4. Example: {"action":"gpt4","value":"In Python on Linux, how can I list all subdirectories in a directory?"}
-- recall: Fetch content from working memory using a key string. Example: {"action":"recall","value":"Cognitive Architecture"}
-- store: Save a form in working memory. Example: {"action":"store","value":"BoardState: {\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}"}
-- web: Conduct a web search. Example: {"action":"web","value":"Weather forecast for Berkeley, CA for January 1, 2023"}
-- wiki: Search the local Wikipedia database. Example: {"action":"wiki","value":"What is the EPR paradox in quantum physics?"}
+- gpt4: Pose a question to GPT-4 for which an answer is not available from known fact or reasoning. Example: {"action":"gpt4","value":"In Python on Linux, how can I list all subdirectories in a directory?"}
+- recall: Retrieve an item from working memory using a query string and assign it a name. Example: {"action":"recall","value":"Cognitive Architecture", "name":"wm1"}
+- store: Save an item in working memory. Example: {"action":"store","value":"BoardState: {\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}"}
+- web: Conduct a web search for detailed or ephemeral or transient information not otherwise available. Example: {"action":"web","value":"Weather forecast for Berkeley, CA for January 1, 2023"}
+- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. Example: {"action":"wiki","value":"What is the EPR paradox in quantum physics?"}
 </ACTIONS>
 """
 
@@ -583,19 +586,14 @@ If you need impersonal information or world knowledge, consider using the 'wiki'
 If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
 The usual default action is to use tell to directly respond using 'tell'
 Respond only in JSON using the provided format.
-
-          <INPUT>
-          
-          {{$input}}
-          
-          </INPUT>
           """        
 
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
            SystemMessage(self.core_prompt(include_actions=True)),
-           ConversationHistory(200),
-           UserMessage(user_prompt)
+           ConversationHistory('history', 1000),
+           UserMessage(user_prompt),
+           UserMessage('{{$input}}')
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(self.client, input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
@@ -631,8 +629,9 @@ Respond only in JSON using the provided format.
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'retrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               print(f"calling self.tell with (content['value']")
+               print(f"calling self.tell with {content['value']}")
                full_tell = self.tell(content['value'], input, widget, short_profile)
+               print(f' etell returned {full_tell}')
                self.add_exchange(input, full_tell)
                return {"tell":full_tell}
             elif type(content) == dict and 'action' in content and content['action']=='web':
@@ -670,14 +669,15 @@ Respond only in JSON using the provided format.
                    result = self.store(value, profile=short_profile)
                    self.add_exchange(input, value)
                    return {"store":result}
-            else:
-               return {"none": ''}
 
-    def tell(self,theme, user_text, widget, short_profile):
+        if analysis is not None:
+           return {"unknown": analysis}
+
+    def tell(self, theme, user_text, widget, short_profile):
        print(f'SamCoT Doing extended tell')
-       #if widget is not None:
-       #   self.ui.display_response(theme+'\n')
-       user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Reasons for revision include:
+       response = None
+       try:
+          user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Reasons for revision include:
 1. Adding more detail to an incomplete informational response.
 2. Including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions, to make the conversation more personal and engaging.
 3. Inquiring or commenting on the user's mental or emotional state, to make the conversation more personal and engaging.
@@ -686,26 +686,27 @@ Limit your response to approximately 120 tokens if possible without degrading th
 Respond ONLY with the original response or your revision. Use this JSON format for your response:
 {{"response":"<revision or original response text>"}}
 """        
-       #print(f'action_selection {input}\n{response}')
-       prompt_msgs=[
-          SystemMessage(self.core_prompt(include_actions=False)),
-          ConversationHistory(600),
-          UserMessage(user_prompt)
-       ]
-       try:
+          prompt_msgs=[
+             SystemMessage(self.core_prompt(include_actions=False)),
+             ConversationHistory('history', 1000),
+             UserMessage(user_prompt)
+          ]
           response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
-          #response = self.llm.ask(self.client, user_text, prompt_msgs)
+
+          if response is not None:
+             response = response['response'] # get actual content from dict
+          if response is not None and theme is not None:
+             if len(response) > len(theme):
+                return '\n'+response+'\n'
+          if theme is not None:
+             return '\n'+theme+'\n'
+          if response is not None:
+             return '\n'+response+'\n'
+
        except Exception as e:
-          return f'expanded tell failure {str(e)}'
-       if type(response) is not None:
-          new_text = response
-          if len(new_text) > len(theme):
-             #self.ui.display_response(new_text+'\n')
-             return new_text+'\n'
-          else:
-             #self.ui.display_response(theme+'\n')
-             return theme
-       else: return f'expanded tell failure {theme}'
+          traceback.print_exc()
+          print(f'etell failure {str(e)}')
+       return '\ntell failure\n'
        
     def service_check(self, url, data=None, timeout_seconds=5):
        response = None
@@ -825,7 +826,7 @@ Respond ONLY with the original response or your revision. Use this JSON format f
              SystemMessage(profile_text.split('\n')[0:4]),
              UserMessage(f"""News:\n{self.news}
 Recent Topics:\n{self.current_topics}
-Recent Conversations:\n{self.format_conversation(4)},
+Recent Conversations:\n{self.format_conversation(8)},
 Doc is feeling:\n{self.docEs}
 Doc likes your curiousity about news, Ramana Maharshi, and his feelings. 
 Please do not repeat yourself. Your last reflection was:
