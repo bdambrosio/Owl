@@ -21,7 +21,7 @@ class MainWindow(QMainWindow):
 
         self.tableWidget = QTableWidget(self)
         self.tableWidget.setColumnCount(6)
-        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key", "Item", "Notes" "Timestamp", "Delete"])
+        self.tableWidget.setHorizontalHeaderLabels(["ID", "Key", "Item", "Notes", "Timestamp", "Delete"])
         self.tableWidget.setRowCount(len(self.docHash))
 
         idx = 0
@@ -32,7 +32,9 @@ class MainWindow(QMainWindow):
            self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry['item'])))
            if 'notes' in entry:
                self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry["notes"])))
-           else: self.tableWidget.setItem(idx, 3, QTableWidgetItem(""))
+           else:
+               entry['notes'] = ''
+               self.tableWidget.setItem(idx, 3, QTableWidgetItem(""))
            self.tableWidget.setItem(idx, 4, QTableWidgetItem(str(entry['timestamp'])))
            deleteButton = QPushButton("Delete")
            deleteButton.clicked.connect(lambda _, row=idx: self.deleteRow(row))

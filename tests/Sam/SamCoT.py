@@ -143,9 +143,6 @@ class TextEditDialog(QDialog):
     def __init__(self, static_text, editable_text, parent=None):
         super(TextEditDialog, self).__init__(parent)
         
-        self.init_ui(static_text, editable_text)
-        
-    def init_ui(self, static_text, editable_text):
         layout = QVBoxLayout(self)
         
         self.static_label = QLabel(static_text, self)
@@ -195,6 +192,7 @@ class SamInnerVoice():
         self.memory = VolatileMemory({'input':'', 'history':[]})
         self.load_conv_history()
         self.llm = LLM(ui, self.memory, self.model)
+        self.jsonValidator = JSONResponseValidator()
         self.max_tokens = 4000
         self.keys_of_interest = ['title', 'abstract', 'uri']
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
@@ -206,7 +204,8 @@ class SamInnerVoice():
         self.action_selection_occurred = False
         self.load_workingMemory()
         # active working memory is a list of working memory items inserted into select_action prompt
-        self.active_workingMemory = []
+        self.active_WM = {}
+        self.workingMemoryNewNameIndex = 1
         self.reflect_thoughts = ''
         get_city_state()
         self.nytimes = nyt.NYTimes()
@@ -359,7 +358,7 @@ class SamInnerVoice():
              SystemMessage(short_profile),
              SystemMessage(analysis_prompt_text),
              UserMessage("Doc's input: {{$input}}\n"),
-             #AssistantMessage(' ')
+             AssistantMessage(' ')
           ])
           analysis = ut.run_wave (self.client, {"input": lines}, analysis_prompt, prompt_options,
                                   self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
@@ -396,13 +395,100 @@ class SamInnerVoice():
           print(f' idle loop exception {str(e)}')
        return None
 
+
+    #
+    ## Working Memory routines - maybe split into separate file?
+    #
+
+
+    def create_AWM(self, item, notes=None, profile=None, history=None):
+       print(f'SamCoT store entry {item}')
+       result = self.confirmation_popup("create New Active Memory?", str(item))
+       if not result:
+          return " "
+       type = str
+       item = result
+       if type(item) is dict:
+          type=dict
+       else: # see if it is json in string form
+          try:
+             item = json.loads(item)
+             type=dict
+          except:
+             pass
+       id = generate_faiss_id(str(item))
+       if id in self.docHash:
+          id = id+1
+       key_prompt = [ConversationHistory('history', 120),
+                     SystemMessage(f"""Generate a short descriptive text string for the following item in context. Respond in JSON. Example: {{"key": '<a descriptive string>'}}"""),
+                      UserMessage(f'ITEM:\n{str(item)}'),
+                      AssistantMessage('')]
+       key_json = self.llm.ask(self.client, '', key_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
+       print(f' generated key: {key_json}')
+       if type(key_json) is dict and 'key' in key_json:
+          key = key_json['key']
+       else:
+          key = str(item)[:240]
+       embed = self.embedder.encode(key)
+       name = 'wm'+str(self.workingMemoryNewNameIndex)
+       self.workingMemoryNewNameIndex += 1
+       self.docHash[id] = {"id":id, "name": name, "item":item, "type": type, "key":key, "notes":notes, "embed":embed, "timestamp":datetime.now()}
+       self.active_WM[name]=self.docHash[id]
+       self.save_workingMemory()
+       return key
+
+    def edit_AWM (self):
+       names=[f"{self.active_WM[item]['name']}: {self.active_WM[item]['item'][:32]}" for item in self.active_WM]
+       picker = ListDialog(names)
+       result = picker.exec()
+       ids = list(self.active_WM.keys())
+       if result == QDialog.Accepted:
+          selected_index = picker.selected_index()
+          print(f'Selected Item Index: {selected_index}') 
+          if selected_index != -1:  # -1 means no selection
+             name = names[selected_indx]
+             self.samCoT.save_workingMemory() # save current working memory so we can edit it
+             he = subprocess.run(['python3', 'memoryEditor.py', item['id']])
+             if he.returncode == 0:
+                try:
+                   self.workingMemory = self.samCoT.load_workingMemory()
+                   return ''
+                except Exception as e:
+                   self.display_response(f'Failure to reload working memory {str(e)}')
+             else:
+                return 'edit failure, check logs'
+             
+       else:
+         return 'recall aborted by user'
+
+    def gc_AWM (self):
+       # aquire name through prompt
+       names=[f"{self.active_WM[item]['name']}: {self.active_WM[item]['item'][:32]}" for item in self.active_WM]
+       picker = ListDialog(names)
+       result = picker.exec()
+       if result == QDialog.Accepted:
+          selected_index = picker.selected_index()
+          name = items[selected_indx]
+          try:
+             del self.active_WM[name]
+             return ' '
+          except Exception as e:
+             print(f'attempt to release active_WM entry {name} failed {str(e)}')
+       else:
+         return 'recall aborted by user'
+
+    def save_AWM (self):
+       self.save_workingMemory()
+
     def recall(self, query, name=None, profile=None, retrieval_count=5, retrieval_threshold=.8):
        #
-       ## this sloppy initial version builds the faiss index every time! pbly should move to weaviate
+       ## note we create and carry around embedding, but never display it or put it in a prompt (I hope)
        #
        query_embed = self.embedder.encode(query)
        if name is None:
-          name = query.replace(' ', '').strip()
+          name = 'wm'+str(self.workingMemoryNewNameIndex)
+          self.workingMemoryNewNameIndex += 1
+          print(f'recall assigned name: {name}')
        # gather docs matching tag filter
        candidate_ids = []
        vectors = []
@@ -438,56 +524,13 @@ class SamInnerVoice():
           selected_index = picker.selected_index()
           print(f'Selected Item Index: {selected_index}') 
           if selected_index != -1:  # -1 means no selection
-             fullitem = {k: self.docHash[results[selected_index][0]][k] for k in ["id", "key", "item", "notes", "timestamp"]}
-             print(f'fullitem: {fullitem}')
-             self.active_workingMemory.append(full_item) # note this suggests we might want to store embedding elsewhere.
+             full_item = self.docHash[results[selected_index][0]]
+             full_item['name']=name
+             self.active_WM[name]=full_item # note this suggests we might want to store embedding elsewhere.
        else:
-         return
-       return short_form
+         return 'recall aborted by user'
+       return f"\n{name}:\n{full_item['item']}\n"
     
-    def store(self, item, key=None, notes=None, profile=None, history=None):
-       # opposite of recall
-       # ask AI to generate two keys to store this under
-       print(f'SamCoT store entry {item}')
-       if item is None:
-          return "failure, can't store None"
-       elif type(item) is dict:
-          type='json'
-       else:
-          try:
-             json_form = json.loads(item)
-             item = json_form
-             type='json'
-          except:
-             type= 'str'
-             pass
-       id = generate_faiss_id(item)
-       ida = id
-       idb = id+1
-       if ida in self.docHash:
-          print('duplicate id, error, skipping')
-          return 'store failed, duplicate id'
-       if key is None:
-          keys_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. Respond in JSON using format: {{"key1": '<a short descriptive string>'}}"""),
-                         ConversationHistory('history', 1000),
-                         UserMessage(f'ITEM:\n{str(item)}')]
-          keys_json = self.llm.ask(self.client, item, keys_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
-          print(f' generated key: {keys_json}')
-          if type(keys_json) is dict and 'key1' in keys_json:
-             key = keys_json['key1']
-       if key1 is None:
-          return 'Store key generation failure'
-       embed = self.embedder.encode(key)
-       self.docHash[ida] = {"id":ida, "item":item, "type": type, "key":key1, "notes":notes, "embed":embed, "timestamp":datetime.now()}
-       short_forma={k: self.docHash[ida][k] for k in ["key", "type", "item", "notes"]}
-       print(f'Storing {short_forma}')
-       # and save - write docHash first, we can always recover from that.
-       with open('SamDocHash.pkl', 'wb') as f:
-          data = {}
-          data['docHash'] = self.docHash
-          pickle.dump(data, f)
-       return key1
-
 
     def get_workingMemory_available_keys(self):
        wmkeys = []
@@ -522,42 +565,53 @@ To access full articles, use the action 'article'.
 {self.get_workingMemory_active_items()}
 </WORKING_MEMORY>
 
-Please respond only in JSON format.
-"""
-       if include_actions:
-          prompt +=\
-"""
-Available actions include:
-<ACTIONS>
-- tell: Provide a direct response to user input. Uses phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","value":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
-- question: Ask Doc a question. Example: {"action":"question","value":"How are you feeling today, Doc?"}
-- article: Retrieve a NYTimes article. Example: {"action":"article","value":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
-- gpt4: Pose a question to GPT-4 for which an answer is not available from known fact or reasoning. Example: {"action":"gpt4","value":"In Python on Linux, how can I list all subdirectories in a directory?"}
-- recall: Retrieve an item from working memory using a query string and assign it a name. Example: {"action":"recall","value":"Cognitive Architecture", "name":"wm1"}
-- store: Save an item in working memory. Example: {"action":"store","value":"BoardState: {\"1a\":\" \",\"1b\":\" \",\"1c\":\" \",\"2a\":\" \",\"2b\":\" \",\"2c\":\" \"}"}
-- web: Conduct a web search for detailed or ephemeral or transient information not otherwise available. Example: {"action":"web","value":"Weather forecast for Berkeley, CA for January 1, 2023"}
-- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. Example: {"action":"wiki","value":"What is the EPR paradox in quantum physics?"}
-</ACTIONS>
+<CONVERSATION_HISTORY>
+
 """
 
        return prompt
 
-    def get_workingMemory_active_keys(self):
+    def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
        # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': datetime.datetime(2023, 10, 28, 14, 57, 56, 765072)}, ...]
-       wm_active_keys = []
-       for item in self.active_workingMemory:
-          if 'key' in item:
-             wm_active_keys.append(item['key'])
-       return wm_active_keys
+       wm_active_names = []
+       for item in self.active_WM:
+          if 'name' in item:
+             wm_active_names.append(item['name'])
+       return wm_active_names
                         
     def get_workingMemory_active_items(self):
        # the idea here is to format current working memory entries for insertion into prompt
        workingMemory_str = ''
-       for entry in self.active_workingMemory:
-          workingMemory_str += f"\t{entry['key']}: {entry['item']}\n"
+       for entry in self.active_WM:
+          workingMemory_str += f"\t{self.active_WM[entry]['name']}: {self.active_WM[entry]['item']}\n"
        return workingMemory_str
-                        
+
+    def available_actions(self):
+       return """
+Respond only in JSON format.
+Available actions include:
+
+<ACTIONS>
+- tell: Provide a direct response to user input. Uses phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","response":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
+- question: Ask Doc a question. Example: {"action":"question","query": "How are you feeling today, Doc?"}
+- article: Retrieve a NYTimes article. Example: {"action":"article","title":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
+- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. Example: {"action":"gpt4","query":"In Python on Linux, how can I list all subdirectories in a directory?"}
+- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","query":"Cognitive Architecture"}
+- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text suitable for google search.  Example: {"action":"web","query":"Weather forecast for Berkeley, CA for January 1, 2023"}
+- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","query":"What is the EPR paradox in quantum physics?"}
+</ACTIONS>
+
+Given the following user input, determine which action is needed at this time.
+If there is an action directly specified in the input, select that action
+If you can respond to the input from known fact, logic, or reasoning, use the 'tell' action to respond directly.
+If you need more detail or personal information, consider using the 'question' action.
+If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
+If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
+The usual default action is to use tell to directly respond using 'tell'.
+Respond only in JSON as shown in the above examples.
+
+"""
 
     def action_selection(self, input, profile, widget):
         #
@@ -578,38 +632,23 @@ Available actions include:
                 "meta": "<parameter for action>"
             }
         }
-        user_prompt = """Given the following user input, determine which action is needed at this time.
-If there is an action directly specified in the input, select that action
-If you can respond to the input from known fact, logic, or reasoning, use the 'tell' action to respond directly.
-If you need more detail or personal information, consider using the 'question' action.
-If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
-If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
-The usual default action is to use tell to directly respond using 'tell'
-Respond only in JSON using the provided format.
-          """        
 
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
            SystemMessage(self.core_prompt(include_actions=True)),
            ConversationHistory('history', 1000),
-           UserMessage(user_prompt),
-           UserMessage('{{$input}}')
+           UserMessage(self.available_actions()+'<INPUT>\n{{$input}}\n</INPUT>'),
+           AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(self.client, input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
-        article_prompt_text = f"""In about 500 words, summarize the information in the following text with respect to its title {{$title}}. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
-
-        article_summary_msgs = [
-           SystemMessage(article_prompt_text),
-           UserMessage('{{$input}}'),
-        ]
         if type(analysis) == dict:
             content = analysis
             print(f'SamCoT content {content}')
             if type(content) == dict and 'action' in content and content['action']=='article':
-                title = content['value']
+                title = content['title']
                 print(f'Sam wants to read article {title}')
                 ok = self.confirmation_popup(f'Sam wants to retrieve', title)
                 if not ok: return {"none": ''}
@@ -620,45 +659,50 @@ Respond only in JSON using the provided format.
                    response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=15)
                    data = response.json()
                 except Exception as e:
-                   return {"article": f"retrieval failure, {str(e)}"}
-                summary = self.llm.ask(self.openAIClient, {"input":data['result']}, article_summary_msgs, max_tokens=650, model='gpt-3.5-turbo')
+                   return {"article": f"\nretrieval failure, {str(e)}"}
+                article_prompt_text = f"""In about 500 words, summarize the information in the following text with respect to its title '{title}'. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
+
+                article_summary_msgs = [
+                   SystemMessage(article_prompt_text),
+                   UserMessage('{{$input}}'),
+                   AssistantMessage('')
+                ]
+                summary = self.llm.ask(self.client, {"input":data['result']}, article_summary_msgs, max_tokens=650)
                 if type(summary) is dict and 'status' in summary and summary['status']=='success':
                    self.add_exchange(input, summary['message']['content'])
                    return {"article":  summary['message']['content']}
                 else:
                    self.add_exchange(input, f'retrieval failure {summary}')
-                   return {"article": f'retrieval failure {summary}'}
+                   return {"article": f'\nretrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               print(f"calling self.tell with {content['value']}")
-               full_tell = self.tell(content['value'], input, widget, short_profile)
-               print(f' etell returned {full_tell}')
+               full_tell = self.tell(content['response'], input, widget, short_profile)
                self.add_exchange(input, full_tell)
                return {"tell":full_tell}
             elif type(content) == dict and 'action' in content and content['action']=='web':
-                query = self.confirmation_popup('Web Search', content['value'])
+                query = self.confirmation_popup('Web Search', content['query'])
                 if query:
                    content = self.web(query, widget, short_profile)
                    self.add_exchange(query, content)
                    return {"web":content}
             elif type(content) == dict and 'action' in content and content['action']=='wiki':
-                query = self.confirmation_popup(content['action'], content['value'])
+                query = self.confirmation_popup(content['action'], content['query'])
                 if query:
                    found_text = self.wiki(query, short_profile)
                    self.add_exchange(query, found_text)
                    return {"wiki":found_text}
             elif type(content) == dict and 'action' in content and content['action']=='question':
-                query = self.confirmation_popup(content['action'], content['value'])
+                query = self.confirmation_popup(content['action'], content['query'])
                 self.add_exchange(input, query)
                 if query:
                    return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
-                query = self.confirmation_popup(content['action'], content['value'])
+                query = self.confirmation_popup(content['action'], content['query'])
                 if query:
                    text = self.gpt4(query, short_profile)
                    self.add_exchange(query, text)
                    return {"gpt4":text}
             elif type(content) == dict and 'action' in content and content['action']=='recall':
-                query = self.confirmation_popup(content['action'], content['value'])
+                query = self.confirmation_popup(content['action'], content['query'])
                 if query:
                    result = self.recall(query, profile=short_profile)
                    self.add_exchange(query, result)
@@ -674,29 +718,43 @@ Respond only in JSON using the provided format.
            return {"unknown": analysis}
 
     def tell(self, theme, user_text, widget, short_profile):
-       print(f'SamCoT Doing extended tell')
        response = None
        try:
-          user_prompt = f"""Input:\n{{{{$input}}}}\nCandidate Response:\{theme}.\nYour task is to review the Candidate Response for adequacy and respond either with the Candiate Response itself or with a revised version. Reasons for revision include:
+          user_prompt = f"""
+User Input:\\n{{{{$input}}}}\\nAssistant candidate response:\\n{theme}.\\nYour task is to review the candidate response for adequacy and respond either with the candiate response itself or with a revised version, using this format: 
+{{"tell":"<revision or original response text>"}}
+Reasons for revision include:
 1. Adding more detail to an incomplete informational response.
 2. Including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions, to make the conversation more personal and engaging.
 3. Inquiring or commenting on the user's mental or emotional state, to make the conversation more personal and engaging.
 Choose at most one of the above reasons for revision, with choice 1 the highest priority.
-Limit your response to approximately 120 tokens if possible without degrading the content responding directly to user input.
-Respond ONLY with the original response or your revision. Use this JSON format for your response:
-{{"response":"<revision or original response text>"}}
+Limit your response to approximately 140 tokens if possible without degrading the content responding directly to user input.
+Respond ONLY with the original response or your revision. 
+Use this JSON format for your response:
+{{"action":"tell", "response":"<revision or original response text>"}}
 """        
           prompt_msgs=[
              SystemMessage(self.core_prompt(include_actions=False)),
              ConversationHistory('history', 1000),
-             UserMessage(user_prompt)
+             UserMessage(self.available_actions()+'\n{{$input}}'),
+             AssistantMessage('')
           ]
           response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
-
-          if response is not None:
-             response = response['response'] # get actual content from dict
+          #response = self.llm.ask(self.client, user_text, prompt_msgs)
+          try:
+             print(f'etell raw response from ask: {response}')
+             responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
+                                                              remaining_attempts=0)
+             print(f'etell JSONValidator response: {responsej}')
+             if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
+                if 'valid' in responsej and responsej['valid']:
+                   response = responsej['value']
+          except Exception as e:
+             print(f'Exception parsing raw response as json {str(e)}')
+          if response is not None and type(response) is dict and 'response' in response:
+             response = response['response']
           if response is not None and theme is not None:
-             if len(response) > len(theme):
+             if len(response) > 0.9*len(theme): # prefer extended response even if a little shorter
                 return '\n'+response+'\n'
           if theme is not None:
              return '\n'+theme+'\n'
@@ -761,7 +819,7 @@ Respond ONLY with the original response or your revision. Use this JSON format f
 
     def get_keywords(self, text):
        prompt = Prompt([SystemMessage("Assignment: Extract keywords and named-entities from the conversation below.\nConversation:\n{{$input}}\n."),
-                        #AssistantMessage('')
+                        AssistantMessage('')
                         ])
        
        options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
@@ -774,26 +832,12 @@ Respond ONLY with the original response or your revision. Use this JSON format f
           return keywords
        else: return ''
        
-    def format_conversation(self, depth=-1):
-       # depth- only return last 'depth' says
-       names = {"### Response":'Sam', "### Instruction": 'Doc', "user":'Doc',"assistant":'Sam'}
-       output = ""
-       history = self.memory.get(history)
-       for d, say in enumerate(history):
-          if depth == -1 or d > len(history)-depth:
-             role = say['role']
-             name = names[role]
-             content = str(say['content']).strip()
-             output += f"{content}\n"
-       return output
-
-
     def topic_analysis(self,profile_text):
        keys_ents = self.get_keywords(self.memory.get('history'))
        print(f'keywords {keys_ents}')
        prompt = Prompt([SystemMessage("Assignment: Determine the main topics of a conversation based on the provided keywords below. The response should be an array of strings that represent the main topics discussed in the conversation based on the given keywords and named entities.\n"),
-                        UserMessage('Keywords and Named Entities:\n{{$input}}\n.')
-                        #AssistantMessage('')
+                        UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
+                        AssistantMessage('')
                         ])
        options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=50)
        response = ut.run_wave(self.client, {"input":keys_ents}, prompt, options,
@@ -824,15 +868,16 @@ Respond ONLY with the original response or your revision. Use this JSON format f
           self.last_tell_time = now
           prompt = Prompt([
              SystemMessage(profile_text.split('\n')[0:4]),
+             ConversationHistory('history', 1000),
              UserMessage(f"""News:\n{self.news}
 Recent Topics:\n{self.current_topics}
-Recent Conversations:\n{self.format_conversation(8)},
 Doc is feeling:\n{self.docEs}
 Doc likes your curiousity about news, Ramana Maharshi, and his feelings. 
 Please do not repeat yourself. Your last reflection was:
 {self.reflect_thoughts}
 Choose at most one thought to express.
-Limit your thought to 180 words.""")
+Limit your thought to 180 words."""),
+             AssistantMessage('')
           ])
           options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=2000, max_tokens=240)
           response = None
@@ -859,6 +904,7 @@ Limit your thought to 180 words.""")
       prompt = Prompt([
          SystemMessage(profile),
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
+         AssistantMessage('')
       ])
       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
       response = ut.run_wave(self.client, {"input":response}, prompt, options,
@@ -886,8 +932,9 @@ Limit your thought to 180 words.""")
        if len(query)> 0:
           prompt = Prompt([
              SystemMessage(short_profile),
-             UserMessage(self.format_conversation(4)),
+             ConversationHistory('history', 120),
              UserMessage(f'{query}'),
+             AssistantMessage('')
           ])
        options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=400)
        response = ut.run_wave(self.openAIClient, {"input":query}, prompt, options,

@@ -147,6 +147,7 @@ class ImageDisplay(QtWidgets.QWidget):
         layout.addWidget(self.label)
         # Load image file
         img_path = "Sam.png"
+        #img_path = "Sam_as_human.png"
         pixmap = QtGui.QPixmap(img_path).scaled(360, 360, Qt.KeepAspectRatio)
         rect = QRect(60,60, 240,240)
         pixmap = pixmap.copy(rect)
@@ -270,19 +271,37 @@ class ChatApp(QtWidgets.QWidget):
       self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
       self.on_prompt_combo_changed('Sam')
       
-      self.store_button = QPushButton("Store")
-      self.store_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.store_button.setFont(self.widgetFont)
-      self.store_button.clicked.connect(self.store)
-      control_layout.addWidget(self.store_button)
+      self.create_AWM_button = QPushButton("Create AWM")
+      self.create_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.create_AWM_button.setFont(self.widgetFont)
+      self.create_AWM_button.clicked.connect(self.create_AWM)
+      control_layout.addWidget(self.create_AWM_button)
       
-      self.history_button = QPushButton("History")
+      self.edit_AWM_button = QPushButton("Edit AWM")
+      self.edit_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.edit_AWM_button.setFont(self.widgetFont)
+      self.edit_AWM_button.clicked.connect(self.edit_AWM)
+      control_layout.addWidget(self.edit_AWM_button)
+      
+      self.save_AWM_button = QPushButton("Save AWM")
+      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.save_AWM_button.setFont(self.widgetFont)
+      self.save_AWM_button.clicked.connect(self.save_AWM)
+      control_layout.addWidget(self.save_AWM_button)
+      
+      self.gc_AWM_button = QPushButton("gc AWM")
+      self.gc_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.gc_AWM_button.setFont(self.widgetFont)
+      self.gc_AWM_button.clicked.connect(self.gc_AWM)
+      control_layout.addWidget(self.gc_AWM_button)
+      
+      self.history_button = QPushButton("History") # launch Conversation History editor
       self.history_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.history_button.setFont(self.widgetFont)
       self.history_button.clicked.connect(self.history)
       control_layout.addWidget(self.history_button)
       
-      self.wmem_button = QPushButton("WorkingMem")
+      self.wmem_button = QPushButton("WorkingMem") # launch working memory editor
       self.wmem_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.wmem_button.setFont(self.widgetFont)
       self.wmem_button.clicked.connect(self.workingMem)
@@ -419,6 +438,7 @@ Your task is to:
    def display_response(self, r):
       global PREV_LEN
       self.input_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+      r = str(r)
       encoded = self.codec.fromUnicode(r)
       # Decode bytes back to string
       decoded = encoded.data().decode('utf-8')
@@ -443,12 +463,12 @@ Your task is to:
          if type(action) == dict and 'tell' in action.keys():
             print(f'Sam tell return {action}')
             response = action['tell']+'\n'
-            self.display_response(response) # article summary text
+            self.display_response(response) 
 
          if type(action) == dict and 'article' in action.keys():
             #{"article":'<article body>'}
             # get and display article retrieval
-            response = 'Article summary:\n'+action['article']+'\n'
+            response = '\nArticle summary:\n'+action['article']+'\n'
             self.display_response(response) # article summary text
             #self.run_query('Comments?')
             return
@@ -469,7 +489,7 @@ Your task is to:
             return
          elif type(action) == dict and 'recall' in action.keys():
             #{"recall":'{"id":id, "key":key, "timestamp":timestamp, "item":text or json or ...}
-            self.display_response(action['recall']['item'])
+            self.display_response(action['recall'])
             return
          elif type(action) == dict and 'store' in action.keys():
             #{"store":'<key used to store item>'}
@@ -497,20 +517,29 @@ Your task is to:
       PREV_POS="1.0"
       PREV_LEN=0
    
-   def store(self):
+   def create_AWM(self): # create a new working memory item and put it in active memory
       global PREV_LEN, op#, vmem, vmem_clock
+      selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
          selectedText = cursor.selectedText()
          print(f'cursor has selected, len {len(selectedText)}')
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
-      selectedText = selectedText.strip()
-      if len(selectedText) > 0:
-         print(f'cursor has selected, len {len(selectedText)}')
-         self.samCoT.store(selectedText)
+         selectedText = selectedText.strip()
+      print(f'cursor has selected, len {len(selectedText)}')
+      self.samCoT.create_AWM(selectedText)
          
-   def workingMem(self):
+   def edit_AWM(self): # edit an active working memory item
+      self.samCoT.edit_AWM()
+         
+   def gc_AWM(self): # release a working memory item from active memory
+      self.samCoT.gc_AWM()
+         
+   def save_AWM(self): # save active working memory items
+      self.samCoT.save_AWM()
+         
+   def workingMem(self): # lauching working memory editor
       self.samCoT.save_workingMemory() # save current working memory so we can edit it
       he = subprocess.run(['python3', 'memoryEditor.py'])
       if he.returncode == 0:
@@ -520,7 +549,7 @@ Your task is to:
             self.display_response(f'Failure to reload working memory {str(e)}')
 
    def history(self):
-      self.samCoT.historyEditor() # save current working memory so we can edit it
+      self.samCoT.historyEditor() # save and display Conversation history for editting
 
    def on_timer_timeout(self):
       global profile, profile_text
@@ -528,11 +557,9 @@ Your task is to:
       response = self.samCoT.reflect(get_current_profile_prompt_text())
       print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
-         if 'sentiment_analysis' in response.keys():
-            self.add_exchange('', "Doc's feelings:\n"+response['sentiment_analysis']+'\n')
          if 'tell' in response.keys():
             self.display_response(response['tell'])
-            self.add_exchange('', response['tell'])
+            self.samCoT.add_exchange('reflect', response['tell'])
       self.timer.start(600000) # longer timeout when nothing happening
       #print('timer start')
 

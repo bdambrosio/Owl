@@ -24,15 +24,8 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower())]
-""" not needed any more, above collects all in Downloads/models
-models = ["Mistral-7B-OpenOrca-exl2",
-          "mistral-airoboros-7b-GPTQ",
-          "Nous-Hermes-70b-GPTQ",
-          "platypus2-70b-instruct-gptq",
-          "Spicyboros-70b-22-GPTQ",
-          ]
-"""
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower())]
+
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:

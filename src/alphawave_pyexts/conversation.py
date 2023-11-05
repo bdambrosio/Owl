@@ -455,6 +455,20 @@ register_conv_template(
         stop_token_ids=[50278, 50279, 50277, 1, 0],
     )
 )
+# Zephyr Beta template
+register_conv_template(
+    Conversation(
+        name="zephyr",
+        system="",
+        roles=("<|user|>", "<|assistant|>", "<|system|>"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
+        sep="</s>",
+        stop_str="<|user|>",
+        stop_token_ids=[2],
+    )
+)
 
 # Baize default template
 register_conv_template(
