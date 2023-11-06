@@ -271,7 +271,7 @@ class SamInnerVoice():
                       sanitized_history.append(d)
                    except Exception as e:
                       print(f' problem with this form in conversation history, skipping {d}')
-                      self.memory.set('history', sanitized_history)
+                self.memory.set('history', sanitized_history)
           except Exception as e:
              self.ui.display_response(f'Failure to reload conversation history {str(e)}')
 
@@ -387,11 +387,12 @@ class SamInnerVoice():
     #
 
 
-    def create_AWM(self, item, notes=None, profile=None, history=None):
+    def create_AWM(self, item, name=None, notes=None, confirm=True):
        print(f'SamCoT store entry {item}')
-       result = self.confirmation_popup("create New Active Memory?", str(item))
-       if not result:
-          return " "
+       if confirm:
+          result = self.confirmation_popup("create New Active Memory?", str(item))
+          if not result:
+             return " "
        item_type = 'str'
        item = result
        if type(item) is dict: item_type='dict'
@@ -408,15 +409,16 @@ class SamInnerVoice():
                      SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
                       UserMessage(f'ITEM:\n{str(item)}'),
                       AssistantMessage('')]
-       key_json = self.llm.ask(self.client, '', key_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
+       key_json = self.llm.ask(self.client, '', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
        print(f' generated key: {key_json}')
        if type(key_json) is dict and 'key' in key_json:
           key = key_json['key']
        else:
-          key = str(item)[:240]
+          key = str(item)[:120]
        embed = self.embedder.encode(key)
-       name = 'wm'+str(self.workingMemoryNewNameIndex)
-       self.workingMemoryNewNameIndex += 1
+       if name is None:
+          name = 'wm'+str(self.workingMemoryNewNameIndex)
+          self.workingMemoryNewNameIndex += 1
        self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
        self.active_WM[name]=self.docHash[id]
        self.save_workingMemory()
@@ -426,7 +428,6 @@ class SamInnerVoice():
        names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
        picker = ListDialog(names)
        result = picker.exec()
-       ids = list(self.active_WM.keys())
        if result == QDialog.Accepted:
           selected_index = picker.selected_index()
           print(f'Selected Item Index: {selected_index}') 
@@ -439,8 +440,9 @@ class SamInnerVoice():
                    show_item = item.copy()
                    if 'embed' in show_item:
                       del show_item['embed']
-                   print(f'item pre edit: {show_item}')
                    editted_item = self.confirmation_popup(name, json.dumps(show_item, indent=4))
+                   if not editted_item :
+                      return 'edit aborted by user'
                    json_item = json.loads(editted_item)
                 except Exception as e:
                    self.ui.display_response(f'invalid json {str(e)}')
@@ -687,8 +689,8 @@ Respond only in JSON as shown in the above examples.
                    return {"wiki":found_text}
             elif type(content) == dict and 'action' in content and content['action']=='question':
                 query = self.confirmation_popup(content['action'], content['query'])
-                self.add_exchange(input, query)
                 if query:
+                   self.add_exchange(input, query)
                    return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
                 query = self.confirmation_popup(content['action'], content['query'])
@@ -709,8 +711,10 @@ Respond only in JSON as shown in the above examples.
                    self.add_exchange(input, value)
                    return {"store":result}
 
-        if analysis is not None:
-           return {"unknown": analysis}
+        # fallthrough - do a tell
+        full_tell = self.tell('', input, widget, short_profile)
+        self.add_exchange(input, full_tell)
+        return {"tell":full_tell}
 
     def tell(self, theme, user_text, widget, short_profile):
        response = None
@@ -723,7 +727,7 @@ Reasons for revision include:
 2. Including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions, to make the conversation more personal and engaging.
 3. Inquiring or commenting on the user's mental or emotional state, to make the conversation more personal and engaging.
 Choose at most one of the above reasons for revision, with choice 1 the highest priority.
-Limit your response to approximately 140 tokens if possible without degrading the content responding directly to user input.
+Limit your response to approximately 200 tokens if possible without degrading the content responding directly to user input.
 Respond ONLY with the original response or your revision. 
 Use this JSON format for your response:
 {{"action":"tell", "response":"<revision or original response text>"}}
@@ -734,22 +738,25 @@ Use this JSON format for your response:
              UserMessage(self.available_actions()+'\n{{$input}}'),
              AssistantMessage('')
           ]
-          response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
-          #response = self.llm.ask(self.client, user_text, prompt_msgs)
+          #response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
+          response = self.llm.ask(self.client, user_text, prompt_msgs)
           try:
-             print(f'etell raw response from ask: {response}')
+             #print(f'etell raw response from ask: {response}')
              responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
                                                               remaining_attempts=0)
-             print(f'etell JSONValidator response: {responsej}')
+             #print(f'etell JSONValidator response: {responsej}')
              if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
                 if 'valid' in responsej and responsej['valid']:
                    response = responsej['value']
           except Exception as e:
              print(f'Exception parsing raw response as json {str(e)}')
+             return '\n'+theme+'\n'
           if response is not None and type(response) is dict and 'response' in response:
              response = response['response']
+          if response is not None and type(response) is dict:
+             response = str(response)
           if response is not None and theme is not None:
-             if len(response) > 0.9*len(theme): # prefer extended response even if a little shorter
+             if len(response) > len(theme): # prefer extended response even if a little shorter
                 return '\n'+response+'\n'
           if theme is not None:
              return '\n'+theme+'\n'

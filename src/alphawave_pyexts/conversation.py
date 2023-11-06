@@ -73,7 +73,9 @@ class Conversation:
                 )
             ])
         #print(f'ret: {ret}')
-        if (final_messages[-1][0] != "user"):print( f"Last message must be from user, got {messages[-1][0]}")
+        while (final_messages[-1][0] == "user"):
+            print( f"Last message must be from user, got {messages[-1][0]}")
+            final_messages = final_messages[:-1]
         ret_suffix =  f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}"
         #print(f'ret_suffix: {ret_suffix}')
         ret=ret+ret_suffix

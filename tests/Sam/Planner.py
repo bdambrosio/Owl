@@ -188,6 +188,12 @@ def load_conv_history():
         print(f'Failure to load conversation history {str(e)}')
         return []
 
+
+class InvalidAction(Exception):
+   # raised by parse_as_action
+   pass
+
+
 class LLM():
    def __init__(self, model='alpaca'):
         self.model = model
@@ -271,6 +277,8 @@ Your conversation style is warm, gentle, humble, and engaging. """
                 continue
              elif item['action'] == 'first':
                 return self.first(item)
+             elif item['action'] == 'assign':
+                return self.assign(item)
           return 'no item selected or no item found'
        return 'action not yet implemented'
     
@@ -296,8 +304,26 @@ Your conversation style is warm, gentle, humble, and engaging. """
             return None
 
 
-    def assign(self, literal, addr):
-       pass
+    def parse_as_action(self, item):
+       if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
+          self.ui.display_response(f'form is not an action {item}')
+          raise InvalidAction(str(item))
+       else:
+          return item['action'], item['arguments'], item['result']
+
+
+    def assign(self, action):
+       #
+       ## assign an item or literal as the value of a name
+       ## example: {"action":"assign", "arguments":"abc", "result":"pi35"}
+       ##   assigns the literal string 'abc' as the value of active memory name pi35 
+       ##   if pi35 is not present as a name in active memory, it is created 
+       ##   should we recreate key? Not clear, as use case and semantics of key is unclear.
+       ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
+       action, arguments, result = parse_as_action(self, action)
+       if type(result) != str: # target of assign must be a name 
+          raise InvalidAction(f'target of assign must be a name: {str(item)}')       
+       self.samCoT.create(arguments, name=result, confirm=False)
 
     def article(self, titleAddr):
        pass

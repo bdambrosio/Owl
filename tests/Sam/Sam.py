@@ -470,10 +470,9 @@ Your task is to:
                                                  self) # this last for async display
          # see if Sam needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
-            print(f'Sam tell return {action}')
             response = action['tell']+'\n'
             self.display_response(response) 
-
+            return
          if type(action) == dict and 'article' in action.keys():
             #{"article":'<article body>'}
             # get and display article retrieval
@@ -510,10 +509,8 @@ Your task is to:
             question = action['question'] # add something to indicate internal activity?
             self.display_response(question)
             return
-         elif type(action) == dict and 'unknown' in action.keys():
-            #{"ask":'<question>'}
-            text = action['unknown']
-            self.display_response(text)
+         else:
+            self.display_response(str(action))
             return
          
       # response = self.run_query(new_text)
