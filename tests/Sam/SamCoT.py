@@ -307,20 +307,6 @@ class SamInnerVoice():
        else:
           return False
 
-    def confirmation_popupb(self, action):
-       msg_box = QMessageBox()
-       msg_box.setWindowTitle("Confirmation")
-       self.action_text = action
-       msg_box.setText(f"Can Sam perform {action}?")
-       #msg_box.editTextChanged.connect(lambda x: self.action_text)
-       msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-       #msg_box.editTextChanged.connect(lambda x: self.action_text) # Add this line
-       retval = msg_box.exec_()
-       if retval == QMessageBox.Yes:
-          return self.action_text
-       elif retval == QMessageBox.No:
-          return False
-
     
     def logInput(self, input):
         with open('SamInputLog.txt', 'a') as log:
@@ -406,21 +392,20 @@ class SamInnerVoice():
        result = self.confirmation_popup("create New Active Memory?", str(item))
        if not result:
           return " "
-       type = str
+       item_type = 'str'
        item = result
-       if type(item) is dict:
-          type=dict
+       if type(item) is dict: item_type='dict'
        else: # see if it is json in string form
           try:
              item = json.loads(item)
-             type=dict
+             item_type='dict'
           except:
              pass
        id = generate_faiss_id(str(item))
        if id in self.docHash:
           id = id+1
        key_prompt = [ConversationHistory('history', 120),
-                     SystemMessage(f"""Generate a short descriptive text string for the following item in context. Respond in JSON. Example: {{"key": '<a descriptive string>'}}"""),
+                     SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
                       UserMessage(f'ITEM:\n{str(item)}'),
                       AssistantMessage('')]
        key_json = self.llm.ask(self.client, '', key_prompt, max_tokens=100, temp=0.3, stop_on_json=True, validator=JSONResponseValidator())
@@ -432,13 +417,13 @@ class SamInnerVoice():
        embed = self.embedder.encode(key)
        name = 'wm'+str(self.workingMemoryNewNameIndex)
        self.workingMemoryNewNameIndex += 1
-       self.docHash[id] = {"id":id, "name": name, "item":item, "type": type, "key":key, "notes":notes, "embed":embed, "timestamp":datetime.now()}
+       self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
        self.active_WM[name]=self.docHash[id]
        self.save_workingMemory()
        return key
 
     def edit_AWM (self):
-       names=[f"{self.active_WM[item]['name']}: {self.active_WM[item]['item'][:32]}" for item in self.active_WM]
+       names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
        picker = ListDialog(names)
        result = picker.exec()
        ids = list(self.active_WM.keys())
@@ -446,32 +431,42 @@ class SamInnerVoice():
           selected_index = picker.selected_index()
           print(f'Selected Item Index: {selected_index}') 
           if selected_index != -1:  # -1 means no selection
-             name = names[selected_indx]
-             self.samCoT.save_workingMemory() # save current working memory so we can edit it
-             he = subprocess.run(['python3', 'memoryEditor.py', item['id']])
-             if he.returncode == 0:
+             name = names[selected_index].split(':')[0]
+             item = self.active_WM[name]
+             valid_json = False
+             while not valid_json:
                 try:
-                   self.workingMemory = self.samCoT.load_workingMemory()
-                   return ''
+                   show_item = item.copy()
+                   if 'embed' in show_item:
+                      del show_item['embed']
+                   print(f'item pre edit: {show_item}')
+                   editted_item = self.confirmation_popup(name, json.dumps(show_item, indent=4))
+                   json_item = json.loads(editted_item)
                 except Exception as e:
-                   self.display_response(f'Failure to reload working memory {str(e)}')
-             else:
-                return 'edit failure, check logs'
-             
+                   self.ui.display_response(f'invalid json {str(e)}')
+                   continue
+                valid_json = True
+                self.active_WM[name]=json_item
+                item_w_embed = json_item.copy()
+                item_w_embed['embed'] = self.embedder.encode(json_item['key'])
+                self.docHash[json_item['id']] = item_w_embed
+                self.save_workingMemory()
+             return 'successful edit'
+          return 'no item selected'
        else:
-         return 'recall aborted by user'
+          return 'edit aborted by user'
 
     def gc_AWM (self):
        # aquire name through prompt
-       names=[f"{self.active_WM[item]['name']}: {self.active_WM[item]['item'][:32]}" for item in self.active_WM]
+       names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
        picker = ListDialog(names)
        result = picker.exec()
        if result == QDialog.Accepted:
           selected_index = picker.selected_index()
-          name = items[selected_indx]
+          name = names[selected_index].split(':')[0]
           try:
              del self.active_WM[name]
-             return ' '
+             return 'item released from Active memory '
           except Exception as e:
              print(f'attempt to release active_WM entry {name} failed {str(e)}')
        else:
@@ -511,13 +506,13 @@ class SamInnerVoice():
        # Compute score combining distance and recency
        scores = []
        for dist, id, ts in zip(distances[0], ids[0], timestamps):
-          age = (datetime.now() - ts).days
+          age = (time.time() - ts)/84400
           score = dist + age * 0.1 # Weighted
           scores.append((id, score))
        # Sort by combined score
        results = sorted(scores, key=lambda x: x[1])
-       #short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "type", "notes", "timestamp"]}
-       items=[f"{item[0]},{self.docHash[item[0]]['key']}, {self.docHash[item[0]]['item'][:60]}" for item in results]
+       #short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "item_type", "notes", "timestamp"]}
+       items=[f"{item[0]},{self.docHash[item[0]]['key']}, {str(self.docHash[item[0]]['item'])[:60]}" for item in results]
        picker = ListDialog(items)
        result = picker.exec()
        if result == QDialog.Accepted:
@@ -573,7 +568,7 @@ To access full articles, use the action 'article'.
 
     def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
-       # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': datetime.datetime(2023, 10, 28, 14, 57, 56, 765072)}, ...]
+       # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': time.time()}, ...]
        wm_active_names = []
        for item in self.active_WM:
           if 'name' in item:

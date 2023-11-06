@@ -40,12 +40,13 @@ from PyQt5.QtGui import QFont, QKeySequence
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec
 import concurrent.futures
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
-from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
+from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
+from SamCoT import ListDialog, LLM
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -126,7 +127,6 @@ action_primitive_names = \
 action_primitive_descriptions = \
 """
 [
-    {"action": "initialize", "arguments": "name1, type", "result": "None", "description": "initialize an empty entity of the specified type (List, Item, etc.) with the given name."},
     {"action": "none", "arguments": "None", "result": "None", "description": "no action is needed."},
     {"action": "append", "arguments": "name1, name2", "result": "name3", "description": "append the Item name1 to List name2, and assign the resulting list to name3"},
     {"action": "article", "arguments": "name1", "result": "name2", "description": "access the article title named name1, use it to retrieve the article body, and assign it to name2."},
@@ -215,8 +215,10 @@ class LLM():
          return None
        
 class PlanInterpreter():
-    def __init__(self, planner, profile=None, history=None, model='alpaca'):
+    def __init__(self, ui, samCoT, planner, profile=None, history=None, model='alpaca'):
         self.model = model
+        self.ui = ui
+        self.samCoT = samCoT
         self.client = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
         self.llm = LLM()
@@ -238,46 +240,41 @@ Your conversation style is warm, gentle, humble, and engaging. """
         self.profile = self.personality
         #self.op = op.OpenBook() # comment out for testing.
 
-        self.nytimes = nyt.NYTimes()
-        self.news, self.details = self.nytimes.headlines()
-        self.articles = []
-        item_number = 1
-        for key in self.details.keys():
-            for item in self.details[key]:
-                self.articles.append({f"news_article{item_number}": item['title'] })
-                self.wmWrite(f"news_article{item_number}", item['title'])
-                item_number += 1
-        #print(f'Plan interpreter {self.articles}')
-        self.wmWrite('news', self.articles)
-
-    def confirmation_popup(self, action):
-       msg_box = QMessageBox()
-       msg_box.setWindowTitle("Confirmation")
-       self.action_text = action
-       msg_box.setText(f"Can Sam perform {action}?")
-       msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-       #msg_box.editTextChanged.connect(lambda x: self.action_text) # Add this line
-       retval = msg_box.exec_()
-       if retval == QMessageBox.Yes:
-          return self.action_text
-       elif retval == QMessageBox.No:
-          return False
-
-    
-    def format_conversation(self, history, depth=-1):
-       # depth- only return last 'depth' says
-       names = {"### Response":'Sam', "### Instruction": 'Doc'}
-       output = ""
-       for d, say in enumerate(history):
-          if depth == -1 or d > len(history)-depth:
-             role = say['role']
-             name = names[role]
-             content = str(say['content']).strip()
-             output += f"{content}\n"
-       return output
 
    
-    def LLM_1op(self, operation_prompt, data1=None, data2=None, validator = DefaultResponseValidator()):
+    def eval_AWM (self):
+       #
+       ## note this and samCoT should be written in a way that doesn't require direct access/manipulation of samCoT data!
+       #
+       names=[f"{self.samCoT.active_WM[item]['name']}: {str(self.samCoT.active_WM[item]['item'])[:32]}" for item in self.samCoT.active_WM]
+       valid_json = False
+       while not valid_json: # loop untill we have found a valid json item that is an action
+          picker = ListDialog(names)
+          result = picker.exec()
+          if result != QDialog.Accepted:
+             return 'user aborted eval'
+          selected_index = picker.selected_index()
+          if selected_index == -1:  # -1 means no selection
+             return 'user failed to select entry for eval'
+             name = names[selected_index].split(':')[0]
+             entry = self.samCoT.active_WM[name]
+             if type(entry['item']) != dict:
+                try:
+                   json_item = json.loads(entry['item'])
+                except Exception as e:
+                   self.ui.display_response(f'invalid json {str(e)}')
+                   continue
+             valid_json=True
+             # ok, item is a dict, let's see if it is an action
+             if 'action' not in item:
+                self.ui.display_response(f'item is not an action {item}')
+                continue
+             elif item['action'] == 'first':
+                return self.first(item)
+          return 'no item selected or no item found'
+       return 'action not yet implemented'
+    
+    def LLM_one_op(self, operation_prompt, data1=None, data2=None, validator = DefaultResponseValidator()):
         planner_core_text = f"""."""
         analysis_prompt = Prompt([
             SystemMessage(planner_core_text),
@@ -305,50 +302,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
     def article(self, titleAddr):
        pass
     
-    def wmRead(self, addr):
-        #
-        ## retrieve from working memory
-        #
-        addr_embed = self.embedder.encode(addr)
-        # gather docs matching tag filter
-        vectors = []
-        distances, all_ids = self.wmIndex.search(addr_embed.reshape(1,-1), 10)
-        ids = [id for id in all_ids[0] if id != -1]
-        distances = distances[0][:len(ids)]
-        print(f'weRead d {distances} ids {ids}')
-        data = None
-        if len(ids) > 0:
-            timestamps = [self.wmMetaData[i]['timestamp'] for i in ids]
-            # Compute score combining distance and recency
-            scores = []
-            for dist, id, ts in zip(distances, ids, timestamps):
-                if id == -1: # means no more entries
-                    continue
-                age = (datetime.now() - ts).days
-                score = dist + age * 0.1 # Weighted
-                scores.append((id, score))
-                # Sort by combined score
-                results = sorted(scores, key=lambda x: x[1])
-                return self.wmHash[results[0][0]]
-        return None
-
-    def wmWrite(self, addr, value):
-        embed = self.embedder.encode(addr)
-        id = generate_faiss_id(addr)
-        #print(f'wmWrite faiss_id {id}')
-        if id in self.wmHash:
-            print('duplicate, skipping')
-        self.wmIndex.add_with_ids(embed.reshape(1,-1), np.array([id]))
-        self.wmHash[id] = value
-        self.wmMetaData[id] = {"embed": embed, "timestamp":datetime.now()}
-        # and save - write wmHash first, we can always recover from that.
-        #with open('SamPlanWmHash.pkl', 'wb') as f:
-        #    data = {}
-        #    data['wmHash'] = self.wmHash
-        #    data['wmMetaData'] = self.wmMetaData
-        #    pickle.dump(data, f)
-        return value
-
     def choose(self, criterion, List):
        prompt = Prompt([
           SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
@@ -365,7 +318,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
 
     def first(self, List):
        prompt = Prompt([
-          SystemMessage('The following is a list of steps. Each step starts with the word "Step". Please select and respond with only the first entry. Include the entire first entry in your response.'),
+          SystemMessage('The following is a list. Please select and respond with only the first entry. Include the entire first entry in your response.'),
           UserMessage(f'List:\n{List}\n')
        ])
     
@@ -393,76 +346,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
           return answer
        else: return 'unknown'
 
-
-    def summarize(self, query, response):
-      prompt = Prompt([
-         SystemMessage(self.profile),
-         UserMessage(f'Following is a Context and a Value.  to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
-      ])
-      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
-      response = ut.run_wave(self.client, {"input":response}, prompt, options,
-                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                             logRepairs=False, validator=DefaultResponseValidator())
-      if type(response) == dict and 'status' in response and response['status'] == 'success':
-         answer = response['message']['content']
-         return answer
-      else: return 'unknown'
-
-    def wiki(self, query):
-       short_profile = self.profile.split('\n')[0]
-       query = query.strip()
-       #
-       #TODO rewrite query as answer (HyDE)
-       #
-       if len(query)> 0:
-          wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response)
-          return wiki_lookup_summary
-
-    def gpt4(self, query):
-       short_profile = self.profile.split('\n')[0]
-       query = query.strip()
-       if len(query)> 0:
-          prompt = Prompt([
-             SystemMessage(short_profile),
-             UserMessage(self.format_conversation(self.cvHistory, 4)),
-             UserMessage(f'{query}'),
-          ])
-       options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=200)
-       response = ut.run_wave(self.openAIClient, {"input":query}, prompt, options,
-                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                             logRepairs=False, validator=DefaultResponseValidator())
-       if type(response) == dict and 'status' in response and response['status'] == 'success':
-          answer = response['message']['content']
-          print(f'gpt4 answered')
-          return answer
-       else: return {'none':''}
-
-    def web(self, query='', widget=None):
-       query = query.strip()
-       self.web_widget = widget
-       if len(query)> 0:
-          self.web_query = query
-          self.web_profile = self.profile.split('\n')[0]
-          self.web_history = self.cvHistory
-          self.worker = WebSearch(query)
-          self.worker.finished.connect(self.web_search_finished)
-          self.worker.start()
-     
-    def web_search_finished(self, search_result):
-      if 'result' in search_result:
-         response = ''
-         if type(search_result['result']) == list:
-            for item in search_result['result']:
-               if self.web_widget is not None:
-                  self.web_widget.display_response('* '+item['source']+'\n')
-                  self.web_widget.display_response('     '+item['text']+'\n\n')
-               response += item['text']+'\n'
-         elif type(search_result['result']) is str:
-            if self.web_widget is not None:
-               self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
-            response = self.summarize(self.web_query, search_result['result']+'\n')
-         return response
 
     def test_executable(self, value):
        global action_primitive_descriptions, action_primitive_names
@@ -549,8 +432,10 @@ class Planner():
     #
     ### we should 1 or 2 shot planner requests to LLM so it knows format!
     #
-    def __init__(self, model='alpaca'):
+    def __init__(self, ui, samCoT, model='alpaca'):
        self.model = model
+       self.ui = ui
+       self.samCoT = samCoT
        self.client = OSClient(api_key=None)
        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
        self.llm = LLM(self.model)
@@ -565,7 +450,7 @@ class Planner():
        self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
-       self.interpreter = PlanInterpreter(self, model=self.model)
+       self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, model=self.model)
 
 
     def save_plan(self, task_name, plan):

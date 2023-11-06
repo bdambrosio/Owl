@@ -35,6 +35,7 @@ from vlite.main import VLite
 import ipinfo
 import nyt
 from SamCoT import SamInnerVoice
+from Planner import Planner, PlanInterpreter
 
 #NYT_API_KEY = os.getenv("NYT_API_KEY")
 
@@ -191,6 +192,8 @@ class ChatApp(QtWidgets.QWidget):
 
       self.samCoT = SamInnerVoice(self, model = model)
       self.memory_display = None
+      self.planner = Planner(self, self.samCoT)
+      self.interpreter = self.planner.interpreter
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)
       # Set the background color for the entire window
@@ -283,17 +286,23 @@ class ChatApp(QtWidgets.QWidget):
       self.edit_AWM_button.clicked.connect(self.edit_AWM)
       control_layout.addWidget(self.edit_AWM_button)
       
-      self.save_AWM_button = QPushButton("Save AWM")
-      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.save_AWM_button.setFont(self.widgetFont)
-      self.save_AWM_button.clicked.connect(self.save_AWM)
-      control_layout.addWidget(self.save_AWM_button)
+      self.eval_AWM_button = QPushButton("Eval AWM")
+      self.eval_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.eval_AWM_button.setFont(self.widgetFont)
+      self.eval_AWM_button.clicked.connect(self.eval_AWM)
+      control_layout.addWidget(self.eval_AWM_button)
       
       self.gc_AWM_button = QPushButton("gc AWM")
       self.gc_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.gc_AWM_button.setFont(self.widgetFont)
       self.gc_AWM_button.clicked.connect(self.gc_AWM)
       control_layout.addWidget(self.gc_AWM_button)
+      
+      self.save_AWM_button = QPushButton("Save AWM")
+      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.save_AWM_button.setFont(self.widgetFont)
+      self.save_AWM_button.clicked.connect(self.save_AWM)
+      control_layout.addWidget(self.save_AWM_button)
       
       self.history_button = QPushButton("History") # launch Conversation History editor
       self.history_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
@@ -532,6 +541,9 @@ Your task is to:
          
    def edit_AWM(self): # edit an active working memory item
       self.samCoT.edit_AWM()
+         
+   def eval_AWM(self): # edit an active working memory item
+      self.interpreter.eval_AWM()
          
    def gc_AWM(self): # release a working memory item from active memory
       self.samCoT.gc_AWM()
