@@ -36,9 +36,7 @@ import ipinfo
 import nyt
 from SamCoT import SamInnerVoice
 
-#NYT_API_KEY = os.getenv("NYT_API_KEY")
-
-NYT_API_KEY="TvKkanLr8T42xAUml7MDlUFGXC3G5AxA"
+NYT_API_KEY = os.getenv("NYT_API_KEY")
 
 # find out where we are
 

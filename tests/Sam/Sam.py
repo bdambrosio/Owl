@@ -39,8 +39,6 @@ from Planner import Planner, PlanInterpreter
 
 #NYT_API_KEY = os.getenv("NYT_API_KEY")
 
-NYT_API_KEY="TvKkanLr8T42xAUml7MDlUFGXC3G5AxA"
-
 # find out where we are
 
 def get_city_state():
@@ -94,28 +92,24 @@ def get_profile(profile, theme):
 
 CURRENT_PROFILE_PROMPT_TEXT = ''
 
-def get_current_profile_prompt_text():
+def get_cururent_profile_prompt_text():
    return CURRENT_PROFILE_PROMPT_TEXT
 
 
 FORMAT=True
 PREV_LEN=0
-#print(f' models: {llm.get_available_models()}')
+#print(f' template: {llm.get_available_models()}')
 parser = argparse.ArgumentParser()
 #parser.add_argument('model', type=str, default='wizardLM', choices=['guanaco', 'wizardLM', 'zero_shot', 'vicuna_v1.1', 'dolly', 'oasst_pythia', 'stablelm', 'baize', 'rwkv', 'openbuddy', 'phoenix', 'claude', 'mpt', 'bard', 'billa', 'h2ogpt', 'snoozy', 'manticore', 'falcon_instruct', 'gpt_35', 'gpt_4'],help='select prompting based on modelto load')
 
-model = ''
-modelin = input('model name? ').strip()
-if modelin is not None and len(modelin)>1:
-   model = modelin.strip()
-   models = llm.get_available_models()
-   while model not in models:
-      print(models)
-      modelin = input('model name? ').strip()
-      model=modelin
+template = 'bad'
+models = llm.get_available_models()
+while template not in models:
+   if template.startswith('gpt'):
+      break
+   template = input('template name? ').strip()
       
 #server = OSClient.OSClient(apiKey=None)
-
 
 def setFormat():
    global FORMAT
@@ -137,25 +131,35 @@ port = 5004
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.image_files = ["images/Sam.png", "images/Sam_as_human.png","images/Sam_as_human2.png"]
+        self.current_image_index=0
         # Create layout manager
         layout = QtWidgets.QVBoxLayout()
-        #self.setWindowFlags(Qt.FramelessWindowHint)
         self.setWindowTitle('Sam')
         layout.setContentsMargins(2, 2, 2, 2)
         self.setLayout(layout)
-        # Add label to display text
         self.label = QtWidgets.QLabel("")
         layout.addWidget(self.label)
         # Load image file
-        img_path = "Sam.png"
-        #img_path = "Sam_as_human.png"
-        pixmap = QtGui.QPixmap(img_path).scaled(360, 360, Qt.KeepAspectRatio)
-        rect = QRect(60,60, 240,240)
-        pixmap = pixmap.copy(rect)
-        self.label.setStyleSheet('background-image: url(%s);' % img_path)
-        self.label.setPixmap(pixmap)
+        self.update_image()
         self.resize(240,240)
         self.show()
+
+    def update_image(self):
+        """Updates the displayed image."""
+        img_path = self.image_files[self.current_image_index]
+        pixmap = QtGui.QPixmap(img_path).scaled(360, 360, Qt.KeepAspectRatio)
+        rect = QRect(60, 60, 240, 240)
+        pixmap = pixmap.copy(rect)
+        self.label.setPixmap(pixmap)
+
+    def mousePressEvent(self, event):
+        """Handle mouse press events to change the image on left click."""
+        if event.button() == Qt.LeftButton:
+            # Increment the index. If at the end of the list, go back to the start.
+            self.current_image_index = (self.current_image_index + 1) % len(self.image_files)
+            # Update the image displayed
+            self.update_image()
 
 class MemoryDisplay(QtWidgets.QWidget):
    def __init__(self):
@@ -190,7 +194,7 @@ class ChatApp(QtWidgets.QWidget):
       super().__init__()
       global model
 
-      self.samCoT = SamInnerVoice(self, model = model)
+      self.samCoT = SamInnerVoice(self, template = template)
       self.memory_display = None
       self.planner = Planner(self, self.samCoT)
       self.interpreter = self.planner.interpreter
@@ -466,7 +470,7 @@ Your task is to:
       if profile == 'Sam':
          self.samCoT.logInput(new_text)
          action = self.samCoT.action_selection(new_text,
-                                                 get_current_profile_prompt_text(),
+                                                 self.get_current_profile_prompt_text(),
                                                  self) # this last for async display
          # see if Sam needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
@@ -563,7 +567,7 @@ Your task is to:
    def on_timer_timeout(self):
       global profile, profile_text
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
-      response = self.samCoT.reflect(get_current_profile_prompt_text())
+      response = self.samCoT.reflect(self.get_current_profile_prompt_text())
       print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'tell' in response.keys():

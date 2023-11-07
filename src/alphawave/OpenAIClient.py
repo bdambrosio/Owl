@@ -49,7 +49,8 @@ class OpenAIClient(PromptCompletionClient):
         #
         if isinstance(options, dict):
             argoptions = options
-            options = PromptCompletionOptions(completion_type = argoptions['completion_type'], model = argoptions['model'])
+            #options = PromptCompletionOptions(completion_type = argoptions['completion_type'], model = argoptions['model'])
+            options = PromptCompletionOptions(completion_type = argoptions['completion_type'], model = 'gpt_4')
             update_dataclass(options, **argoptions)
         if hasattr(options, 'max_input_tokens') and getattr(options, 'max_input_tokens') is not None:
             max_input_tokens = options.max_input_tokens

@@ -52,7 +52,16 @@ today = date.today().strftime("%b-%d-%Y")
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
 sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
+
 openai_api_key = os.getenv("OPENAI_API_KEY")
+# List all available models
+try:
+    models = openai.Model.list()
+    for model in models.data:
+        print(model.id)
+except openai.error.OpenAIError as e:
+    print(e)
+
 
 def get_city_state():
    api_key = os.getenv("IPINFO")
@@ -61,8 +70,6 @@ def get_city_state():
    city, state = response.city, response.region
    return city, state
 city, state = get_city_state()
-
-NYT_API_KEY="TvKkanLr8T42xAUml7MDlUFGXC3G5AxA"
 
 # find out where we are
 
@@ -86,6 +93,8 @@ hour = local_time.tm_hour
 host = '127.0.0.1'
 port = 5004
 
+GPT4='gpt-4-1106-preview'
+
 def generate_faiss_id(document):
     hash_object = hashlib.sha256()
     hash_object.update(document.encode("utf-8"))
@@ -94,14 +103,16 @@ def generate_faiss_id(document):
     return faiss_id
 
 class LLM():
-   def __init__(self, ui, memory, model='alpaca'):
-        self.model = model
+   def __init__(self, ui, memory, osClient, openAIClient, template='alpaca'):
         self.ui = ui # needed to get current ui temp, max_tokens
+        self.openAIClient=openAIClient
+        self.memory = memory
+        self.osClient= osClient
+        self.template = template # default prompt template.
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-        self.memory = memory
 
-   def ask(self, client, input, prompt_msgs, model=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
+   def ask(self, input, prompt_msgs, client=None, template=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
       """ Example use:
           class_prefix_prompt = [SystemMessage(f"Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}")]
           prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
@@ -110,15 +121,20 @@ class LLM():
              prefix = prefix_json['name']
       """
 
-      if model is None:
-         model = self.model
+      if template is None:
+         template = self.template
       if max_tokens is None:
          max_tokens= int(self.ui.max_tokens_combo.currentText())
       if temp is None:
          temp = float(self.ui.temp_combo.currentText())
       if top_p is None:
          top_p = float(self.ui.top_p_combo.currentText())
-      options = PromptCompletionOptions(completion_type='chat', model=model,
+
+      if 'gpt' in template:
+         client = self.openAIClient
+      else:
+         client = self.osClient
+      options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
                                         stop_on_json=stop_on_json)
       try:
@@ -128,7 +144,7 @@ class LLM():
          # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
          response = ut.run_wave (client, {"input":input}, prompt, options,
                                  self.memory, self.functions, self.tokenizer, validator=validator)
-         #print(f'ask response {response}')
+         print(f'ask response {response}')
          if type(response) is not dict or 'status' not in response or response['status'] != 'success':
             return None
          content = response['message']['content']
@@ -182,16 +198,16 @@ class ListDialog(QDialog):
         return self.list_widget.currentRow()
 
 class SamInnerVoice():
-    def __init__(self, ui, model):
+    def __init__(self, ui, template):
         self.ui = ui
-        self.model = model
-        self.client = OSClient(api_key=None)
+        self.template = template
+        self.osClient = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
         self.load_conv_history()
-        self.llm = LLM(ui, self.memory, self.model)
+        self.llm = LLM(ui, self.memory, self.osClient, self.openAIClient, self.template)
         self.jsonValidator = JSONResponseValidator()
         self.max_tokens = 4000
         self.keys_of_interest = ['title', 'abstract', 'uri']
@@ -200,7 +216,7 @@ class SamInnerVoice():
         self.current_topics = None # topics under discussion - mostly a keyword list
         self.last_tell_time = int(time.time()) # how long since last tell
         # create wiki search engine
-        self.op = op.OpenBook()
+        self.op = None # lazy init
         self.action_selection_occurred = False
         self.load_workingMemory()
         # active working memory is a list of working memory items inserted into select_action prompt
@@ -261,10 +277,7 @@ class SamInnerVoice():
                 data = pickle.load(f)
                 history = data['history']
                 # test each form for sanity
-                sanitized_history = [
-                   {"role": "### Instruction", "content": "What is the meaning of life?"},
-                   {"role": "### Response", "content": "I don't know. I've read that some believe that life's purpose lies in self-discovery and growth, while others think it's about contributing positively to society. There's also the idea that perhaps there isn't a single 'purpose', but rather opportunities for meaningful experiences. What do you think?"},
-                ]
+                sanitized_history = [ ]
                 for d in history:
                    try:
                       s = json.dumps(d) # only doing this to test form, don't really care about result
@@ -336,7 +349,7 @@ class SamInnerVoice():
 
           #lines = inputLog.split('\n')
           lines = inputLog[-4000:]
-          prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=150)
+          prompt_options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=150)
         
           analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own."""
 
@@ -393,8 +406,8 @@ class SamInnerVoice():
           result = self.confirmation_popup("create New Active Memory?", str(item))
           if not result:
              return " "
+          item = result
        item_type = 'str'
-       item = result
        if type(item) is dict: item_type='dict'
        else: # see if it is json in string form
           try:
@@ -409,7 +422,7 @@ class SamInnerVoice():
                      SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
                       UserMessage(f'ITEM:\n{str(item)}'),
                       AssistantMessage('')]
-       key_json = self.llm.ask(self.client, '', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+       key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
        print(f' generated key: {key_json}')
        if type(key_json) is dict and 'key' in key_json:
           key = key_json['key']
@@ -521,8 +534,10 @@ class SamInnerVoice():
           selected_index = picker.selected_index()
           print(f'Selected Item Index: {selected_index}') 
           if selected_index != -1:  # -1 means no selection
-             full_item = self.docHash[results[selected_index][0]]
+             full_item = self.docHash[results[selected_index][0]].copy()
              full_item['name']=name
+             if 'embed' in full_item: # remove embed from active memory items
+                del full_item['embed']
              self.active_WM[name]=full_item # note this suggests we might want to store embedding elsewhere.
        else:
          return 'recall aborted by user'
@@ -638,7 +653,7 @@ Respond only in JSON as shown in the above examples.
            AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
-        analysis = self.llm.ask(self.client, input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
+        analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
         if type(analysis) == dict:
@@ -664,10 +679,10 @@ Respond only in JSON as shown in the above examples.
                    UserMessage('{{$input}}'),
                    AssistantMessage('')
                 ]
-                summary = self.llm.ask(self.client, {"input":data['result']}, article_summary_msgs, max_tokens=650)
-                if type(summary) is dict and 'status' in summary and summary['status']=='success':
-                   self.add_exchange(input, summary['message']['content'])
-                   return {"article":  summary['message']['content']}
+                summary = self.llm.ask({"input":data['result']}, article_summary_msgs, max_tokens=650)
+                if summary is not None:
+                   self.add_exchange(input, summary)
+                   return {"article":  summary}
                 else:
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'\nretrieval failure {summary}'}
@@ -712,6 +727,7 @@ Respond only in JSON as shown in the above examples.
                    return {"store":result}
 
         # fallthrough - do a tell
+        print(f'tell fallthrough')
         full_tell = self.tell('', input, widget, short_profile)
         self.add_exchange(input, full_tell)
         return {"tell":full_tell}
@@ -738,8 +754,8 @@ Use this JSON format for your response:
              UserMessage(self.available_actions()+'\n{{$input}}'),
              AssistantMessage('')
           ]
-          #response = self.llm.ask(self.client, user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
-          response = self.llm.ask(self.client, user_text, prompt_msgs)
+          #response = self.llm.ask(user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
+          response = self.llm.ask(user_text, prompt_msgs)
           try:
              #print(f'etell raw response from ask: {response}')
              responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
@@ -808,7 +824,7 @@ Use this JSON format for your response:
           wakeup_messages += 'Hi Doc.\n'
        self.nytimes = nyt.NYTimes()
        self.news, self.details = self.nytimes.headlines()
-       #if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'model':'gpt-3.5-turbo'}, timeout_seconds=20):
+       #if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'template':'gpt-3.5-turbo'}, timeout_seconds=20):
        #   wakeup_messages += f' - is web search service started?\n'
        if not self.service_check("http://192.168.1.195:5004", data={'prompt':'You are an AI','query':'who are you?','max_tokens':10}):
           wakeup_messages += f' - is llm service started?\n'
@@ -824,11 +840,7 @@ Use this JSON format for your response:
                         AssistantMessage('')
                         ])
        
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=50)
-       response = ut.run_wave(self.client, {"input":text}, prompt, options,
-                                      self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                                      logRepairs=False, validator=DefaultResponseValidator())
-       
+       response = llm.ask({"input":text}, prompt, temperature=0.2, max_tokens=50)
        if type(response) == dict and 'status' in response and response['status'] == 'success':
           keywords = response['message']['content']
           return keywords
@@ -841,10 +853,7 @@ Use this JSON format for your response:
                         UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
                         AssistantMessage('')
                         ])
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=50)
-       response = ut.run_wave(self.client, {"input":keys_ents}, prompt, options,
-                                      self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                                      logRepairs=False, validator=DefaultResponseValidator())
+       response = llm.ask({"input":keys_ents}, prompt, temperature=0.1, max_tokens=50)
        if type(response) == dict and 'status' in response and response['status'] == 'success':
           topic = response['message']['content']
           print(f'topic_analysis topics{topic}')
@@ -881,11 +890,10 @@ Choose at most one thought to express.
 Limit your thought to 180 words."""),
              AssistantMessage('')
           ])
-          options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.4, max_input_tokens=2000, max_tokens=240)
           response = None
           try:
-             response = ut.run_wave(self.client, {"input":''}, prompt, options,
-                                 self.memory, self.functions, self.tokenizer)
+             response = self.llm.ask({"input":''}, prompt, options, max_tokens=240)
+    
           except Exception as e:
              traceback.print_exc()
           print(f'LLM tell response {response}')
@@ -908,14 +916,10 @@ Limit your thought to 180 words."""),
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
          AssistantMessage('')
       ])
-      options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
-      response = ut.run_wave(self.client, {"input":response}, prompt, options,
-                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                             logRepairs=False, validator=DefaultResponseValidator())
-      if type(response) == dict and 'status' in response and response['status'] == 'success':
-         answer = response['message']['content']
-         return answer
-      else: return 'unknown'
+      response = llm.ask({"input":response}, prompt, template = self.template, temperature=.1, max_tokens=400)
+      if response is not None:
+         return '\nWiki Summary:\n'+response+'\n'
+      else: return 'wiki lookup and summary failure'
 
     def wiki(self, query, profile):
        short_profile = profile.split('\n')[0]
@@ -924,6 +928,8 @@ Limit your thought to 180 words."""),
        #TODO rewrite query as answer (HyDE)
        #
        if len(query)> 0:
+          if self.op is None:
+             self.op = op.OpenBook()
           wiki_lookup_response = self.op.search(query)
           wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
           return wiki_lookup_summary
@@ -938,12 +944,9 @@ Limit your thought to 180 words."""),
              UserMessage(f'{query}'),
              AssistantMessage('')
           ])
-       options = PromptCompletionOptions(completion_type='chat', model='gpt-4', temperature = 0.1, max_tokens=400)
-       response = ut.run_wave(self.openAIClient, {"input":query}, prompt, options,
-                             self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                             logRepairs=False, validator=DefaultResponseValidator())
-       if type(response) == dict and 'status' in response and response['status'] == 'success':
-          answer = response['message']['content']
+       response = llm.ask({"input":query}, prompt, model=gpt4, max_tokens=400)
+       if response is not None:
+          answer = response
           print(f'gpt4 answered')
           return answer
        else: return {'gpt4':'query failure'}
@@ -989,7 +992,7 @@ class WebSearch(QThread):
          self.finished.emit(result)  # Emit the result string.
          
    def long_running_task(self):
-      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model=gpt-3.5-turbo')
+      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={gpt4}')
       data = response.json()
       return data
 

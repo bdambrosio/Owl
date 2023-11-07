@@ -95,7 +95,7 @@ class JSONResponseValidator(PromptResponseValidator):
             template_suffix = f' Respond using this template:\n{template}\n'
         
         raw_text = message if isinstance(message, str) else message.get('content', '')
-        #print(f'***** JSONResponseValidator input {raw_text}')
+        print(f'***** JSONResponseValidator input {raw_text}')
         # Parse the response text
         text = re.sub('\n+', '\n', raw_text)
         cleaned_text = ""

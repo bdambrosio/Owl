@@ -262,26 +262,32 @@ Your conversation style is warm, gentle, humble, and engaging. """
           selected_index = picker.selected_index()
           if selected_index == -1:  # -1 means no selection
              return 'user failed to select entry for eval'
-             name = names[selected_index].split(':')[0]
-             entry = self.samCoT.active_WM[name]
-             if type(entry['item']) != dict:
-                try:
-                   json_item = json.loads(entry['item'])
-                except Exception as e:
+          name = names[selected_index].split(':')[0]
+          entry = self.samCoT.active_WM[name]
+          print(f'selected action: {entry}')
+          if type(entry['item']) != dict:
+             try:
+                print(f"trying item string as json {entry['item']}")
+                dict_item = json.loads(entry['item'].strip())
+             except Exception as e:
+                print(f"json loads failed, trying (gasp!) eval")
+                dict_item = eval(entry['item'].strip())
+                if type(dict_item) != dict:
                    self.ui.display_response(f'invalid json {str(e)}')
                    continue
-             valid_json=True
-             # ok, item is a dict, let's see if it is an action
-             if 'action' not in item:
-                self.ui.display_response(f'item is not an action {item}')
-                continue
-             elif item['action'] == 'first':
-                return self.first(item)
-             elif item['action'] == 'assign':
-                return self.assign(item)
+                
+          valid_json=True
+          # ok, item is a dict, let's see if it is an action
+          if 'action' not in dict_item:
+             self.ui.display_response(f'item is not an action {item}')
+             continue
+          elif dict_item['action'] == 'first':
+             return self.first(dict_item)
+          elif dict_item['action'] == 'assign':
+             return self.assign(dict_item)
           return 'no item selected or no item found'
        return 'action not yet implemented'
-    
+   
     def LLM_one_op(self, operation_prompt, data1=None, data2=None, validator = DefaultResponseValidator()):
         planner_core_text = f"""."""
         analysis_prompt = Prompt([
@@ -320,10 +326,11 @@ Your conversation style is warm, gentle, humble, and engaging. """
        ##   if pi35 is not present as a name in active memory, it is created 
        ##   should we recreate key? Not clear, as use case and semantics of key is unclear.
        ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
-       action, arguments, result = parse_as_action(self, action)
+       print(f'assign {action}')
+       action, arguments, result = self.parse_as_action(action)
        if type(result) != str: # target of assign must be a name 
           raise InvalidAction(f'target of assign must be a name: {str(item)}')       
-       self.samCoT.create(arguments, name=result, confirm=False)
+       self.samCoT.create_AWM(arguments, name=result, confirm=False)
 
     def article(self, titleAddr):
        pass
@@ -497,7 +504,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
        if prefix is None:
           prefix = 'tempClassName'
           class_prefix_prompt = [SystemMessage(f"""Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}""")]
-          prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
+          prefix_json = self.llm.ask(form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
           print(f'***** prefix response {prefix_json}')
           if type(prefix_json) is dict and 'name' in prefix_json.keys():
              prefix = prefix_json['name']
@@ -526,7 +533,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
        for step, instruction in interview_instructions:
           messages.append(UserMessage(instruction))
           if step != 'observations':
-             user_prompt = self.llm.ask(self.client, self.model, messages, temp = 0.05)
+             user_prompt = self.llm.ask('', messages, temp = 0.05)
              print(f"\nAI : {step}, {user_prompt}")
              past = ''
              if self.sbar is not None and type(self.sbar) is dict and step in self.sbar.keys():
@@ -540,7 +547,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
              messages.append(AssistantMessage(user_prompt))
              messages.append(UserMessage(user_input))
           else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
-             observations = self.llm.ask(self.client, self.model, messages, max_tokens=150,temp = 0.05)
+             observations = self.llm.ask('', messages, max_tokens=150,temp = 0.05)
              user_responses['observations']=observations
              print(f"\nAI : {step}, {observations}")
              user_response = input("User: ")
@@ -605,7 +612,7 @@ The plan may include four agents:
              messages.append(UserMessage(revision_prompt))
           
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask(self.openAIClient, '', messages, model='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
+          plan = self.llm.ask('', messages, template='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
           print(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
