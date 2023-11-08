@@ -37,7 +37,7 @@ import nyt
 from SamCoT import SamInnerVoice
 from Planner import Planner, PlanInterpreter
 
-#NYT_API_KEY = os.getenv("NYT_API_KEY")
+NYT_API_KEY = os.getenv("NYT_API_KEY")
 
 # find out where we are
 
