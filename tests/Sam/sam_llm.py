@@ -24,7 +24,7 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or '01' in d.lower())]
 
 
 model_number = -1
@@ -40,6 +40,7 @@ while model_number < 0 or model_number > len(models) -1:
 
 
 config = ExLlamaV2Config()
+config.scale_alpha_value=2
 config.model_dir = models_dir+models[model_number]
 config.prepare()
 
@@ -49,7 +50,7 @@ model.load([19, 24])
 
 tokenizer = ExLlamaV2Tokenizer(config)
 
-cache = ExLlamaV2Cache(model)
+cache = ExLlamaV2Cache(model, max_seq_len=6144)
 
 # Initialize generator
 
@@ -83,6 +84,7 @@ async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False)
     open_braces = 0
     open_brace_seen = False
     complete_json_seen = False
+    text = ''
     while True:
         chunk, eos, _ = generator.stream()
         generated_tokens += 1
@@ -95,9 +97,13 @@ async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False)
             if open_brace_seen and open_braces == 0:
                 complete_json_seen = True
         print (chunk, end = "")
-        
+        text += chunk
         yield chunk
-        if eos or generated_tokens == max_new_tokens or (stop_on_json and complete_json_seen):
+
+        # note test for '[INST]' is a hack because we don't send template-specific stop strings yes
+        if (eos or generated_tokens == max_new_tokens or
+            (stop_on_json and complete_json_seen) or
+            ('[INST]' in text or '</s>' in text or '<|endoftext|>' in text)):
             print('\n')
             break
 

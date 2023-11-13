@@ -116,7 +116,6 @@ def run_wave (client, input, prompt, prompt_options, memory, functions, tokenize
                      logRepairs = logRepairs)
 
     response = wave.completePrompt()
-    # Ensure response succeeded
     return {
       'type': "TaskResponse",
       'status': response['status'],

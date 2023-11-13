@@ -14,12 +14,24 @@ from promptrix.AssistantMessage import AssistantMessage
 from promptrix.ConversationHistory import ConversationHistory
 from alphawave_pyexts import utilityV2 as ut
 from alphawave_pyexts import LLMClient as llm
+from alphawave.DefaultResponseValidator import DefaultResponseValidator
+from alphawave.JSONResponseValidator import JSONResponseValidator
+from alphawave.ChoiceResponseValidator import ChoiceResponseValidator
+from alphawave.TOMLResponseValidator import TOMLResponseValidator
+from alphawave_pyexts import utilityV2 as ut
+from alphawave_pyexts import LLMClient as lc
+from alphawave_pyexts import Openbook as op
+from alphawave.OSClient import OSClient
+from alphawave.OpenAIClient import OpenAIClient
+from alphawave.alphawaveTypes import PromptCompletionOptions
+
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 temperature=0.1
 top_p = 1
 max_tokens=100
 FORMAT='FORMAT'
-prompt_text = ''
+prompt_text = 'you are a chatty ai.'
 PROMPT = Prompt([
     SystemMessage(prompt_text),
     ConversationHistory('history', .5),
@@ -39,6 +51,51 @@ if modelin is not None and len(modelin)>1:
         print(models)
         modelin = input('model name? ').strip()
         model=modelin
+
+class LLM():
+   def __init__(self, memory, osClient, openAIClient, template='alpaca'):
+        self.openAIClient=openAIClient
+        self.memory = memory
+        self.osClient= osClient
+        self.template = template # default prompt template.
+        self.functions = FunctionRegistry()
+        self.tokenizer = GPT3Tokenizer()
+
+   def ask(self, input, prompt_msgs, client=None, template=None, temp=0.1, max_tokens=512, top_p=1.0, stop_on_json=False, validator=DefaultResponseValidator()):
+      """ Example use:
+          class_prefix_prompt = [SystemMessage(f"Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}")]
+          prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
+          print(f'***** prefix response {prefix_json}')
+          if type(prefix_json) is dict and 'name' in prefix_json:
+             prefix = prefix_json['name']
+      """
+
+      if template is None:
+         template = self.template
+      if 'gpt' in template:
+         client = self.openAIClient
+      else:
+         client = self.osClient
+      options = PromptCompletionOptions(completion_type='chat', model=template,
+                                        temperature=temp, top_p= top_p, max_tokens=max_tokens,
+                                        stop_on_json=stop_on_json)
+      try:
+         prompt = Prompt(prompt_msgs)
+         #print(f'ask prompt {prompt_msgs}')
+         # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
+         # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
+         response = ut.run_wave (client, {"input":input}, prompt, options,
+                                 self.memory, self.functions, self.tokenizer, validator=validator)
+         print(f'ask response {response}')
+         if type(response) is not dict or 'status' not in response or response['status'] != 'success':
+            return None
+         content = response['message']['content']
+         return content
+      except Exception as e:
+         traceback.print_exc()
+         print(str(e))
+         return None
+       
 
 def set(text):
     global temperature, top_p, max_tokens
@@ -85,30 +142,8 @@ def setPrompt(input_text):
     elif input_text.startswith("F"):
         input_text = 'Respond as a friendly, chatty young woman named Samantha.Limit your response to 100 words where possible.'
         print(f'prompt set to: {input_text}')
-    elif input_text.startswith("R"):
-        input_text =\
-            """Define steps as:
-orient: identify the task
-thought: think step by step about the task. Identify ambiguities or logical consequences in the problem statement that impact your response to the task.
-action: act to further progress on the task. Your available acts are:
-i. answer: if the answer is available, respond with answer then respond STOP
-ii. logic: use known fact or logical reasoning based on known fact to expand on thought, then respond with reasoning.
-iii. ask: ask user a question to clarify the task. Display: question, Display: STOP
-iv. search: use the llmsearch plugin to search the web for question based on thought
-observation: revise or refine the task given thought and results of action
-
-Define react as:
-For step in steps: perform step
-askUser 'should we continue?'
-Display STOP
-
-Assistant will concisely display all orient, thought, action, and observation
-Assistant will follow the instructions in react above to respond to all questions and tasks.
-"""
-        print(f'prompt set to: {input_text}')
     else:
-        print(f'valid prompts are N(one), H(elpful), B(hagavan), A(CT), F(riend), R(eact)')
-    
+        print(f'valid prompts are N(one), H(elpful), B(hagavan), A(CT), F(riend)')
     
     memory.set('prompt_text', input_text)
     PROMPT = Prompt([
@@ -138,7 +173,6 @@ def render_text_completion():
         text = as_text.output
     return text
 
-# Render the prompt for a Text Completion call
 def render_messages_completion():
     #print(f"\n***** chat memory pre render input: \n{memory.get('input')}")
     #print(f"***** chat memory pre render \n{memory.get('history')}\n")
@@ -152,28 +186,33 @@ def render_messages_completion():
 host = '127.0.0.1'
 port = 5004
 
-def run_query(query):
+temperature=0.1
+top_p = 1.0
+max_tokens=256
+
+def run_query(llm, query):
     global model, temperature, top_p, max_tokens, memory
     response = ''
     try:
-        memory.set('input', query)
-        if FORMAT:
-            msgs = render_messages_completion()
-            for msg in msgs:
-                print(str(msg))
-            response = ut.ask_LLM(model, msgs, int(max_tokens), float(temperature), float(top_p), host, port)
-            history = memory.get('history')
-            history.append({'role':llm.USER_PREFIX, 'content': query.strip()})
-            response = response.replace(llm.ASSISTANT_PREFIX+':', '')
-            response = response.replace(llm.ASSISTANT_PREFIX, '')
-            history.append({'role': llm.ASSISTANT_PREFIX, 'content': response.strip()})
-            memory.set('history', history)
-        else:
-            # just send the raw input text to server
-            llm.run_query(model, query, int(max_tokens), float(temperature), float(top_p), host, port)
+        msgs = [
+            SystemMessage('{{$prompt_text}}'),
+            ConversationHistory('history', .5),
+            UserMessage('{{$input}}')
+        ]
+        response = llm.ask(query, msgs, template=model, max_tokens=int(max_tokens), temp=float(temperature), top_p=float(top_p))
+        history = memory.get('history')
+        history.append({'role':'user', 'content': query.strip()})
+        history.append({'role': 'assistant', 'content': response.strip()})
+        memory.set('history', history)
     except Exception:
         traceback.print_exc()
     return response
+
+osClient = OSClient(api_key=None)
+openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
+memory = VolatileMemory({'input':'', 'history':[]})
+memory.set('prompt_text', prompt_text)
+llm = LLM(memory, osClient, openAIClient, model)
 
 while True:
     ip = input('?')
@@ -188,4 +227,4 @@ while True:
         elif 'clear' in ip:
             clear()
     else:
-        print(run_query(ip.strip()))
+        print(run_query(llm, ip.strip()))

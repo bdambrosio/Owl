@@ -31,7 +31,6 @@ from alphawave_pyexts import utilityV2 as ut
 from alphawave_pyexts import LLMClient as llm
 from alphawave_pyexts import Openbook as op
 from alphawave import OSClient
-from vlite.main import VLite
 import ipinfo
 import nyt
 from SamCoT import SamInnerVoice
@@ -131,7 +130,8 @@ port = 5004
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.image_files = ["images/Sam.png", "images/Sam_as_human.png","images/Sam_as_human2.png"]
+        self.image_files = ["images/Sam.png", "images/Sam_as_human.png","images/Sam_as_human2.png", "images/yiCoach.png",
+                            "images/jnani1.png","images/jnani2.png"]
         self.current_image_index=0
         # Create layout manager
         layout = QtWidgets.QVBoxLayout()

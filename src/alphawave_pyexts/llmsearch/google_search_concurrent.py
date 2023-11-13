@@ -90,16 +90,14 @@ def process_urls(query_phrase, keywords, keyword_weights, urls, search_level, cl
         try:
             while len(urls) > 0 or len(in_process) >0:
                 # empty queue if out of time
-                if (search_level==NORMAL_SEARCH and (len(full_text) > 1600 or time.time()-start_time > 18)
-                    or (search_level==QUICK_SEARCH  and (len(full_text) > 1200 or time.time()-start_time > 12))):
+                if len(full_text) > max_chars or time.time()-start_time > 16:
                     urls = []
                 elif len(urls) > 0:
                     url = urls[0]
                     urls = urls[1:]
                     # set timeout so we don't wait for a slow site forever
-                    timeout = 16-int(time.time()-start_time)
-                    if search_level==NORMAL_SEARCH:
-                        timeout = timeout+8
+                    timeout = 20-int(time.time()-start_time)
+
                     future = executor.submit(process_url, query_phrase, keywords, keyword_weights, url, timeout, client, model, memory, functions, tokenizer, max_chars)
                     in_process.append(future)
                     #print(f'added one to in_process {len(urls)}, {len(in_process)}')
@@ -132,7 +130,7 @@ def process_urls(query_phrase, keywords, keyword_weights, urls, search_level, cl
             executor.shutdown(wait=False)
         return response
 
-def extract_subtext(text, query_phrase, keywords, keyword_weights):
+def extract_subtext(text, query_phrase, keywords, keyword_weights, max_chars):
     ###  maybe we should score based on paragraphs, not lines?
     sentences = ut.reform(text)
     sentence_weights = {}
@@ -149,7 +147,7 @@ def extract_subtext(text, query_phrase, keywords, keyword_weights):
     for keyword in keyword_weights.keys():
         max_sentence_weight += keyword_weights[keyword]
     for i in range(max_sentence_weight,1,-1):
-        if len(final_text)>3000 and i < max(1, int(max_sentence_weight/4)): # make sure we don't miss any super-important text
+        if len(final_text)> 3000 and i < max(1, int(max_sentence_weight/4)): # make sure we don't miss any super-important text
             return final_text
         for sentence in sentences:
             if len(final_text)+len(sentence)>3001 and i < max(1, int(max_sentence_weight/4)):
@@ -194,8 +192,8 @@ def log_url_process(site, reason, raw_text, extract_text, gpt_text):
 
 
 def llm_tldr (text, query, client, model, memory, functions, tokenizer, max_chars):
-    text = text[:max_chars] # make sure we don't run over token limit
-    prompt = Prompt([UserMessage('Analyze the following Text to identify if there is any content relevant to the query {{$query}}, Respond using this JSON template:\n\n{"relevant": "Yes" if there is any text found in the input that is relevant to the query, "No" otherwise>, "tldr": "<relevant content found in Text, rewritten coherence>"}\n\nText:\n{{$input}}\n. ')])
+    #text = text[:max_chars] # make sure we don't run over token limit
+    prompt = Prompt([UserMessage('Analyze the following Text to identify if there is any content relevant to the query:\n{{$query}}.\nRespond using this JSON template:\n\n{"relevant": "Yes" if there is any text found in the input that is relevant to the query, "No" otherwise>, "extract": "<all relevant content found in Text, with irrelevant text removed. >"}\n\nText:\n{{$input}}\n. ')])
     response_text=''
     completion = None
     schema = {
@@ -207,28 +205,28 @@ def llm_tldr (text, query, client, model, memory, functions, tokenizer, max_char
                 "type": "string",
                 "description": "Yes if any relevant text, otherwise No"
             },
-            "tldr": {
+            "extract": {
                 "type": "string",
-                "description": "relevant extract from Text, or empty string"
+                "description": "relevant full extract from Text, or empty string"
             }
         },
-        "required":["relevant", "tldr"],
+        "required":["relevant", "extract"],
         "returns":"extract"
     }
     
-    options = PromptCompletionOptions(completion_type='chat', model=model)
+    options = PromptCompletionOptions(completion_type='chat', model=model, max_tokens= int(max_chars/4))
     # don't clutter primary memory with tldr stuff
     fork = MemoryFork(memory)
     response = ut.run_wave(client, {'input':text, 'query':query}, prompt, options, fork, functions, tokenizer, validator=JSONResponseValidator(schema))
-    #print(f'\n***** google llm_tldr processing \n{response}')
+    print(f'\n***** google llm_tldr processing \n{response}')
     if type(response) == dict and 'status' in response and response['status'] == 'success'and 'message' in response:
         message = response['message']
         if type(message) != dict:
             try:
                 message = json.loads(message)
             except Exception as e:
-                if message.find('tldr')> 0:
-                    return message[message.find('tldr'):]
+                if message.find('extract')> 0:
+                    return message[message.find('extract'):]
                 else:
                     return ''
         if 'content' in message:
@@ -238,10 +236,12 @@ def llm_tldr (text, query, client, model, memory, functions, tokenizer, max_char
                     content = json.loads(content.strip())
                 except Exception as e:
                     return ''
-            if 'relevant' in content and 'yes' in str(content['relevant']).lower() and 'tldr' in content:
-                #print(f"***** google llm_tldr\n{content['tldr']}\n")
-                return content['tldr']
-    return ''
+            if 'relevant' in content and 'yes' in str(content['relevant']).lower() and 'extract' in content:
+                #print(f"***** google llm_tldr\n{content['extract']}\n")
+                return content['extract']
+    else:
+        print(f'google llm_tldr response is not a dict')
+        return ''
     
 
 def response_text_extract(query_phrase, keywords, keyword_weights, url, response, get_time, client, model, memory, functions, tokenizer, max_chars):
@@ -256,14 +256,14 @@ def response_text_extract(query_phrase, keywords, keyword_weights, url, response
         for e in elements:
             stre = str(e).replace('  ', ' ')
             str_elements.append(stre)
-        extract_text = extract_subtext(str_elements, query_phrase, keywords, keyword_weights)
+        extract_text = extract_subtext(str_elements, query_phrase, keywords, keyword_weights, int(max_chars))
         print(extract_text)
     if len(extract_text.strip()) < 8:
         return ''
 
     # now ask openai to extract answer
     response = ''
-    response = llm_tldr(extract_text, query_phrase, client, model, memory, functions, tokenizer, max_chars)
+    response = llm_tldr(extract_text, query_phrase, client, model, memory, functions, tokenizer, int(max_chars))
     return response
 
 def extract_items_from_numbered_list(text):

@@ -53,7 +53,7 @@ class OpenAIClient(PromptCompletionClient):
             options = PromptCompletionOptions(completion_type = argoptions['completion_type'], model = 'gpt_4')
             update_dataclass(options, **argoptions)
         if hasattr(options, 'max_input_tokens') and getattr(options, 'max_input_tokens') is not None:
-            max_input_tokens = options.max_input_tokens
+            max_input_tokens = int(options.max_input_tokens)
         result = prompt.renderAsMessages(memory, functions, tokenizer, max_input_tokens)
         if result.tooLong:
             return {'status': 'too_long', 'message': f"Prompt length of {result.length} tokens exceeds max_input_tokens of {max_input_tokens}."}
@@ -71,6 +71,8 @@ class OpenAIClient(PromptCompletionClient):
             if jsonbody[key] is None:
                 del jsonbody[key]
         
+        #if 'max_tokens' in request:
+        #    request['max_tokens'] = int(request['max_tokens'])
         if self.options['logRequests']:
             print(Colorize.title('CHAT PROMPT:'))
             for msg in result.output:
@@ -93,24 +95,6 @@ class OpenAIClient(PromptCompletionClient):
             #print(Colorize.output(response.json()))
         return {'status': 'success', 'message': str(result['choices'][0]['message']['content'])}
 
-        """
-        if response.status_code < 300:
-            completion = response.json().get('choices')[0]
-            return {'status': 'success', 'message': completion.get('message', {'role': 'assistant', 'content': ''})}
-        elif response.status_code == 429:
-            if self.options['logRequests']:
-                print(Colorize.title('HEADERS:'))
-                print(Colorize.output(response.headers))
-            return {'status': 'rate_limited', 'message': 'The chat completion API returned a rate limit error.'}
-        elif response.status_code == 503:
-            if self.options['logRequests']:
-                print(Colorize.title('HEADERS:'))
-                print(Colorize.output(response.headers))
-            return {'status': 'server unavailable', 'message': 'The chat completion API returned server unavailable or overloaded.'}
-        else:
-            return {'status': 'error', 'message': f"The chat completion API returned an error status of {response.status_code}: {response.reason}"}
-        """
-        
     def addRequestHeaders(self, headers: Dict[str, str], options: OpenAIClientOptions):
         headers['Authorization'] = f"Bearer {options['apiKey']}"
         if options['organization']:

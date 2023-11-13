@@ -97,32 +97,107 @@ action_primitive_names = \
  ]
 
 #
-#1. Initialization Actions:
-#   - initialize
-#2. Manipulation Actions:
-#   - append
-#   - concatenate
-#   - difference
-#   - extract
-#   - integrate
-#   - sort
-#3. Selection Actions:
-#   - choose
-#   - first
-#4. Information Actions:
-#   - gpt4
-#   - question
-#   - recall
-#   - request
-#   - web
-#   - wiki
-#5. Response Actions:
-#   - tell
-#6. Utility Actions:
-#   - assign
-#7. Test Actions:
-#   - empty
-#   - containedIn
+## from gpt4:
+#
+#Summarize - Condense text to key points (wrt topic taxonomy? length / format of summary?)
+#Elaborate - Expand on text with more details (how is this different from 'research' - autoextract topic to elaborate?)
+#Explain - Clarify meaning of concepts in text (explain what? how diff from elaborate)
+#Simplify - Rewrite text using simpler vocabulary (how diff from Explain?)
+#Combining Texts:
+#
+#Merge - Integrate content from two texts (topic? target len rel to source len?))
+#Compare - Find similarities and differences
+#Contrast - Focus on differences between two texts (topic? sentiment?)
+#Concatenate - Append one text to another
+
+#Testing Texts:
+#Classify - Categorize text into predefined classes (classification provided? taxonomy node to use a root? one or many classes for any one text?)
+#Sentiment - Judge positive/negative sentiment (what if mixed sentiment? starting topic?)
+#Similarity - Compare semantic similarity of two texts (wrt - topic, sentiment, viewpoint)
+#Entailment - Assess if text A entails text B (again, wrt topic?)
+#
+#This provides a basic set of semantic operations that transform, blend, and analyze texts in ways that could be useful for extracting knowledge, reasoning about information, and answering questions. The large language model would provide the underlying capability to perform these complex operations.
+
+#Example: Research:
+#The semantic operations you've outlined are a strong foundation for text analysis and can be instrumental in tackling complex tasks like research.
+#Let's consider how these operations could play into the stages of research:
+
+#Reviewing Documents:
+#Summarize: Quickly get the gist of numerous documents.
+#Classify: Organize documents into categories for easier reference.
+#Similarity: Identify documents covering similar topics to compare viewpoints or findings.
+
+#Extracting Relevant Information:
+#Merge: Combine information from multiple sources to create a comprehensive perspective.
+#Contrast: Highlight unique points in different documents to capture a range of insights.
+#Entailment: Determine if the information in one document is supported or contradicted by another.
+
+#Noticing Discrepancies and Inconsistencies:
+#Compare: Place documents side by side to spot contradictions.
+#Sentiment: Detect potential biases in the texts that might skew information.
+
+#Seeking Further Information:
+#Research (new operation): Execute queries based on discrepancies or gaps found, possibly by employing a recursive loop of summarizing and classifying newly found texts, and then merging or contrasting them with the existing information.
+
+#Fact-Checking Apparent Inconsistencies:
+#Entailment & Compare: Verify facts across documents to ensure consistency.
+
+#Resolving Information Lacks:
+#Elaborate: Find or infer details that are missing from the current dataset.
+#Explain: Unpack complex information that may fill the gaps in understanding.
+
+#Integration into a Review Document:
+#Concatenate: Stitch together coherent segments from various texts. (merge would be better here?)
+#Simplify: Ensure that the final document is understandable to a broader audience.
+
+#Finalization:
+#Summarize: End with a succinct summary of the research findings.
+#Sentiment: Reflect on the overall sentiment of the conclusions drawn.
+
+"""
+And now, a plan using the above: Are we actionable yet?
+
+Certainly, a structured plan for researching the status of small nuclear fusion power could look like this, using the semantic operations in a flow that iteratively refines understanding and information:
+
+1. **Initialization**:
+    - Set initial parameters for the search (e.g., "small nuclear fusion power current status", "recent advances in nuclear fusion", "fusion power feasibility studies").
+    - Define a time frame for recent information to ensure the data's relevancy.
+
+2. **Data Collection Phase**:
+    - **Classify**: Set up filters to categorize documents into theoretical research, experimental results, technological advancements, policy discussions, and commercial viability reports.
+    - **Search (new operation)**: Use a specialized operation to execute searches across scientific databases, news articles, and white papers.
+
+3. **First-pass Analysis**:
+    - **Summarize**: Create abstracts of the collected documents to understand the main findings or arguments.
+    - **Similarity**: Group similar summaries to prepare for in-depth analysis.
+
+4. **Deep Analysis Loop**:
+    - **Merge**: Integrate information from similar groups to form a more cohesive understanding of specific areas (e.g., technological hurdles, recent breakthroughs).
+    - **Compare & Contrast**: Identify discrepancies or opposing viewpoints among the groups.
+    - **Entailment**: Assess if the conclusions from one document are supported by others.
+
+5. **Gap Identification and Resolution**:
+    - **Elaborate**: For identified gaps, look for additional information that can fill them.
+    - **Research (new operation)**: If needed, go back to the Data Collection Phase to find new data that can resolve inconsistencies or fill knowledge gaps.
+
+6. **Synthesis**:
+    - **Concatenate**: Assemble the verified and consistent information into a structured format.
+    - **Simplify**: Refine the language to make it accessible to non-expert stakeholders.
+
+7. **Final Review and Adjustment**:
+    - **Compare**: Make a final comparison with the latest news or scientific articles to ensure no significant recent developments have been missed.
+    - **Summarize**: Draft a comprehensive but concise summary of the current status of small nuclear fusion power.
+
+8. **Output Generation**:
+    - **Explain**: Write up a detailed explanation that not only presents the findings but also explains the significance and context in the field of nuclear fusion.
+    - **Sentiment**: Gauge the overall sentiment or tone of the industry toward small nuclear fusion power to add a layer of qualitative analysis.
+
+9. **Iteration and Feedback**:
+    - **Loop with Conditions**: If new information significantly changes the landscape, re-enter the Deep Analysis Loop.
+    - **If-Then**: If new policies or commercial steps are announced during the research, then adapt the analysis to include these developments.
+
+This plan uses semantic operations as building blocks for an iterative, intelligent research process. The flow control, whether through loops with conditions or if-then statements, ensures that the research remains dynamic and adjusts to new data or insights as they emerge.
+"""
 
 action_primitive_descriptions = \
 """
@@ -148,6 +223,62 @@ action_primitive_descriptions = \
     {"action": "wiki", "arguments": "item1", "result": "item2", "description": "wiki search the local wikipedia database using item1 as the search string, and assign the integrated content to item2."}
 ]
 """
+
+"""
+Evaluating the quality of a text can be multifaceted, depending on the type of text and the context in which it is used. Here are some common dimensions to consider for a critique:
+
+1. **Clarity**: Is the text clear and understandable? Does it communicate its points effectively?
+
+2. **Coherence**: Do the ideas flow logically? Is there a clear structure that guides the reader through the text?
+
+3. **Depth**: Does the text provide a thorough exploration of the topic? Does it offer insight beyond surface-level information?
+
+4. **Accuracy**: Are the facts presented in the text correct? Is the information reliable and supported by evidence?
+
+5. **Integrity**: Is the text free from bias and misleading information? Does it present the information honestly without manipulation?
+
+6. **Relevance**: Is the information presented relevant to the intended audience or purpose of the text?
+
+7. **Originality**: Does the text provide unique perspectives or information not found elsewhere?
+
+8. **Style**: Is the writing style appropriate for the audience and purpose? Is it engaging or does it enhance the content?
+
+9. **Grammar and Syntax**: Is the text grammatically correct? Are there errors in punctuation, spelling, or sentence structure?
+
+10. **Purpose Fulfillment**: Does the text achieve its intended purpose, whether it's to inform, persuade, entertain, or something else?
+
+11. **Credibility**: Are the author's credentials and the sources of information credible?
+
+12. **Impact**: Does the text have the desired effect on the reader? Does it provoke thought, elicit emotions, or spur action?
+
+13. **Cultural and Ethical Sensitivity**: Does the text respect cultural differences and adhere to ethical standards?
+
+When composing a prompt to evaluate the quality of a text, consider focusing on specific dimensions that are most relevant to the text in question. Here's an example of a prompt that could be used:
+
+---
+"Please provide a quality evaluation of the attached text considering the following dimensions:
+
+- Clarity: Assess the text's ability to convey its message in an understandable way.
+- Coherence: Critique the logical flow and structure of the text.
+- Depth and Insight: Evaluate the thoroughness of the topic exploration and the insights provided.
+- Accuracy and Evidence: Confirm the correctness of the facts and the presence of supporting evidence.
+- Integrity and Bias: Discuss the presence of bias or misrepresentation in the text.
+- Relevance: Determine the text's relevance to its intended audience and purpose.
+- Originality: Consider the uniqueness of the content provided.
+- Style and Engagement: Comment on the appropriateness and engagement level of the writing style.
+- Grammar and Syntax: Note any grammatical or syntactical errors.
+- Purpose Fulfillment: Judge how well the text achieves its intended purpose.
+- Credibility: Examine the credibility of the author and sources.
+- Impact: Reflect on the effect the text has on the reader.
+- Cultural and Ethical Sensitivity: Evaluate the text's cultural sensitivity and adherence to ethical standards.
+
+Provide examples and explanations to support your assessments for each dimension."
+
+---
+
+By using this prompt, you can conduct a comprehensive evaluation of the text's quality across various important dimensions.
+"""
+
 
 planner_nl_list_prompt =\
 """

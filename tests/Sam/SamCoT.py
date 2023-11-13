@@ -226,10 +226,10 @@ class SamInnerVoice():
         get_city_state()
         self.nytimes = nyt.NYTimes()
         self.news, self.details = self.nytimes.headlines()
-        self.articles = []
+        self.articles = '\n'
         for key in self.details.keys():
             for item in self.details[key]:
-                self.articles.append({"title": item['title'] })
+                self.articles+=item['title']+'\n'
         
     def save_conv_history(self):
       global memory, profile
@@ -536,10 +536,10 @@ class SamInnerVoice():
     
 
     def get_workingMemory_available_keys(self):
-       wmkeys = []
+       wmkeys = ''
        for id in self.docHash:
           if 'key' in self.docHash[id]:
-             wmkeys.append(self.docHash[id]['key'])
+             wmkeys +=self.docHash[id]['key']+'\n'
        return wmkeys
                         
     def core_prompt(self, include_actions=True):
@@ -564,9 +564,9 @@ To access full articles, use the action 'article'.
 {self.get_workingMemory_available_keys()}
 </WORKING_MEMORY_KEYS>
 
-<WORKING_MEMORY>
+<ACTIVE WORKING_MEMORY>
 {self.get_workingMemory_active_items()}
-</WORKING_MEMORY>
+</ACTIVE WORKING_MEMORY>
 
 <CONVERSATION_HISTORY>
 
@@ -596,13 +596,20 @@ Respond only in JSON format.
 Available actions include:
 
 <ACTIONS>
-- tell: Provide a direct response to user input. Uses phrasing that invites engagement and reinforces your close bond with Doc. Example: {"action":"tell","response":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
-- question: Ask Doc a question. Example: {"action":"question","query": "How are you feeling today, Doc?"}
-- article: Retrieve a NYTimes article. Example: {"action":"article","title":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
-- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","query":"In Python on Linux, how can I list all subdirectories in a directory?"}
-- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","query":"Cognitive Architecture"}
-- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text suitable for google search.  Example: {"action":"web","query":"Weather forecast for Berkeley, CA for January 1, 2023"}
-- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","query":"What is the EPR paradox in quantum physics?"}
+- tell: Provide a direct response to user input. Reason step-by-step to create an initial response. Then consider:
+1. Expanding on the initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
+2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
+3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
+4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
+5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
+Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
+Example: {"action":"tell","argument":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
+- question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?"}
+- article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
+- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?"}
+- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture"}
+- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023"}
+- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?"}
 </ACTIONS>
 
 Given the following user input, determine which action is needed at this time.
@@ -629,7 +636,7 @@ Respond only in JSON as shown in the above examples.
                 "required": True,
                 "meta": "<action to perform>"
             },
-            "value": {
+            "argument": {
                 "type":"string",
                 "required": True,
                 "meta": "<parameter for action>"
@@ -640,8 +647,8 @@ Respond only in JSON as shown in the above examples.
         prompt_msgs=[
            SystemMessage(self.core_prompt(include_actions=True)),
            ConversationHistory('history', 1000),
-           UserMessage(self.available_actions()+'<INPUT>\n{{$input}}\n</INPUT>'),
-           AssistantMessage('')
+           UserMessage('\n</CONVERSATION HISTORY>\n\n'+self.available_actions()+'<INPUT>\n{{$input}}\n</INPUT>'),
+           #AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
@@ -651,7 +658,7 @@ Respond only in JSON as shown in the above examples.
             content = analysis
             print(f'SamCoT content {content}')
             if type(content) == dict and 'action' in content and content['action']=='article':
-                title = content['title']
+                title = content['argument']
                 print(f'Sam wants to read article {title}')
                 ok = self.confirmation_popup(f'Sam wants to retrieve', title)
                 if not ok: return {"none": ''}
@@ -663,7 +670,7 @@ Respond only in JSON as shown in the above examples.
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In about 500 words, summarize the information in the following text with respect to its title '{title}'. Do not include meta information such as description of the content, instead, summarize the actual information contained."""
+                article_prompt_text = f"""In about 400 words, compile the information in the following text with respect to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with only the actual information contained in the text relative to the title."""
 
                 article_summary_msgs = [
                    SystemMessage(article_prompt_text),
@@ -678,40 +685,41 @@ Respond only in JSON as shown in the above examples.
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'\nretrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               full_tell = self.tell(content['response'], input, widget, short_profile)
-               self.add_exchange(input, full_tell)
-               return {"tell":full_tell}
+               #full_tell = self.tell(content['argument'], input, widget, short_profile)
+               #self.add_exchange(input, full_tell)
+               self.add_exchange(input, content['argument'])
+               return {"tell":content['argument']}
             elif type(content) == dict and 'action' in content and content['action']=='web':
-                query = self.confirmation_popup('Web Search', content['query'])
+                query = self.confirmation_popup('Web Search', content['argument'])
                 if query:
                    content = self.web(query, widget, short_profile)
                    self.add_exchange(query, content)
                    return {"web":content}
             elif type(content) == dict and 'action' in content and content['action']=='wiki':
-                query = self.confirmation_popup(content['action'], content['query'])
+                query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
                    found_text = self.wiki(query, short_profile)
                    self.add_exchange(query, found_text)
                    return {"wiki":found_text}
             elif type(content) == dict and 'action' in content and content['action']=='question':
-                query = self.confirmation_popup(content['action'], content['query'])
+                query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
                    self.add_exchange(input, query)
                    return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
-                query = self.confirmation_popup(content['action'], content['query'])
+                query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
                    text = self.gpt4(query, short_profile)
                    self.add_exchange(query, text)
                    return {"gpt4":text}
             elif type(content) == dict and 'action' in content and content['action']=='recall':
-                query = self.confirmation_popup(content['action'], content['query'])
+                query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
                    result = self.recall(query, profile=short_profile)
                    self.add_exchange(query, result)
                    return {"recall":result}
             elif type(content) == dict and 'action' in content and content['action']=='store':
-                value = self.confirmation_popup(content['action'], content['value'])
+                value = self.confirmation_popup(content['action'], content['argument'])
                 if value:
                    result = self.store(value, profile=short_profile)
                    self.add_exchange(input, value)
@@ -719,48 +727,63 @@ Respond only in JSON as shown in the above examples.
 
         # fallthrough - do a tell
         print(f'tell fallthrough')
-        full_tell = self.tell(None, input, widget, short_profile)
+        full_tell = self.tell(analysis, input, widget, short_profile)
         self.add_exchange(input, full_tell)
         return {"tell":full_tell}
 
     def tell(self, theme, user_text, widget, short_profile):
         response = None
+        max_tokens = int(int(self.ui.max_tokens_combo.currentText())/1.5)
         try:
             if theme is None:
                 # fallthrough, respond directly
                 user_prompt = f"""
-User Input:\\n{{{{$input}}}}\\nLimit your response to approximately 200 tokens if possible without degrading the content responding directly to user input.
+
+</CONVERSATION HISTORY>
+
+User Input:\\n{{{{$input}}}}\\nReason step-by-step to craft a response to the user. Limit your response to approximately {max_tokens} tokens. Consider:
+1. Expanding on your initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
+2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
+3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
+4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
+5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
+Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
 Use this JSON format for your response:
-{{"action":"tell", "response":"<response text>"}}
+{{"action":"tell", "argument":"<response text>"}}
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
                     ConversationHistory('history', 1000),
-                    UserMessage('{{$input}}'),
+                    UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
-                max_tokens=120
             else:
                 user_prompt = f"""
-User Input:\\n{{{{$input}}}}\\nAssistant candidate response:\\n{theme}.\\nYour task is to review the candidate response for adequacy and respond either with the candiate response itself or with a revised version, using this format: 
-{{"tell":"<revision or original response text>"}}
-Reasons for revision include:
-1. Adding more detail to an incomplete informational response.
-2. Including a comment or note relevant to the current ongoing dialog or your own imagined feelings or reactions, to make the conversation more personal and engaging.
-3. Inquiring or commenting on the user's mental or emotional state, to make the conversation more personal and engaging.
-Choose at most one of the above reasons for revision, with choice 1 the highest priority.
-Limit your response to approximately 200 tokens if possible without degrading the content responding directly to user input.
-Respond ONLY with the original response or your revision. 
+User Input:
+{{{{$input}}}}
+Assistant candidate response:
+{theme}.
+Your task is to review the candidate response for depth and comprehensiveness. Respond only with either with the candidate response itself or with a revised version, but not both, using this format:
+{{"action":"tell", "argument":"<revised text>"}}
+Consider these points for revision:
+1. Expanding on the initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
+2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
+3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
+4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
+5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
+Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
+Respond ONLY with the either your revision or the original response. 
 Use this JSON format for your response:
-{{"action":"tell", "response":"<revision or original response text>"}}
+{{"action":"tell", "argument":"<revised text>"}}
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
                     ConversationHistory('history', 1000),
-                    UserMessage(self.available_actions()+'\n{{$input}}'),
+                    #UserMessage(self.available_actions()+'\n{{$input}}'),
+                    UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
-                max_tokens = int(len(theme)/3+30)
+                #max_tokens = int(len(theme)/3+30)
             #response = self.llm.ask(user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
             response = self.llm.ask(user_text, prompt_msgs, max_tokens=max_tokens)
             try:
@@ -904,7 +927,7 @@ Limit your thought to 180 words."""),
              traceback.print_exc()
           print(f'LLM tell response {response}')
           if response is not None:
-             answer = response['message']['content'].strip()
+             answer = response.strip()
              results['tell'] = '\n'+answer+'\n'
              
        self.reflect_thoughts = results
@@ -945,7 +968,7 @@ Limit your thought to 180 words."""),
              UserMessage(f'{query}'),
              AssistantMessage('')
           ]
-       response = self.llm.ask({"input":query}, prompt, model=gpt4, max_tokens=400)
+       response = self.llm.ask({"input":query}, prompt, template=GPT4, max_tokens=400)
        if response is not None:
           answer = response
           print(f'gpt4 answered')
@@ -958,7 +981,7 @@ Limit your thought to 180 words."""),
        if len(query)> 0:
           self.web_query = query
           self.web_profile = profile.split('\n')[0]
-          self.worker = WebSearch(query)
+          self.worker = WebSearch(query, self.ui)
           self.worker.finished.connect(self.web_search_finished)
           self.worker.start()
        return f"\nSearch started for: {query}\n"
@@ -982,9 +1005,10 @@ Limit your thought to 180 words."""),
 
 class WebSearch(QThread):
    finished = pyqtSignal(dict)
-   def __init__(self, query):
+   def __init__(self, query, ui):
       super().__init__()
       self.query = query
+      self.ui = ui
       
    def run(self):
       with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -993,9 +1017,10 @@ class WebSearch(QThread):
          self.finished.emit(result)  # Emit the result string.
          
    def long_running_task(self):
-      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={GPT4}')
-      data = response.json()
-      return data
+       max_tokens = int(self.ui.max_tokens_combo.currentText())
+       response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={GPT4}&max_chars={max_tokens*4}')
+       data = response.json()
+       return data
 
 if __name__ == '__main__':
     sam = SamInnerVoice(model='alpaca')

@@ -53,17 +53,19 @@ class Conversation:
     
 
     def get_llama_2_prompt(self):
-        B_INST, E_INST = "[INST]", "[/INST]"
-        B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
+        B_INST, E_INST = "\n[INST]", "\n[/INST]"
+        B_SYS, E_SYS = "\n<<SYS>>\n", "\n<</SYS>>\n"
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
         messages = self.messages
         #print(f'Input: {messages}')
         if self.messages[0][0] != "system": # no first system message, create empty one for consistent formatting
             messages = [("system", '')] + self.messages
+        #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
         final_messages = [[messages[1][0],B_SYS + messages[0][1] + E_SYS + messages[1][1]]]
-        if len(messages) > 2:
+        if len(messages) > 2: # for remainder of conversation
             final_messages = final_messages + messages[2:]
         #print(f'\nInitial rewrite: {messages}')
+        # but following is silly, why not format ret from messages[2:]?
         ret: str = \
             ''.join([
                 f"{B_INST} {(prompt[1]).strip()} {E_INST} {(answer[1]).strip()} "
@@ -72,13 +74,15 @@ class Conversation:
                         final_messages[1::2],
                 )
             ])
-        #print(f'ret: {ret}')
-        while (final_messages[-1][0] == "user"):
+        print(f'ret: {ret}')
+        print(f'final msgs {final_messages}')
+        while (final_messages[-1][0] != "user"):
             print( f"Last message must be from user, got {messages[-1][0]}")
             final_messages = final_messages[:-1]
-        ret_suffix =  f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}"
+        if len(final_messages) > 2:
+            ret_suffix =  f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}" 
+            ret=ret+ret_suffix
         #print(f'ret_suffix: {ret_suffix}')
-        ret=ret+ret_suffix
         #print(f'Final ret: {ret}')
         return ret
 
@@ -544,6 +548,19 @@ register_conv_template(
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.PHOENIX,
+        sep="</s>",
+    )
+)
+
+# Yi default template
+register_conv_template(
+    Conversation(
+        name="yi",
+        system="",
+        roles=("<|Human|>", "<|Assistant|>"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
         sep="</s>",
     )
 )

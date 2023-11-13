@@ -39,7 +39,7 @@ history = {}
 
 
 #client = OSClient(apiKey=os.getenv('OPENAI_API_KEY'))#, logRequests=True)
-client = OpenAIClient(apiKey=os.getenv('OPENAI_API_KEY'))#, logRequests=True)
+client = OpenAIClient(apiKey=os.getenv('OPENAI_API_KEY'), logRequests=True)
 model = 'gpt-3.5-turbo'
 memory = VolatileMemory()
 functions = None
@@ -49,7 +49,8 @@ app = FastAPI()
 
 
 @app.get("/search/")
-async def search(query: str, max_chars: int = 1200):
+#{self.query}&model={GPT4}&max_chars={max_tokens*4}')
+async def search(query: str, model:str = 'gpt-3.5-turbo', max_chars: int = 1200):
   global client, memory, functions, tokenizer
   response_text = ''
   storeInteraction = True
