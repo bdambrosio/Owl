@@ -53,19 +53,26 @@ class Conversation:
     
 
     def get_llama_2_prompt(self):
-        B_INST, E_INST = "\n[INST]", "\n[/INST]"
+        #
+        ## Note a problem here - conversation history can get confused, may not alternate! this code assumes it does.
+        #
+        B_INST, E_INST = "\n[INST]", "[/INST]\n"
         B_SYS, E_SYS = "\n<<SYS>>\n", "\n<</SYS>>\n"
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
         messages = self.messages
         #print(f'Input: {messages}')
-        if self.messages[0][0] != "system": # no first system message, create empty one for consistent formatting
-            messages = [("system", '')] + self.messages
+        if self.messages[0][0] != "system": # no initial system message, create empty one for consistent formatting
+            messages = [("system", DEFAULT_SYSTEM_PROMPT)] + self.messages
         #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
-        final_messages = [[messages[1][0],B_SYS + messages[0][1] + E_SYS + messages[1][1]]]
-        if len(messages) > 2: # for remainder of conversation
+        final_messages = [('user',B_SYS + messages[0][1] + E_SYS + messages[1][1])] # note this is ONE message, from USER!
+        if len(messages) > 2: # for remainder of conversation # we added a system message if there wasn't one 
             final_messages = final_messages + messages[2:]
+        else: # all we have is prompt and one user message, return it:
+            return f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}"
         #print(f'\nInitial rewrite: {messages}')
-        # but following is silly, why not format ret from messages[2:]?
+        # but following is silly, why not format ret from messages[2:]? Aren't they the same?
+        #At this point we've formatted sys prompt and first (presumably user) message into a single message..
+
         ret: str = \
             ''.join([
                 f"{B_INST} {(prompt[1]).strip()} {E_INST} {(answer[1]).strip()} "
@@ -74,8 +81,8 @@ class Conversation:
                         final_messages[1::2],
                 )
             ])
-        print(f'ret: {ret}')
-        print(f'final msgs {final_messages}')
+        #print(f'ret: {ret}')
+        #print(f'final msgs {final_messages}')
         while (final_messages[-1][0] != "user"):
             print( f"Last message must be from user, got {messages[-1][0]}")
             final_messages = final_messages[:-1]
@@ -634,6 +641,21 @@ register_conv_template(
 register_conv_template(
     Conversation(
         name="mpt",
+        system="",
+        roles=("<|im_start|>user", "<|im_start|>assistant", "<|im_start|>system"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
+        sep="<|im_end|>",
+        sep2='',
+        stop_token_ids=[50278, 0],
+        response_prime=True,
+    )
+)
+# chatml default template
+register_conv_template(
+    Conversation(
+        name="chatml",
         system="",
         roles=("<|im_start|>user", "<|im_start|>assistant", "<|im_start|>system"),
         messages=(),

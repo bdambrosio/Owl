@@ -24,7 +24,7 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or '01' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower())]
 
 
 model_number = -1
@@ -39,8 +39,10 @@ while model_number < 0 or model_number > len(models) -1:
         print(f'Enter a number between 0 and {len(models)-1}')
 
 
+#if 'dolphin' in models[model_number]:
+#    cache = ExLlamaV2Cache(model, max_seq_len=8192)
 config = ExLlamaV2Config()
-config.scale_alpha_value=2
+#config.scale_alpha_value=2
 config.model_dir = models_dir+models[model_number]
 config.prepare()
 
@@ -50,7 +52,8 @@ model.load([19, 24])
 
 tokenizer = ExLlamaV2Tokenizer(config)
 
-cache = ExLlamaV2Cache(model, max_seq_len=6144)
+#cache = ExLlamaV2Cache(model, max_seq_len=6144)
+cache = ExLlamaV2Cache(model, max_seq_len=4096)
 
 # Initialize generator
 
@@ -69,14 +72,6 @@ max_new_tokens = 250
 # Make sure CUDA is initialized so we can measure performance
 generator.warmup()
 
-
-host = socket.gethostname()
-host = ''
-port = 5004  # use port above 1024
-
-app = FastAPI()
-print(f"starting server")
-
 async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False):
     generated_tokens = 0
     # this is a very sloppy heuristic for complete json form, but since chunks are short, maybe ok?
@@ -92,14 +87,14 @@ async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False)
             open_braces += chunk.count('{')
             if open_braces > 0:
                 open_brace_seen = True
-            close_braces = chunk.count('}')
-            open_braces -= close_braces
+                close_braces = chunk.count('}')
+                open_braces -= close_braces
             if open_brace_seen and open_braces == 0:
                 complete_json_seen = True
         print (chunk, end = "")
         text += chunk
         yield chunk
-
+                    
         # note test for '[INST]' is a hack because we don't send template-specific stop strings yes
         if (eos or generated_tokens == max_new_tokens or
             (stop_on_json and complete_json_seen) or
@@ -107,6 +102,14 @@ async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False)
             print('\n')
             break
 
+    
+host = socket.gethostname()
+host = ''
+port = 5004  # use port above 1024
+
+app = FastAPI()
+print(f"starting server")
+    
 @app.post("/")
 async def get_stream(request: Request):
     global generator, settings, tokenizer

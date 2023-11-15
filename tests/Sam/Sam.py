@@ -193,7 +193,7 @@ class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
       global model
-
+      self.tts = False
       self.samCoT = SamInnerVoice(self, template = template)
       self.memory_display = None
       self.planner = Planner(self, self.samCoT)
@@ -319,6 +319,12 @@ class ChatApp(QtWidgets.QWidget):
       self.wmem_button.setFont(self.widgetFont)
       self.wmem_button.clicked.connect(self.workingMem)
       control_layout.addWidget(self.wmem_button)
+      
+      self.tts_button = QPushButton("Speak") # launch working memory editor
+      self.tts_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.tts_button.setFont(self.widgetFont)
+      self.tts_button.clicked.connect(self.speak)
+      control_layout.addWidget(self.tts_button)
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
       self.sam = ImageDisplay()
@@ -456,6 +462,11 @@ Your task is to:
       # Decode bytes back to string
       decoded = encoded.data().decode('utf-8')
       self.input_area.insertPlainText(decoded)  # Insert the text at the cursor position
+      if self.tts:
+         try:
+            self.speech_service(decoded)
+         except:
+            traceback.print_exc()
       self.input_area.repaint()
       PREV_LEN=len(self.input_area.toPlainText())-1
       
@@ -560,6 +571,16 @@ Your task is to:
             self.workingMemory = self.samCoT.load_workingMemory()
          except Exception as e:
             self.display_response(f'Failure to reload working memory {str(e)}')
+
+   def speak(self): # lauching working memory editor
+      if self.tts:
+         self.tts = False
+      else:
+         self.tts = True
+
+   def speech_service(self, text):
+      print("trying to speak")
+      r = requests.post("http://bruce-linux:5004/", json={"text":text})
 
    def history(self):
       self.samCoT.historyEditor() # save and display Conversation history for editting

@@ -139,13 +139,15 @@ class JSONResponseValidator(PromptResponseValidator):
                     }
                 else:
                     if type(obj) == dict:
-                        return {
-                            'type': 'Validation',
-                            'valid': True,
-                            'value': obj
-                        }
-                    else: raise Exception()
-                    #print(f'***** JSONResponseValidator validation passed! {type(obj)}, {obj}')
+                        return {'type': 'Validation', 'valid': True, 'value': obj}
+                    str_obj = str(obj).strip()
+                    if str_obj.startswith('{') and not str_obj.endswith('}'):
+                        str_obj += "'}"
+                        try:
+                            objj = json.loads(str_obj)
+                            return {'type': 'Validation', 'valid': True, 'value': objj}
+                        except:
+                            return {'type': 'Validation', 'valid': false, 'value': str_obj}
             except ValidationError as e:
                 path = str(list(e.relative_schema_path)[1:-1]).replace('[','').replace(']',"").replace(', ', ':')
                 if not errors:
@@ -170,7 +172,7 @@ class JSONResponseValidator(PromptResponseValidator):
         try:
             arg = error.validator
         except:
-            return error.message
+            return error
         path = str(list(error.relative_schema_path)[1:-1]).replace('[','').replace(']',"").replace(', ', ':')
         
         switcher = {

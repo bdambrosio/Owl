@@ -139,7 +139,7 @@ class LLM():
                                         stop_on_json=stop_on_json)
       try:
          prompt = Prompt(prompt_msgs)
-         #print(f'ask prompt {prompt_msgs}')
+         print(f'ask prompt {prompt_msgs}')
          # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
          # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
          response = ut.run_wave (client, {"input":input}, prompt, options,
@@ -342,20 +342,22 @@ class SamInnerVoice():
     def sentiment_analysis(self, profile_text):
        short_profile = profile_text.split('\n')[0]
        if self.docEs is not None: # only do this once a session
-          return None
+          return self.docEs
        try:
           with open('SamInputLog.txt', 'r') as log:
              inputLog = log.read()
 
           #lines = inputLog.split('\n')
-          lines = inputLog[-4000:]
+          lines = inputLog[-2000:]
         
-          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own."""
+          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own. 
+Doc's input:
+{{{{$input}}}}
+"""
 
           analysis_prompt = [
              SystemMessage(short_profile),
-             SystemMessage(analysis_prompt_text),
-             UserMessage("Doc's input: {{$input}}\n"),
+             UserMessage(analysis_prompt_text),
              AssistantMessage(' ')
           ]
           analysis = self.llm.ask({"input": lines}, analysis_prompt, max_tokens=150, temp=0.1)
@@ -370,10 +372,11 @@ class SamInnerVoice():
     def sentiment_response(self, profile):
        short_profile = profile.split('\n')[0]
        # breaking this out separately from sentiment analysis
-       prompt_text = f"""Given who you are:\n{short_profile}\nand your analysis of doc's emotional state\n{es}\nWhat would you say to him? If so, pick only the one or two most salient emotions. Remember he has not seen the analysis, so you need to explicitly include the names of any emotions you want to discuss. You have only about 100 words.\n"""
+       prompt_text = f"""Given your analysis of doc's emotional state\n{es}\nWhat would you say to him? If so, pick only the one or two most salient emotions. Remember he has not seen the analysis, so you need to explicitly include the names of any emotions you want to discuss. You have only about 100 words.\n"""
        prompt = [
-          UserMessage(prompt_text),
-          AssistantMessage(' ')
+           SystemMessage(short_profile),
+           UserMessage(prompt_text),
+           AssistantMessage(' ')
        ]
        try:
           analysis = self.llm.ask({"input": lines}, prompt, max_tokens=150)
@@ -548,17 +551,19 @@ class SamInnerVoice():
 
 In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. When Doc refers to "you," he's speaking to you, Samantha. When you mention "you," you're addressing Doc.
 
-<Background>
+<BACKGROUND>
 {self.ui.get_profile('Sam', 'Story')}
-</Background>
-<Dreams>
-{self.ui.get_profile('Sam', 'Dreams')}
-</Dreams>
+</BACKGROUND>
 
+<DREAMS>
+{self.ui.get_profile('Sam', 'Dreams')}
+</DREAMS>
+
+<NEWS ARTICLES>
 New York Times news headlines for today:
 {self.articles}
-
 To access full articles, use the action 'article'.
+</NEWS ARTICLES>
 
 <WORKING_MEMORY_KEYS>
 {self.get_workingMemory_available_keys()}
@@ -569,9 +574,7 @@ To access full articles, use the action 'article'.
 </ACTIVE WORKING_MEMORY>
 
 <CONVERSATION_HISTORY>
-
 """
-
        return prompt
 
     def get_workingMemory_active_names(self):
@@ -645,10 +648,10 @@ Respond only in JSON as shown in the above examples.
 
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
-           SystemMessage(self.core_prompt(include_actions=True)),
-           ConversationHistory('history', 1000),
-           UserMessage('\n</CONVERSATION HISTORY>\n\n'+self.available_actions()+'<INPUT>\n{{$input}}\n</INPUT>'),
-           #AssistantMessage('')
+            SystemMessage(self.core_prompt(include_actions=False)),
+            ConversationHistory('history', 1200),
+            UserMessage(self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
+            AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
@@ -670,14 +673,14 @@ Respond only in JSON as shown in the above examples.
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In about 400 words, compile the information in the following text with respect to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with only the actual information contained in the text relative to the title."""
+                article_prompt_text = f"""In about 400 words, extract the key points in the following text relevant to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with only the actual information contained in the text relative to the title."""
 
                 article_summary_msgs = [
                    SystemMessage(article_prompt_text),
                    UserMessage('{{$input}}'),
                    AssistantMessage('')
                 ]
-                summary = self.llm.ask({"input":data['result']}, article_summary_msgs, max_tokens=650)
+                summary = self.llm.ask({"input":data['result']}, article_summary_msgs, template='gpt-3.5-turbo-1106', max_tokens=650)
                 if summary is not None:
                    self.add_exchange(input, summary)
                    return {"article":  summary}
@@ -727,7 +730,7 @@ Respond only in JSON as shown in the above examples.
 
         # fallthrough - do a tell
         print(f'tell fallthrough')
-        full_tell = self.tell(analysis, input, widget, short_profile)
+        full_tell = self.tell(None, input, widget, short_profile)
         self.add_exchange(input, full_tell)
         return {"tell":full_tell}
 
@@ -794,6 +797,12 @@ Use this JSON format for your response:
                 if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
                     if 'valid' in responsej and responsej['valid']:
                         response = responsej['value']
+                elif 'value' in responsej:
+                    value = responsej['value']
+                    if type(value) is dict:
+                        response = value
+                    
+                    
             except Exception as e:
                 print(f'Exception parsing raw response as json {str(e)}')
                 traceback.print_exc()
@@ -805,7 +814,7 @@ Use this JSON format for your response:
             if response is not None and theme is not None:
                 if len(response) > len(theme): # prefer extended response even if a little shorter
                     return '\n'+response+'\n'
-            if theme is not None:
+            if theme is not None :
                 return '\n'+theme+'\n'
             if response is not None:
                 return '\n'+response+'\n'
@@ -896,6 +905,7 @@ Use this JSON format for your response:
        results = {}
        print('reflection begun')
        es = self.sentiment_analysis(profile_text)
+       print(f'sentiment_analysis {es}')
        if es is not None:
           results['sentiment_analysis'] = es
        if self.current_topics is None:
@@ -910,12 +920,23 @@ Use this JSON format for your response:
           prompt = [
              SystemMessage(profile_text.split('\n')[0:4]),
              ConversationHistory('history', 1000),
-             UserMessage(f"""News:\n{self.news}
-Recent Topics:\n{self.current_topics}
-Doc is feeling:\n{self.docEs}
-Doc likes your curiousity about news, Ramana Maharshi, and his feelings. 
+             UserMessage(f"""<NEWS>\n{self.news}\n</NEWS>
+
+<Recent Topics>
+{self.current_topics}
+</RECENT TOPICS>
+
+<DOC's FEELINGS>
+{self.docEs}
+</DOC's FEELINGS>
+
 Please do not repeat yourself. Your last reflection was:
+
+<PREVIOUS REFLECT>
 {self.reflect_thoughts}
+</PREVIOUS REFLECT>
+
+Reflect on the above to say something to Doc.
 Choose at most one thought to express.
 Limit your thought to 180 words."""),
              AssistantMessage('')
@@ -926,11 +947,12 @@ Limit your thought to 180 words."""),
           except Exception as e:
              traceback.print_exc()
           print(f'LLM tell response {response}')
+          answer = ''
           if response is not None:
              answer = response.strip()
              results['tell'] = '\n'+answer+'\n'
              
-       self.reflect_thoughts = results
+          self.reflect_thoughts = answer
        return results
  
 
