@@ -26,12 +26,26 @@ models_dir = "/home/bruce/Downloads/models/"
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower())]
 
+templates = {"CodeLlama-34B-instruct-exl2":"",
+             "Mistral-7B-OpenOrca-exl2":"",
+             "platypus2-70b-instruct-gptq":"alpaca",
+             "zephyr-7b-beta":"zephyr",
+             "openchat-3.5-8bpw-h8-exl2":"openchat",
+             "Spicyboros-70b-22-GPTQ":"llama-2(?)",
+             "dolphin-34b-exl2":"llama-2(?)",
+             "ShiningValiant-4bpw-h6-exl2":"llama-2(?)",
+             "Airoboros-L2-70b-312-GPTQ":"llama-2",
+             "airoboros-c34b-3.1.2-8.0bpq-h6-exl2":"llama-2",
+             "mistral-airoboros-7b-GPTQ":"?"}
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:
     print(f'Available models:')
     for i in range(len(models)):
-        print(f'{i}. {models[i]}')
+        template = ''
+        if models[i] in templates:
+            template = templates[models[i]]
+        print(f'{i}. {models[i]} template: {template}')
     number = input('input model # to load: ')
     try:
         model_number = int(number)
@@ -42,7 +56,7 @@ while model_number < 0 or model_number > len(models) -1:
 #if 'dolphin' in models[model_number]:
 #    cache = ExLlamaV2Cache(model, max_seq_len=8192)
 config = ExLlamaV2Config()
-#config.scale_alpha_value=2
+config.scale_alpha_value=1.5
 config.model_dir = models_dir+models[model_number]
 config.prepare()
 
@@ -52,8 +66,8 @@ model.load([19, 24])
 
 tokenizer = ExLlamaV2Tokenizer(config)
 
-#cache = ExLlamaV2Cache(model, max_seq_len=6144)
-cache = ExLlamaV2Cache(model, max_seq_len=4096)
+cache = ExLlamaV2Cache(model, max_seq_len=6144)
+#cache = ExLlamaV2Cache(model, max_seq_len=4096)
 
 # Initialize generator
 

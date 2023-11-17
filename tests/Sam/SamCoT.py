@@ -23,7 +23,7 @@ from promptrix.Prompt import Prompt
 from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
-from promptrix.ConversationHistory import ConversationHistory
+from promptrix.ConversationHistorySam import ConversationHistorySam
 from alphawave.MemoryFork import MemoryFork
 from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
@@ -412,10 +412,10 @@ Doc's input:
        id = generate_faiss_id(str(item))
        if id in self.docHash:
           id = id+1
-       key_prompt = [ConversationHistory('history', 120),
-                     SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
-                      UserMessage(f'ITEM:\n{str(item)}'),
-                      AssistantMessage('')]
+       key_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
+                     ConversationHistorySam('history', 120),
+                     UserMessage(f'ITEM:\n{str(item)}'),
+                     AssistantMessage('')]
        key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
        print(f' generated key: {key_json}')
        if type(key_json) is dict and 'key' in key_json:
@@ -573,7 +573,6 @@ To access full articles, use the action 'article'.
 {self.get_workingMemory_active_items()}
 </ACTIVE WORKING_MEMORY>
 
-<CONVERSATION_HISTORY>
 """
        return prompt
 
@@ -649,7 +648,7 @@ Respond only in JSON as shown in the above examples.
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
             SystemMessage(self.core_prompt(include_actions=False)),
-            ConversationHistory('history', 1200),
+            ConversationHistorySam('history', 1200),
             UserMessage(self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
             AssistantMessage('')
         ]
@@ -657,7 +656,7 @@ Respond only in JSON as shown in the above examples.
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
-        if type(analysis) == dict:
+        if type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
             print(f'SamCoT content {content}')
             if type(content) == dict and 'action' in content and content['action']=='article':
@@ -688,10 +687,11 @@ Respond only in JSON as shown in the above examples.
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'\nretrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               #full_tell = self.tell(content['argument'], input, widget, short_profile)
-               #self.add_exchange(input, full_tell)
-               self.add_exchange(input, content['argument'])
-               return {"tell":content['argument']}
+               full_tell = self.tell(content['argument'], input, widget, short_profile)
+               self.add_exchange(input, full_tell)
+               return {"tell": full_tell}
+               #self.add_exchange(input, content['argument'])
+               #return {"tell":content['argument']}
             elif type(content) == dict and 'action' in content and content['action']=='web':
                 query = self.confirmation_popup('Web Search', content['argument'])
                 if query:
@@ -742,75 +742,77 @@ Respond only in JSON as shown in the above examples.
                 # fallthrough, respond directly
                 user_prompt = f"""
 
-</CONVERSATION HISTORY>
-
-User Input:\\n{{{{$input}}}}\\nReason step-by-step to craft a response to the user. Limit your response to approximately {max_tokens} tokens. Consider:
-1. Expanding on your initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
-2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
-3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
-4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
-5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
+Respond to the User input below. Limit your response to approximately {max_tokens} tokens. Consider the following in generating your response:
+1. Include insights, examples, or explanations to provide a more comprehensive understanding of the topic.
+2. Integrate relevant conversation history or background information that enhances the user's understanding.
+3. Add Reflect on broader implications or related aspects of the topic that were not initially addressed.
+4. Engage in a deeper exploration of the topic by posing thoughtful questions or introducing new perspectives.
+5. Avoid adding discursive material or material that discusses how to respond. Rather, restrict your response to the content of the use input.
 Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
-Use this JSON format for your response:
-{{"action":"tell", "argument":"<response text>"}}
+
+User Input:
+{{{{$input}}}}
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
-                    ConversationHistory('history', 1000),
+                    ConversationHistorySam('history', 1000),
                     UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
             else:
                 user_prompt = f"""
+
+Your task is to review the candidate response below for depth and comprehensiveness. 
+Respond only with either with the candidate response itself or with a revised version, but not both.
+Consider these points for your revision:
+1. Include in the revision all relevant content from the original response.
+2. Expand on the candidate response with additional insights or examples to provide a more comprehensive response.
+3. Integrate relevant conversation context or background information to enhances the user's understanding.
+4. Reflect on broader implications or related aspects of the topic, to offer a more holistic perspective.
+5. Engage in a deeper exploration of the topic by posing thoughtful questions or introducing new perspectives.
+
+Limit your response to approximately {max_tokens} tokens, focusing on enriching the candidate response to the user input.
+Respond ONLY with the either your revision or the original response. 
+
+candidate response:
+{theme}.
+
 User Input:
 {{{{$input}}}}
-Assistant candidate response:
-{theme}.
-Your task is to review the candidate response for depth and comprehensiveness. Respond only with either with the candidate response itself or with a revised version, but not both, using this format:
-{{"action":"tell", "argument":"<revised text>"}}
-Consider these points for revision:
-1. Expanding on the initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
-2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
-3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
-4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
-5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
-Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
-Respond ONLY with the either your revision or the original response. 
-Use this JSON format for your response:
-{{"action":"tell", "argument":"<revised text>"}}
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
-                    ConversationHistory('history', 1000),
-                    #UserMessage(self.available_actions()+'\n{{$input}}'),
+                    ConversationHistorySam('history', 1000),
                     UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
                 #max_tokens = int(len(theme)/3+30)
             #response = self.llm.ask(user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
             response = self.llm.ask(user_text, prompt_msgs, max_tokens=max_tokens)
-            try:
-                print(f'etell raw response from ask: {response}')
-                responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
-                                                                 remaining_attempts=0)
-                #print(f'etell JSONValidator response: {responsej}')
-                if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
-                    if 'valid' in responsej and responsej['valid']:
-                        response = responsej['value']
-                elif 'value' in responsej:
-                    value = responsej['value']
-                    if type(value) is dict:
-                        response = value
-                    
-                    
-            except Exception as e:
-                print(f'Exception parsing raw response as json {str(e)}')
-                traceback.print_exc()
-                return '\n'+theme+'\n'
-            if response is not None and type(response) is dict and 'response' in response:
-                response = response['response']
-            if response is not None and type(response) is dict:
-                response = str(response)
+            #try:
+            #    print(f'etell raw response from ask: {response}')
+            #    responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
+            #                                                     remaining_attempts=0)
+            #    #print(f'etell JSONValidator response: {responsej}')
+            #    if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
+            #        if 'valid' in responsej and responsej['valid']:
+            #            response = responsej['value']
+            #    elif 'value' in responsej:
+            #        value = responsej['value']
+            #        if type(value) is dict:
+            #            response = value
+            #except Exception as e:
+            #    print(f'Exception parsing raw response as json {str(e)}')
+            #    traceback.print_exc()
+            #    return '\n'+theme+'\n'
+            #if response is not None and type(response) is dict and 'response' in response:
+            #    response = response['response']
+            #if response is not None and type(response) is dict:
+            #    response = str(response)
+            if response is not None and type(response) is str:
+                loc = response.lower().find('user input:')
+                if loc > 0:
+                    response = response[:loc]
             if response is not None and theme is not None:
                 if len(response) > len(theme): # prefer extended response even if a little shorter
                     return '\n'+response+'\n'
@@ -919,7 +921,7 @@ Use this JSON format for your response:
           self.last_tell_time = now
           prompt = [
              SystemMessage(profile_text.split('\n')[0:4]),
-             ConversationHistory('history', 1000),
+             ConversationHistorySam('history', 1000),
              UserMessage(f"""<NEWS>\n{self.news}\n</NEWS>
 
 <Recent Topics>
@@ -986,7 +988,7 @@ Limit your thought to 180 words."""),
        if len(query)> 0:
           prompt = [
              SystemMessage(short_profile),
-             ConversationHistory('history', 120),
+             ConversationHistorySam('history', 120),
              UserMessage(f'{query}'),
              AssistantMessage('')
           ]

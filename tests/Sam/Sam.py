@@ -194,10 +194,11 @@ class ChatApp(QtWidgets.QWidget):
       super().__init__()
       global model
       self.tts = False
+      self.template = template
       self.samCoT = SamInnerVoice(self, template = template)
       self.memory_display = None
       self.planner = Planner(self, self.samCoT)
-      self.interpreter = self.planner.interpreter
+      #self.interpreter = self.planner.interpreter
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)
       # Set the background color for the entire window
@@ -555,7 +556,7 @@ Your task is to:
       self.samCoT.edit_AWM()
          
    def eval_AWM(self): # edit an active working memory item
-      self.interpreter.eval_AWM()
+      self.planner.interpreter.eval_AWM()
          
    def gc_AWM(self): # release a working memory item from active memory
       self.samCoT.gc_AWM()
@@ -600,11 +601,11 @@ Your task is to:
 nytimes = nyt.NYTimes()
 news, news_details = nytimes.headlines()
 print(f'headlines {news}')
-
 app = QtWidgets.QApplication([])
 window = ChatApp()
 window.show()
 
-app.exec_()
+if __name__== '__main__':
+   app.exec_()
 
 

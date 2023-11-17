@@ -324,32 +324,6 @@ class InvalidAction(Exception):
    # raised by parse_as_action
    pass
 
-
-class LLM():
-   def __init__(self, model='alpaca'):
-        self.model = model
-        self.functions = FunctionRegistry()
-        self.tokenizer = GPT3Tokenizer()
-        self.memory = VolatileMemory({'input':[], 'history':[]})
-
-   def ask(self, client, input, prompt_msgs, model=None, temp=0.2, max_tokens=100, validator=DefaultResponseValidator()):
-      if model is None:
-         model = self.model
-      options = PromptCompletionOptions(completion_type='chat', model=model, temperature=temp, max_tokens=max_tokens)
-      try:
-         prompt = Prompt(prompt_msgs)
-         #print(f'ask prompt {prompt_msgs}')
-         response = ut.run_wave (client, {"input":input}, prompt, options,
-                                 self.memory, self.functions, self.tokenizer, validator=validator)
-         #print(f'ask response {response}')
-         if type(response) is not dict or 'status' not in response.keys() or response['status'] != 'success':
-            return None
-         content = response['message']['content']
-         return content
-      except Exception as e:
-         traceback.print_exc()
-         print(str(e))
-         return None
        
 class PlanInterpreter():
     def __init__(self, ui, samCoT, planner, profile=None, history=None, model='alpaca'):
@@ -358,7 +332,7 @@ class PlanInterpreter():
         self.samCoT = samCoT
         self.client = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-        self.llm = LLM()
+        self.llm = samCoT.llm
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.cvHistory = load_conv_history()  # load conversation history.
@@ -409,6 +383,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
                 
           valid_json=True
           # ok, item is a dict, let's see if it is an action
+          dict_item = entry['item']
           if 'action' not in dict_item:
              self.ui.display_response(f'item is not an action {item}')
              continue
@@ -416,6 +391,14 @@ Your conversation style is warm, gentle, humble, and engaging. """
              return self.first(dict_item)
           elif dict_item['action'] == 'assign':
              return self.assign(dict_item)
+          elif dict_item['action'] == 'web':
+             return self.assign(dict_item)
+          elif dict_item['action'] == 'extract':
+             return self.pweb(dict_item)
+          elif dict_item['action'] == 'tell':
+             return self.ptell(dict_item)
+          elif dict_item['action'] == 'wiki':
+             return self.pwiki(dict_item)
           return 'no item selected or no item found'
        return 'action not yet implemented'
    
@@ -567,13 +550,9 @@ explanation="<explanation of reason for value>"
        if executable == 'no':
           return False
 
-       ### ok, llm thinks executable, let's try a plan.
-       #planner = Planner(model = self.model)
-       #analysis = planner.analyze(None, value)
-       #plan = planner.plan()
-       #return plan
        return True
 
+    
     
 class WebSearch(QThread):
    finished = pyqtSignal(dict)
@@ -602,7 +581,7 @@ class Planner():
        self.samCoT = samCoT
        self.client = OSClient(api_key=None)
        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-       self.llm = LLM(self.model)
+       self.llm = samCoT.llm # use same model?
        self.max_tokens = 4000
        self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
        self.current_topics = None # topics under discussion - mostly a keyword list
@@ -762,33 +741,16 @@ The plan may include four agents:
        return plan     
 
 if __name__ == '__main__':
-    pi = PlanInterpreter(None)
-    #pi.wmWrite('outline', 'one, two, three')
-    #pi.wmWrite('chapter1', 'On monday I went to the store')
-    #pi.wmWrite('chapter 2', 'On tuesday I went to the dentist')
-    #pi.wmWrite('news', '')
-    #print(pi.wmRead('outline'))
-    #article = pi.choose('gaza', pi.articles)
-    #print(f'PI article {article}')
-    #chris = pi.wiki('christopher columbus')
-    #print(f'PI columbus {chris}')
-    #print('****************************************')
-    #print(pi.test_executable("Compile a list of reliable news websites, blogs, and social media accounts that cover diverse topics of interest to Doc."))
-
-    #print('****************************************')
-    #print(pi.test_executable("""fetch_headlines(source):
-    # retrieve latest headlines from specified source
-#"""))
-
-    #print('****************************************')
-    #print(pi.test_executable("""Search the web for latest news"""))
-    #print('****************************************')
-    pl = Planner()
-    #print('******analyze news**************************')
-    pl.analyze('news',"build a short list of fact-checked world news sources on the web")
-    #print('******plan news********************')
-    plan = pl.plan()
-    #print('******extract first step from news plan ***')
-    step = pi.first(plan)
-    #print('*******test if first step is executable *************')
-    pi.test_executable(step)
+   import Sam as sam
+   ui = sam.window
+   cot = ui.samCoT
+   pl = Planner(ui, cot)
+   print('******analyze news**************************')
+   pl.analyze('news',"build a short list of fact-checked world news sources on the web")
+   print('******plan news********************')
+   plan = pl.plan()
+   print(f'\nplan\n{plan}\n')
+   print('******extract first step from news plan ***')
+   step = pl.interpreter.first(plan)
+   print('*******test if first step is executable *************')
+   pl.interpreter.test_executable(step)

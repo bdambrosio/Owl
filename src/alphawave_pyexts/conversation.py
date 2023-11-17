@@ -55,7 +55,12 @@ class Conversation:
     def get_llama_2_prompt(self):
         #
         ## Note a problem here - conversation history can get confused, may not alternate! this code assumes it does.
-        #
+        ## also, CHSam now is a single message, but what if we have Sys, CHSam, User?
+        ## looks like CHSam get's incorporated as part of sys/init-user, which seems ok,
+        ## but that means first user msg gets tacked on as asst.
+        ## maybe change CHSam to return 2 msgs to keep order straight?
+        ## ah, blank second, so asst replies '' to init message. that seems ok?
+        ## or, below, check msg 1, and if from asst, insert '' user msg instead of using first
         B_INST, E_INST = "\n[INST]", "[/INST]\n"
         B_SYS, E_SYS = "\n<<SYS>>\n", "\n<</SYS>>\n"
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
@@ -63,6 +68,9 @@ class Conversation:
         #print(f'Input: {messages}')
         if self.messages[0][0] != "system": # no initial system message, create empty one for consistent formatting
             messages = [("system", DEFAULT_SYSTEM_PROMPT)] + self.messages
+        # now check - if first real msg is from asst, insert empty user msgs
+        if self.messages[1][0] != "user": # no first user message, create empty one for consistent formatting
+            messages = [messages[0], ("user", '')] + self.messages[1:]
         #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
         final_messages = [('user',B_SYS + messages[0][1] + E_SYS + messages[1][1])] # note this is ONE message, from USER!
         if len(messages) > 2: # for remainder of conversation # we added a system message if there wasn't one 
