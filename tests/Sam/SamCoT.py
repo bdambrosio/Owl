@@ -24,6 +24,7 @@ from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
 from promptrix.ConversationHistorySam import ConversationHistorySam
+from promptrix.ConversationHistory import ConversationHistory
 from alphawave.MemoryFork import MemoryFork
 from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
@@ -413,7 +414,7 @@ Doc's input:
        if id in self.docHash:
           id = id+1
        key_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
-                     ConversationHistorySam('history', 120),
+                     ConversationHistory('history', 120),
                      UserMessage(f'ITEM:\n{str(item)}'),
                      AssistantMessage('')]
        key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
@@ -648,7 +649,7 @@ Respond only in JSON as shown in the above examples.
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
             SystemMessage(self.core_prompt(include_actions=False)),
-            ConversationHistorySam('history', 1200),
+            ConversationHistory('history', 1200),
             UserMessage(self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
             AssistantMessage('')
         ]
@@ -755,7 +756,7 @@ User Input:
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
-                    ConversationHistorySam('history', 1000),
+                    ConversationHistory('history', 1000),
                     UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
@@ -782,7 +783,7 @@ User Input:
 """        
                 prompt_msgs=[
                     SystemMessage(self.core_prompt(include_actions=False)),
-                    ConversationHistorySam('history', 1000),
+                    ConversationHistory('history', 1000),
                     UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
@@ -921,7 +922,7 @@ User Input:
           self.last_tell_time = now
           prompt = [
              SystemMessage(profile_text.split('\n')[0:4]),
-             ConversationHistorySam('history', 1000),
+             ConversationHistory('history', 1000),
              UserMessage(f"""<NEWS>\n{self.news}\n</NEWS>
 
 <Recent Topics>
@@ -988,7 +989,7 @@ Limit your thought to 180 words."""),
        if len(query)> 0:
           prompt = [
              SystemMessage(short_profile),
-             ConversationHistorySam('history', 120),
+             ConversationHistory('history', 120),
              UserMessage(f'{query}'),
              AssistantMessage('')
           ]

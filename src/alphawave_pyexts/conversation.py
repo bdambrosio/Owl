@@ -70,36 +70,20 @@ class Conversation:
             messages = [("system", DEFAULT_SYSTEM_PROMPT)] + self.messages
         # now check - if first real msg is from asst, insert empty user msgs
         if self.messages[1][0] != "user": # no first user message, create empty one for consistent formatting
-            messages = [messages[0], ("user", '')] + self.messages[1:]
+            print('adding empty user msg')
+            messages = [messages[0], ("user", ' ')] + self.messages[1:]
         #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
-        final_messages = [('user',B_SYS + messages[0][1] + E_SYS + messages[1][1])] # note this is ONE message, from USER!
-        if len(messages) > 2: # for remainder of conversation # we added a system message if there wasn't one 
-            final_messages = final_messages + messages[2:]
-        else: # all we have is prompt and one user message, return it:
-            return f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}"
-        #print(f'\nInitial rewrite: {messages}')
-        # but following is silly, why not format ret from messages[2:]? Aren't they the same?
-        #At this point we've formatted sys prompt and first (presumably user) message into a single message..
+        prompt = B_INST+B_SYS + messages[0][1] + E_SYS + messages[1][1]+E_INST # note this is ONE message, from USER!
+        for message in messages[2:]:
+            if message[0] == 'user':
+                prompt += B_INST+message[1]+E_INST
+            else:
+                prompt += message[1]
+        
+        if not prompt.endswith('[/INST]\n'):
+            prompt += E_INST
 
-        ret: str = \
-            ''.join([
-                f"{B_INST} {(prompt[1]).strip()} {E_INST} {(answer[1]).strip()} "
-                for prompt, answer in zip(
-                        final_messages[::2],
-                        final_messages[1::2],
-                )
-            ])
-        #print(f'ret: {ret}')
-        #print(f'final msgs {final_messages}')
-        while (final_messages[-1][0] != "user"):
-            print( f"Last message must be from user, got {messages[-1][0]}")
-            final_messages = final_messages[:-1]
-        if len(final_messages) > 2:
-            ret_suffix =  f"{B_INST} {(final_messages[-1][1]).strip()} {E_INST}" 
-            ret=ret+ret_suffix
-        #print(f'ret_suffix: {ret_suffix}')
-        #print(f'Final ret: {ret}')
-        return ret
+        return prompt
 
         
     def get_prompt(self, include_system=False) -> str:
