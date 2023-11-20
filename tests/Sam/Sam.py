@@ -208,7 +208,7 @@ class ChatApp(QtWidgets.QWidget):
       self.setPalette(palette)
       self.codec = QTextCodec.codecForName("UTF-8")
       self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
-      
+      self.reflect = True
       #self.setStyleSheet("background-color: #101820; color")
       # Main Layout
       main_layout = QHBoxLayout()
@@ -284,6 +284,12 @@ class ChatApp(QtWidgets.QWidget):
       self.create_AWM_button.setFont(self.widgetFont)
       self.create_AWM_button.clicked.connect(self.create_AWM)
       control_layout.addWidget(self.create_AWM_button)
+      
+      self.recall_WM_button = QPushButton("Recall WM")
+      self.recall_WM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.recall_WM_button.setFont(self.widgetFont)
+      self.recall_WM_button.clicked.connect(self.recall_WM)
+      control_layout.addWidget(self.recall_WM_button)
       
       self.edit_AWM_button = QPushButton("Edit AWM")
       self.edit_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
@@ -552,6 +558,16 @@ Your task is to:
       print(f'cursor has selected, len {len(selectedText)}')
       self.samCoT.create_AWM(selectedText)
          
+   def recall_WM(self): # create a new working memory item and put it in active memory
+      selectedText = ''
+      cursor = self.input_area.textCursor()
+      if cursor.hasSelection():
+         selectedText = cursor.selectedText()
+      elif PREV_LEN < len(self.input_area.toPlainText())+2:
+         selectedText = self.input_area.toPlainText()[PREV_LEN:]
+         selectedText = selectedText.strip()
+      self.samCoT.recall_WM(selectedText)
+         
    def edit_AWM(self): # edit an active working memory item
       self.samCoT.edit_AWM()
          
@@ -588,6 +604,8 @@ Your task is to:
 
    def on_timer_timeout(self):
       global profile, profile_text
+      if not self.reflect:
+         return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
       response = self.samCoT.reflect(self.get_current_profile_prompt_text())
       print(f'Reflection response {response}')

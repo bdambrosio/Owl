@@ -1,4 +1,5 @@
 import os
+import re
 import traceback
 import requests
 import json
@@ -232,6 +233,25 @@ class SamInnerVoice():
             for item in self.details[key]:
                 self.articles+=item['title']+'\n'
         
+
+    def AWM_has(self, name):
+        if name in self.active_WM:
+            return True
+        else: return False
+        
+    def AWM_read(self, name):
+        if name in self.active_WM:
+            return self.active_WM[name]
+        else:
+            return None
+        
+    def AWM_write(self, name, value):
+        if name not in self.active_WM:
+            self.create_AWM(value, name=name)
+        self.active_WM[name]['item'] = value
+        self.active_WM[name]['type'] = str(type(value))
+        # pbly should update key if update of old item?
+            
     def save_conv_history(self):
       global memory, profile
       data = defaultdict(dict)
@@ -290,7 +310,8 @@ class SamInnerVoice():
              self.ui.display_response(f'Failure to reload conversation history {str(e)}')
 
     def save_workingMemory(self):
-       with open('SamDocHash.pkl', 'wb') as f:
+        # note we need to update WM when AWM changes! tbd
+        with open('SamDocHash.pkl', 'wb') as f:
           data = {}
           data['docHash'] = self.docHash
           pickle.dump(data, f)
@@ -321,7 +342,6 @@ class SamInnerVoice():
        else:
           return False
 
-    
     def logInput(self, input):
         with open('SamInputLog.txt', 'a') as log:
             log.write(input.strip()+'\n')
@@ -392,45 +412,57 @@ Doc's input:
 
     #
     ## Working Memory routines - maybe split into separate file?
+    ## What is AWM?
+    ## AWM is the set of working memory items that are Active, that is, included in prompt
     #
 
-
     def create_AWM(self, item, name=None, notes=None, confirm=True):
-       print(f'SamCoT store entry {item}')
-       if confirm:
-          result = self.confirmation_popup("create New Active Memory?", str(item))
-          if not result:
-             return " "
-          item = result
-       item_type = 'str'
-       if type(item) is dict: item_type='dict'
-       else: # see if it is json in string form
-          try:
-             item = json.loads(item)
-             item_type='dict'
-          except:
-             pass
-       id = generate_faiss_id(str(item))
-       if id in self.docHash:
-          id = id+1
-       key_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a descriptive text string'}}"""),
-                     ConversationHistory('history', 120),
-                     UserMessage(f'ITEM:\n{str(item)}'),
-                     AssistantMessage('')]
-       key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
-       print(f' generated key: {key_json}')
-       if type(key_json) is dict and 'key' in key_json:
-          key = key_json['key']
-       else:
-          key = str(item)[:120]
-       embed = self.embedder.encode(key)
-       if name is None:
-          name = 'wm'+str(self.workingMemoryNewNameIndex)
-          self.workingMemoryNewNameIndex += 1
-       self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
-       self.active_WM[name]=self.docHash[id]
-       self.save_workingMemory()
-       return key
+        print(f'SamCoT store entry {json.dumps(item)}')
+        if confirm:
+            result = self.confirmation_popup("create New Active Memory?", item)
+            if not result:
+                return " "
+            item = result
+        item_type = 'str'
+        if type(item) is dict: item_type='dict'
+        else: # see if it is json in string form
+            keep_trying = True
+            while keep_trying:
+                try:
+                    itemj = json.loads(item)
+                    print(f'create post loads {type(itemj)}')
+                    item_type='dict'
+                    item = itemj
+                    keep_trying = False
+                except Exception as e:
+                    result = self.confirmation_popup("not json, try again?", str(item))
+                    if not result: keep_trying = False
+                    item_type='str'
+
+        id = generate_faiss_id(str(item))
+        name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
+
+        if id in self.docHash:
+            id = id+1
+        key_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
+                      ConversationHistory('history', 120),
+                      UserMessage(f'ITEM:\n{str(item)}'),
+                      AssistantMessage('')]
+        key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+        print(f' generated key: {key_json}')
+        if type(key_json) is dict and 'key' in key_json:
+            key = key_json['key']
+        else:
+            key = str(item)[:120]
+        key = re.sub(r'[^a-z ]', '', key.lower())
+        embed = self.embedder.encode(key)
+        # add entry to Working memory
+        self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
+        # and to active Working Memory
+        self.active_WM[name]=self.docHash[id]
+        # and write-through persist
+        self.save_workingMemory()
+        return name
 
     def edit_AWM (self):
        names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
@@ -459,6 +491,7 @@ Doc's input:
                 self.active_WM[name]=json_item
                 item_w_embed = json_item.copy()
                 item_w_embed['embed'] = self.embedder.encode(json_item['key'])
+                #writethough to WM and backing store
                 self.docHash[json_item['id']] = item_w_embed
                 self.save_workingMemory()
              return 'successful edit'
@@ -485,58 +518,74 @@ Doc's input:
     def save_AWM (self):
        self.save_workingMemory()
 
-    def recall(self, query, name=None, profile=None, retrieval_count=5, retrieval_threshold=.8):
-       #
-       ## note we create and carry around embedding, but never display it or put it in a prompt (I hope)
-       #
-       query_embed = self.embedder.encode(query)
-       if name is None:
-          name = 'wm'+str(self.workingMemoryNewNameIndex)
-          self.workingMemoryNewNameIndex += 1
-          print(f'recall assigned name: {name}')
-       # gather docs matching tag filter
-       candidate_ids = []
-       vectors = []
-       # gather all docs
-       for id in self.docHash:
-          # gather all potential docs
-          candidate_ids.append(id)
-          vectors.append(self.docHash[id]['embed'])
+    def recall_WM(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
+        #
+        ## recall an item from WM into AWM
+        #
+        if query is None:
+            query = self.confirmation_popup("name or query string?", '?')
+            if query is None:
+                return
+        query = query
+        # maybe already loaded?
+        if query in self.active_WM:
+            return self.active_WM[query]
+        # test if query string matches a Working Memory item name, if so assume that is target.
+        for item in self.docHash.values():
+            if 'name' in item and item['name'].lower() == query:
+                full_item = item.copy()
+                if 'embed' in full_item: # remove embed from active memory items
+                    del full_item['embed']
+                self.active_WM[full_item['name']]=full_item
+                return full_item
+        query_embed = self.embedder.encode(query)
+        # gather docs matching tag filter
+        candidate_ids = []
+        vectors = []
+        # gather all docs
+        for id in self.docHash:
+            # gather all potential docs
+            candidate_ids.append(id)
+            vectors.append(self.docHash[id]['embed'])
           
-       # add all matching docs to index:
-       index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
-       vectors_np = np.array(vectors)
-       ids_np = np.array(candidate_ids)
-       print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
-       index.add_with_ids(vectors_np, ids_np)
-       distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
-       print("Distances:", distances)
-       print("Id:",ids)
-       timestamps = [self.docHash[i]['timestamp'] for i in ids[0]]
-       # Compute score combining distance and recency
-       scores = []
-       for dist, id, ts in zip(distances[0], ids[0], timestamps):
-          age = (time.time() - ts)/84400
-          score = dist + age * 0.1 # Weighted
-          scores.append((id, score))
-       # Sort by combined score
-       results = sorted(scores, key=lambda x: x[1])
-       #short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "item_type", "notes", "timestamp"]}
-       items=[f"{item[0]},{self.docHash[item[0]]['key']}, {str(self.docHash[item[0]]['item'])[:60]}" for item in results]
-       picker = ListDialog(items)
-       result = picker.exec()
-       if result == QDialog.Accepted:
-          selected_index = picker.selected_index()
-          print(f'Selected Item Index: {selected_index}') 
-          if selected_index != -1:  # -1 means no selection
-             full_item = self.docHash[results[selected_index][0]].copy()
-             full_item['name']=name
-             if 'embed' in full_item: # remove embed from active memory items
-                del full_item['embed']
-             self.active_WM[name]=full_item # note this suggests we might want to store embedding elsewhere.
-       else:
-         return 'recall aborted by user'
-       return f"\n{name}:\n{full_item['item']}\n"
+        # add all matching docs to index:
+        index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
+        vectors_np = np.array(vectors)
+        ids_np = np.array(candidate_ids)
+        print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
+        index.add_with_ids(vectors_np, ids_np)
+        distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
+        print("Distances:", distances)
+        print("Id:",ids)
+        timestamps = [self.docHash[i]['timestamp'] for i in ids[0]]
+        # Compute score combining distance and recency
+        scores = []
+        for dist, id, ts in zip(distances[0], ids[0], timestamps):
+            try:
+                tsint = int(ts)
+                age = (time.time() - ts)/84400
+            except:
+                age = 5
+            score = dist + age * 0.1 # Weighted
+            scores.append((id, score))
+        # Sort by combined score
+        results = sorted(scores, key=lambda x: x[1])
+        #short_form={k: self.docHash[results[0][0]][k] for k in ["key", "item", "item_type", "notes", "timestamp"]}
+        items=[f"{item[0]},{self.docHash[item[0]]['key']}, {str(self.docHash[item[0]]['item'])[:60]}" for item in results]
+        picker = ListDialog(items)
+        result = picker.exec()
+        if result == QDialog.Accepted:
+            selected_index = picker.selected_index()
+            print(f'Selected Item Index: {selected_index}') 
+            if selected_index != -1:  # -1 means no selection
+                full_item = self.docHash[results[selected_index][0]].copy()
+                if 'embed' in full_item: # remove embed from active memory items
+                    del full_item['embed']
+                self.active_WM[full_item['name']]=full_item
+                return full_item
+            else:
+                return None
+            return f"\n{full_item['name']}:\n{json.dumps(full_item['item'], indent=4)}\n"
     
 
     def get_workingMemory_available_keys(self):
@@ -565,10 +614,6 @@ New York Times news headlines for today:
 {self.articles}
 To access full articles, use the action 'article'.
 </NEWS ARTICLES>
-
-<WORKING_MEMORY_KEYS>
-{self.get_workingMemory_available_keys()}
-</WORKING_MEMORY_KEYS>
 
 <ACTIVE WORKING_MEMORY>
 {self.get_workingMemory_active_items()}
@@ -719,7 +764,7 @@ Respond only in JSON as shown in the above examples.
             elif type(content) == dict and 'action' in content and content['action']=='recall':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
-                   result = self.recall(query, profile=short_profile)
+                   result = self.recall_WM(query, profile=short_profile)
                    self.add_exchange(query, result)
                    return {"recall":result}
             elif type(content) == dict and 'action' in content and content['action']=='store':
@@ -743,13 +788,9 @@ Respond only in JSON as shown in the above examples.
                 # fallthrough, respond directly
                 user_prompt = f"""
 
-Respond to the User input below. Limit your response to approximately {max_tokens} tokens. Consider the following in generating your response:
-1. Include insights, examples, or explanations to provide a more comprehensive understanding of the topic.
-2. Integrate relevant conversation history or background information that enhances the user's understanding.
-3. Add Reflect on broader implications or related aspects of the topic that were not initially addressed.
-4. Engage in a deeper exploration of the topic by posing thoughtful questions or introducing new perspectives.
-5. Avoid adding discursive material or material that discusses how to respond. Rather, restrict your response to the content of the use input.
-Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
+Respond to the user input with a concise yet insightful reply, integrating relevant background information and broader perspectives. 
+Aim for a deeper exploration of the topic, posing thoughtful questions or new viewpoints. 
+Focus on directly addressing the user's input, avoiding extraneous material. Keep your response within approximately {max_tokens} tokens.
 
 User Input:
 {{{{$input}}}}
@@ -764,16 +805,10 @@ User Input:
                 user_prompt = f"""
 
 Your task is to review the candidate response below for depth and comprehensiveness. 
-Respond only with either with the candidate response itself or with a revised version, but not both.
-Consider these points for your revision:
-1. Include in the revision all relevant content from the original response.
-2. Expand on the candidate response with additional insights or examples to provide a more comprehensive response.
-3. Integrate relevant conversation context or background information to enhances the user's understanding.
-4. Reflect on broader implications or related aspects of the topic, to offer a more holistic perspective.
-5. Engage in a deeper exploration of the topic by posing thoughtful questions or introducing new perspectives.
-
-Limit your response to approximately {max_tokens} tokens, focusing on enriching the candidate response to the user input.
-Respond ONLY with the either your revision or the original response. 
+Respond to the user input with a concise yet insightful reply, integrating relevant background information and broader perspectives. 
+Aim for a deeper exploration of the topic, posing thoughtful questions or new viewpoints. 
+Focus on directly addressing the user's input, avoiding extraneous material. Keep your response within approximately {max_tokens} tokens.
+Respond ONLY with the either your revision or the candidate response. 
 
 candidate response:
 {theme}.

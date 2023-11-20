@@ -1,8 +1,17 @@
 import sys
 import pickle
+import json
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QPushButton, QWidget, QMessageBox
 from PyQt5.QtCore import Qt
 
+def strj(item):
+    # convert item to string.
+    # if item is dict, use json.dumps
+    if type(item) == dict:
+        return json.dumps(item)
+    else:
+        return str(item)
+    
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -31,15 +40,15 @@ class MainWindow(QMainWindow):
                 #print(f'type {type(entry)}, keys {entry.keys()}')
                 if 'name' not in entry:
                     entry['name'] = ''
-                self.tableWidget.setItem(idx, 0, QTableWidgetItem(str(entry['name'])))
-                self.tableWidget.setItem(idx, 1, QTableWidgetItem(str(entry['item'])))
-                self.tableWidget.setItem(idx, 2, QTableWidgetItem(str(entry["type"])))
+                self.tableWidget.setItem(idx, 0, QTableWidgetItem(strj(entry['name'])))
+                self.tableWidget.setItem(idx, 1, QTableWidgetItem(strj(entry['item'])))
+                self.tableWidget.setItem(idx, 2, QTableWidgetItem(strj(entry["type"])))
                 if 'notes' not in entry:
                     entry['notes'] = ''
-                self.tableWidget.setItem(idx, 3, QTableWidgetItem(str(entry["notes"])))
-                self.tableWidget.setItem(idx, 4, QTableWidgetItem(str(entry["key"])))
-                self.tableWidget.setItem(idx, 5, QTableWidgetItem(str(entry['id'])))
-                self.tableWidget.setItem(idx, 6, QTableWidgetItem(str(entry['timestamp'])))
+                self.tableWidget.setItem(idx, 3, QTableWidgetItem(strj(entry["notes"])))
+                self.tableWidget.setItem(idx, 4, QTableWidgetItem(strj(entry["key"])))
+                self.tableWidget.setItem(idx, 5, QTableWidgetItem(strj(entry['id'])))
+                self.tableWidget.setItem(idx, 6, QTableWidgetItem(strj(entry['timestamp'])))
                 deleteButton = QPushButton("Delete")
                 deleteButton.clicked.connect(lambda _, row=idx: self.deleteRow(row))
                 self.tableWidget.setCellWidget(idx, 7, deleteButton)
@@ -67,15 +76,30 @@ class MainWindow(QMainWindow):
         new_value = item.text()
         print(f'onItemChanged {row}, {column}, {new_value}')
         try:
-            id = int(self.tableWidget.item(row, 5).text())  # Assuming the first column holds the ID
+            id = int(self.tableWidget.item(row, 5).text())  # column 5 holds the ID
             #print(id)
             if id is None:
                 print (f'cant get id')
                 return
             key = self.tableWidget.horizontalHeaderItem(column).text()  # Get the column header to know which field to update
+            item = self.docHash[id]
             # Update the dictionary
             print(f'key updated {key}')
-            if key in self.docHash[id]:
+
+            if key == 'item':
+                try:
+                    new_value = json.loads(new_value)
+                except Exception as e:
+                    if  item['type'] == 'dict':
+                        print(f'item is dict, json parse failed! {str(e)}')
+                        return
+                    else:
+                        item['item'] = new_value
+                        return
+                item['type'] = 'dict'
+                item[key] = new_value
+                
+            elif key in self.docHash[id]:
                 self.docHash[id][key] = new_value
             else:
                 QMessageBox.warning(self, 'Warning', f"Key '{key}' not found in docHash")
@@ -86,7 +110,7 @@ class MainWindow(QMainWindow):
         buttonReply = QMessageBox.question(self, 'Delete Confirmation', "Are you sure you want to delete this row?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if buttonReply == QMessageBox.Yes:
             try:
-                id = int(self.tableWidget.item(row, 0).text())
+                id = int(self.tableWidget.item(row, 5).text())
                 del self.docHash[id]
             except Exception as e:
                 print(f' failed to get id or id not int {str(e)}')
