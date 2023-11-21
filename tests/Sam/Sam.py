@@ -251,6 +251,7 @@ class ChatApp(QtWidgets.QWidget):
       
       # Control Panel
       control_layout = QVBoxLayout()
+      control_layout2 = QVBoxLayout()
 
       # Buttons and Comboboxes
       self.submit_button = QPushButton("Submit")
@@ -279,41 +280,6 @@ class ChatApp(QtWidgets.QWidget):
       self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
       self.on_prompt_combo_changed('Sam')
       
-      self.create_AWM_button = QPushButton("Create AWM")
-      self.create_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.create_AWM_button.setFont(self.widgetFont)
-      self.create_AWM_button.clicked.connect(self.create_AWM)
-      control_layout.addWidget(self.create_AWM_button)
-      
-      self.recall_WM_button = QPushButton("Recall WM")
-      self.recall_WM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.recall_WM_button.setFont(self.widgetFont)
-      self.recall_WM_button.clicked.connect(self.recall_WM)
-      control_layout.addWidget(self.recall_WM_button)
-      
-      self.edit_AWM_button = QPushButton("Edit AWM")
-      self.edit_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.edit_AWM_button.setFont(self.widgetFont)
-      self.edit_AWM_button.clicked.connect(self.edit_AWM)
-      control_layout.addWidget(self.edit_AWM_button)
-      
-      self.eval_AWM_button = QPushButton("Eval AWM")
-      self.eval_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.eval_AWM_button.setFont(self.widgetFont)
-      self.eval_AWM_button.clicked.connect(self.eval_AWM)
-      control_layout.addWidget(self.eval_AWM_button)
-      
-      self.gc_AWM_button = QPushButton("gc AWM")
-      self.gc_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.gc_AWM_button.setFont(self.widgetFont)
-      self.gc_AWM_button.clicked.connect(self.gc_AWM)
-      control_layout.addWidget(self.gc_AWM_button)
-      
-      self.save_AWM_button = QPushButton("Save AWM")
-      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.save_AWM_button.setFont(self.widgetFont)
-      self.save_AWM_button.clicked.connect(self.save_AWM)
-      control_layout.addWidget(self.save_AWM_button)
       
       self.history_button = QPushButton("History") # launch Conversation History editor
       self.history_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
@@ -332,18 +298,79 @@ class ChatApp(QtWidgets.QWidget):
       self.tts_button.setFont(self.widgetFont)
       self.tts_button.clicked.connect(self.speak)
       control_layout.addWidget(self.tts_button)
+
+
+      self.create_AWM_button = QPushButton("Create AWM")
+      self.create_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.create_AWM_button.setFont(self.widgetFont)
+      self.create_AWM_button.clicked.connect(self.create_AWM)
+      control_layout2.addWidget(self.create_AWM_button)
+      
+      self.recall_WM_button = QPushButton("Recall WM")
+      self.recall_WM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.recall_WM_button.setFont(self.widgetFont)
+      self.recall_WM_button.clicked.connect(self.recall_WM)
+      control_layout2.addWidget(self.recall_WM_button)
+      
+      self.edit_AWM_button = QPushButton("Edit AWM")
+      self.edit_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.edit_AWM_button.setFont(self.widgetFont)
+      self.edit_AWM_button.clicked.connect(self.edit_AWM)
+      control_layout2.addWidget(self.edit_AWM_button)
+      
+      self.eval_AWM_button = QPushButton("Eval AWM")
+      self.eval_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.eval_AWM_button.setFont(self.widgetFont)
+      self.eval_AWM_button.clicked.connect(self.eval_AWM)
+      control_layout2.addWidget(self.eval_AWM_button)
+      
+      self.gc_AWM_button = QPushButton("gc AWM")
+      self.gc_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.gc_AWM_button.setFont(self.widgetFont)
+      self.gc_AWM_button.clicked.connect(self.gc_AWM)
+      control_layout2.addWidget(self.gc_AWM_button)
+      
+      self.save_AWM_button = QPushButton("Save AWM")
+      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.save_AWM_button.setFont(self.widgetFont)
+      self.save_AWM_button.clicked.connect(self.save_AWM)
+      control_layout2.addWidget(self.save_AWM_button)
+      
+      spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
+      control_layout2.addItem(spacer)  # Add spacer to the layout
+
+      self.plan_button = QPushButton("Plan")
+      self.plan_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.plan_button.setFont(self.widgetFont)
+      self.plan_button.clicked.connect(self.plan)
+      control_layout2.addWidget(self.plan_button)
+      
+      self.run_plan_button = QPushButton("Run Plan")
+      self.run_plan_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.run_plan_button.setFont(self.widgetFont)
+      self.run_plan_button.clicked.connect(self.run_plan)
+      control_layout2.addWidget(self.run_plan_button)
+      
+      self.step_plan_button = QPushButton("Step Plan")
+      self.step_plan_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.step_plan_button.setFont(self.widgetFont)
+      self.step_plan_button.clicked.connect(self.step_plan)
+      control_layout2.addWidget(self.step_plan_button)
+
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
+      control_layout2.addStretch(1)  # Add stretch to fill the remaining space
       self.sam = ImageDisplay()
       
       # Add control layout to main layout
       main_layout.addLayout(control_layout)
+      main_layout.addLayout(control_layout2)
       self.setLayout(main_layout)
       greeting = self.samCoT.wakeup_routine()
       self.display_response(greeting+'\n')
 
    def make_combo(self, control_layout, label, choices, callback=None):
-      spacer = QSpacerItem(0, 20)  # Horizontal spacer with 20 pixels width
+      spacer = QSpacerItem(0, 10)  # Vertical spacer with 20 pixels width
       control_layout.addItem(spacer)  # Add spacer to the layout
       
       label = QLabel(label)
@@ -579,6 +606,17 @@ Your task is to:
          
    def save_AWM(self): # save active working memory items
       self.samCoT.save_AWM()
+
+
+   def plan(self): # select or create a plan
+      self.planner.select_plan()
+         
+   def run_plan(self): # ask planner to run a plan
+      self.planner.eval_plan()
+         
+   def step_plan(self): # release a working memory item from active memory
+      self.planner.step_plan()
+
          
    def workingMem(self): # lauching working memory editor
       self.samCoT.save_workingMemory() # save current working memory so we can edit it
@@ -608,7 +646,7 @@ Your task is to:
          return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
       response = self.samCoT.reflect(self.get_current_profile_prompt_text())
-      print(f'Reflection response {response}')
+      #print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'tell' in response.keys():
             self.display_response(response['tell'])

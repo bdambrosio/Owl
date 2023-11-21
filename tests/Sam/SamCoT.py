@@ -141,12 +141,12 @@ class LLM():
                                         stop_on_json=stop_on_json)
       try:
          prompt = Prompt(prompt_msgs)
-         print(f'ask prompt {prompt_msgs}')
+         #print(f'ask prompt {prompt_msgs}')
          # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
          # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
          response = ut.run_wave (client, {"input":input}, prompt, options,
                                  self.memory, self.functions, self.tokenizer, validator=validator)
-         print(f'ask response {response}')
+         #print(f'ask response {response}')
          if type(response) is not dict or 'status' not in response or response['status'] != 'success':
             return None
          content = response['message']['content']
@@ -233,6 +233,34 @@ class SamInnerVoice():
             for item in self.details[key]:
                 self.articles+=item['title']+'\n'
         
+
+    def repair_json (self, item):
+      #
+      ## this asks gpt-4 to repair text that doesn't parse as json
+      #
+
+      prompt_text=\
+         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
+Please repair the text string so that loads can parse it and return a valid dict.
+This repair should be performed recursively, including all field values.
+for example, in:
+{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
+the inner form  {"action"...} should also be parsable as valid json.
+Return ONLY the repaired json.
+
+TextString:
+{{$input}}
+"""
+      prompt = [
+         SystemMessage(prompt_text),
+         AssistantMessage('')
+      ]
+      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=150)
+      if response is not None:
+         answer = response
+         print(f'gpt4 repair {answer}')
+         return answer
+      else: return {'gpt4':'query failure'}
 
     def AWM_has(self, name):
         if name in self.active_WM:
@@ -381,7 +409,7 @@ Doc's input:
              UserMessage(analysis_prompt_text),
              AssistantMessage(' ')
           ]
-          analysis = self.llm.ask({"input": lines}, analysis_prompt, max_tokens=150, temp=0.1)
+          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=150, temp=0.2)
           if analysis is not None:
               self.docEs = analysis.strip().split('\n')[0] # just use the first pp
           return self.docEs
@@ -400,7 +428,7 @@ Doc's input:
            AssistantMessage(' ')
        ]
        try:
-          analysis = self.llm.ask({"input": lines}, prompt, max_tokens=150)
+          analysis = self.llm.ask(lines, prompt, max_tokens=150)
           response = analysis
           self.docEs = response # remember analysis so we only do it at start of session
           return response
@@ -522,7 +550,7 @@ Doc's input:
         #
         ## recall an item from WM into AWM
         #
-        if query is None:
+        if query is None or len(query) == 0:
             query = self.confirmation_popup("name or query string?", '?')
             if query is None:
                 return
@@ -599,15 +627,16 @@ Doc's input:
        ### made into a method so can be eval'd from multiple places
        prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 
-In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. When Doc refers to "you," he's speaking to you, Samantha. When you mention "you," you're addressing Doc.
+In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
+When the user, Doc, says "I," he is referring to the user, Doc.
+When the user, Doc, says "you," he is referring to Samantha. 
+When Samantha says "you," Samantha is referring to the user, Doc.
+When Samantha refers to herself, she says "I".
 
-<BACKGROUND>
+<BACKSTORY>
 {self.ui.get_profile('Sam', 'Story')}
-</BACKGROUND>
-
-<DREAMS>
-{self.ui.get_profile('Sam', 'Dreams')}
-</DREAMS>
+Dream: {self.ui.get_profile('Sam', 'Dreams')}
+</BACKSTORY>
 
 <NEWS ARTICLES>
 New York Times news headlines for today:
@@ -644,14 +673,7 @@ Respond only in JSON format.
 Available actions include:
 
 <ACTIONS>
-- tell: Provide a direct response to user input. Reason step-by-step to create an initial response. Then consider:
-1. Expanding on the initial response with additional insights, examples, or explanations to provide a more comprehensive understanding of the topic.
-2. Integrating relevant context or background information that adds value to the response and enhances the user's understanding.
-3. Reflecting on broader implications or related aspects of the topic that were not initially addressed, to offer a more holistic perspective.
-4. Engaging in a deeper exploration of the topic by posing thoughtful questions or introducing new angles for consideration.
-5. Whenever appropriate, acknowledging the complexity of the topic and providing a balanced view that considers multiple perspectives.
-Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input.
-Example: {"action":"tell","argument":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
+- tell: Provide a direct response to user input. Consider adding insights or explanations, Integrating relevant context into your response, reflecting on broader implications. Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input. Example: {"action":"tell","argument":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
 - question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?"}
 - article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
 - gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?"}
@@ -675,7 +697,7 @@ Respond only in JSON as shown in the above examples.
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
-        print(f'action selection input {input}')
+        #print(f'action selection input {input}')
         self.action_selection_occurred = True
         short_profile = profile.split('\n')[0]
         action_validation_schema={
@@ -700,8 +722,10 @@ Respond only in JSON as shown in the above examples.
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
-        print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
+        #print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
+        if type(analysis) is not dict and '{' in dict:
+            analysis = repair_json(analysis)
         if type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
             print(f'SamCoT content {content}')
@@ -725,7 +749,7 @@ Respond only in JSON as shown in the above examples.
                    UserMessage('{{$input}}'),
                    AssistantMessage('')
                 ]
-                summary = self.llm.ask({"input":data['result']}, article_summary_msgs, template='gpt-3.5-turbo-1106', max_tokens=650)
+                summary = self.llm.ask(data['result'], article_summary_msgs, template='gpt-3.5-turbo-1106', max_tokens=650)
                 if summary is not None:
                    self.add_exchange(input, summary)
                    return {"article":  summary}
@@ -733,11 +757,11 @@ Respond only in JSON as shown in the above examples.
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'\nretrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               full_tell = self.tell(content['argument'], input, widget, short_profile)
-               self.add_exchange(input, full_tell)
-               return {"tell": full_tell}
-               #self.add_exchange(input, content['argument'])
-               #return {"tell":content['argument']}
+               #full_tell = self.tell(content['argument'], input, widget, short_profile)
+               #self.add_exchange(input, full_tell)
+               #return {"tell": full_tell}
+               self.add_exchange(input, content['argument'])
+               return {"tell":content['argument']}
             elif type(content) == dict and 'action' in content and content['action']=='web':
                 query = self.confirmation_popup('Web Search', content['argument'])
                 if query:
@@ -788,9 +812,10 @@ Respond only in JSON as shown in the above examples.
                 # fallthrough, respond directly
                 user_prompt = f"""
 
-Respond to the user input with a concise yet insightful reply, integrating relevant background information and broader perspectives. 
-Aim for a deeper exploration of the topic, posing thoughtful questions or new viewpoints. 
-Focus on directly addressing the user's input, avoiding extraneous material. Keep your response within approximately {max_tokens} tokens.
+Respond to the user input with a concise yet insightful reply. 
+Explor implications of the input, and integrate relevant prior conversation.
+Focus directly on the user's input, avoiding extraneous material or superflous dialog. 
+Keep your response within approximately {max_tokens} tokens.
 
 User Input:
 {{{{$input}}}}
@@ -805,10 +830,11 @@ User Input:
                 user_prompt = f"""
 
 Your task is to review the candidate response below for depth and comprehensiveness. 
-Respond to the user input with a concise yet insightful reply, integrating relevant background information and broader perspectives. 
-Aim for a deeper exploration of the topic, posing thoughtful questions or new viewpoints. 
-Focus on directly addressing the user's input, avoiding extraneous material. Keep your response within approximately {max_tokens} tokens.
-Respond ONLY with the either your revision or the candidate response. 
+Respond to the user input with a concise yet insightful reply. 
+Explore implications of the input, and integrate relevant prior conversation.
+Focus directly on the user's input, avoiding extraneous material or superfluous dialog. 
+Keep your response within approximately {max_tokens} tokens.
+Respond ONLY with either your revision or the candidate response. 
 
 candidate response:
 {theme}.
@@ -825,30 +851,14 @@ User Input:
                 #max_tokens = int(len(theme)/3+30)
             #response = self.llm.ask(user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
             response = self.llm.ask(user_text, prompt_msgs, max_tokens=max_tokens)
-            #try:
-            #    print(f'etell raw response from ask: {response}')
-            #    responsej = self.jsonValidator.validate_response(None, None, None, {"message": {"content":response}},
-            #                                                     remaining_attempts=0)
-            #    #print(f'etell JSONValidator response: {responsej}')
-            #    if type(responsej) is dict and 'type' in responsej and responsej["type"]=='Validation':
-            #        if 'valid' in responsej and responsej['valid']:
-            #            response = responsej['value']
-            #    elif 'value' in responsej:
-            #        value = responsej['value']
-            #        if type(value) is dict:
-            #            response = value
-            #except Exception as e:
-            #    print(f'Exception parsing raw response as json {str(e)}')
-            #    traceback.print_exc()
-            #    return '\n'+theme+'\n'
-            #if response is not None and type(response) is dict and 'response' in response:
-            #    response = response['response']
-            #if response is not None and type(response) is dict:
-            #    response = str(response)
             if response is not None and type(response) is str:
                 loc = response.lower().find('user input:')
                 if loc > 0:
                     response = response[:loc]
+                if 'Revised Response:' in response:
+                    idx = response.find('Revised Response:')
+                    if idx > -1:
+                        response = response[idx + 18:]
             if response is not None and theme is not None:
                 if len(response) > len(theme): # prefer extended response even if a little shorter
                     return '\n'+response+'\n'
@@ -917,43 +927,61 @@ User Input:
        prompt = [SystemMessage("Assignment: Extract keywords and named-entities from the conversation below.\nConversation:\n{{$input}}\n."),
                  AssistantMessage('')
                  ]       
-       response = self.llm.ask({"input":text}, prompt, temp=0.2, max_tokens=50)
+       response = self.llm.ask(text, prompt, temp=0.2, max_tokens=50)
        if response is not None:
           keywords = response
           return keywords
        else: return ''
        
     def topic_analysis(self,profile_text):
+       #key_ents isn't being used right now?
        keys_ents = self.get_keywords(self.memory.get('history'))
-       print(f'keywords {keys_ents}')
+       #print(f'keywords {keys_ents}')
        prompt = [SystemMessage("Assignment: Determine the main topics of a conversation based on the provided keywords below. The response should be an array of strings that represent the main topics discussed in the conversation based on the given keywords and named entities.\n"),
                  UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
                  AssistantMessage('')
                  ]
-       response = self.llm.ask({"input":keys_ents}, prompt, temp=0.1, max_tokens=50)
+       response = self.llm.ask(keys_ents, prompt, temp=0.1, max_tokens=75)
        if response is not None:
           topic = response
-          print(f'topic_analysis topics{topic}')
+          #print(f'topic_analysis topics{topic}')
           return topic
        else: return 'unknown'
-                                      
+
+    def internal_dialog(self, profile):
+        prompt = [
+            SystemMessage(profile.split('\n')[0]),
+            ConversationHistory('history', 300),
+            AssistantMessage('{{$input}}')
+            ]
+        
+        feelings = self.llm.ask('My feelings right now in 24 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        if feelings is not None:
+            self.add_exchange("Samantha's feelings:", feelings)
+        goals = self.llm.ask('What would I like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        if goals is not None:
+            self.add_exchange("Samantha's goals:", goals)
+        print(f'internal_dialog feelings{feelings} goals {goals}')
+        
 
     def reflect(self, profile_text):
        global es
        results = {}
        print('reflection begun')
        es = self.sentiment_analysis(profile_text)
-       print(f'sentiment_analysis {es}')
+       #print(f'sentiment_analysis {es}')
        if es is not None:
           results['sentiment_analysis'] = es
        if self.current_topics is None:
           self.current_topics = self.topic_analysis(profile_text)
-          print(f'topic-analysis: {self.current_topics}')
+          #print(f'topic-analysis: {self.current_topics}')
           results['current_topics'] = self.current_topics
+       if random.randint(1, 5) == 1:
+           self.internal_dialog(profile_text)
        now = int(time.time())
        if self.action_selection_occurred and now-self.last_tell_time > random.random()*240+60 :
           self.action_selection_occurred = False # reset action selection so no more tells till user input
-          print('do I have anything to say?')
+          #print('do I have anything to say?')
           self.last_tell_time = now
           prompt = [
              SystemMessage(profile_text.split('\n')[0:4]),
@@ -981,10 +1009,10 @@ Limit your thought to 180 words."""),
           ]
           response = None
           try:
-             response = self.llm.ask({"input":''}, prompt, max_tokens=240)
+             response = self.llm.ask('', prompt, max_tokens=240)
           except Exception as e:
              traceback.print_exc()
-          print(f'LLM tell response {response}')
+          #print(f'LLM tell response {response}')
           answer = ''
           if response is not None:
              answer = response.strip()
@@ -1000,7 +1028,7 @@ Limit your thought to 180 words."""),
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
          AssistantMessage('')
       ]
-      response = self.llm.ask({"input":response}, prompt, template = self.template, temp=.1, max_tokens=400)
+      response = self.llm.ask(response, prompt, template = self.template, temp=.1, max_tokens=400)
       if response is not None:
          return '\nWiki Summary:\n'+response+'\n'
       else: return 'wiki lookup and summary failure'
@@ -1028,7 +1056,7 @@ Limit your thought to 180 words."""),
              UserMessage(f'{query}'),
              AssistantMessage('')
           ]
-       response = self.llm.ask({"input":query}, prompt, template=GPT4, max_tokens=400)
+       response = self.llm.ask(query, prompt, template=GPT4, max_tokens=400)
        if response is not None:
           answer = response
           print(f'gpt4 answered')
@@ -1084,12 +1112,3 @@ class WebSearch(QThread):
 
 if __name__ == '__main__':
     sam = SamInnerVoice(model='alpaca')
-    #print(sam.sentiment_analysis('You are Sam, a wonderful and caring AI assistant'))
-    #print(sam.action_selection("Hi Sam. We're going to run an experiment ?",  'I would like to explore ', sam.details))
-    #print(generate_faiss_id('a text string'))
-    sam.store('this is a sentence about large language models')
-    sam.store('this is a sentence about doc')
-    sam.store('a girl, Hope, and a tarantula, rambutan, were great friends')
-    print(sam.recall('an unlikely friendship'))
-    #print(sam.recall('language models'))
-    #print(sam.recall(''))

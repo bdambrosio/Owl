@@ -618,6 +618,15 @@ class WebSearch(QThread):
       data = response.json()
       return data
 
+class PlanState():
+   def __init__(self, name, task_dscp):
+      self.name = name
+      self.task_dscp = task_dscp
+      self.sbar = None
+      self.sbar.status = None
+      self.plan = None
+      self.plan.status = None
+      
 class Planner():
    #
    ### we should 1 or 2 shot planner requests to LLM so it knows format!
@@ -638,9 +647,10 @@ class Planner():
        # note many activities will use first paragraph only. Keep it relevant!
        self.cvHistory = load_conv_history()  # load conversation history.
        self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
-You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
+You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
        self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, model=self.model)
+       self.active_plan_state = None
 
 
     def save_plan(self, task_name, plan):
@@ -656,6 +666,27 @@ Your conversation style is warm, gentle, humble, and engaging. """
           print(f'plan load failure {str(e)}')
        return []
     
+    def select_plan(self):
+       for entry in self.names=[f"{self.samCoT.docHash[item]['name']}: {str(self.samCoT.docHash[item]['item'])[:48]}" for item in self.samCoT.docHash ]
+         picker = ListDialog(items)
+         result = picker.exec()
+         if result == QDialog.Accepted:
+            selected_index = picker.selected_index()
+            if selected_index != -1:  # -1 means no selection
+               self.active_plan_state = names[selected_index].split(':')[0]
+               return
+            else: # init new plan
+               plan_state = self.init_plan()
+               self.active_plan_state = plan_state
+               
+
+    def init_plan(self):
+       name = self.samCoT.confirmation_prompt('Plan Name?', 'plan'+random.randint(0,4345))
+       task_dscp = self.samCoT.confirmation_prompt('Short description?',"do something useful")
+       self.plan_state = PlanState(name+'State', task_dscp)
+       self.samCoT.create_AWM(name, self.plan_state)
+       return plan_state
+       
     def analyze(self, prefix, form):
        self.sbar = None
        if prefix is None:
