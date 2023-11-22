@@ -612,7 +612,7 @@ Your task is to:
       self.planner.select_plan()
          
    def run_plan(self): # ask planner to run a plan
-      self.planner.eval_plan()
+      self.planner.run_plan()
          
    def step_plan(self): # release a working memory item from active memory
       self.planner.step_plan()

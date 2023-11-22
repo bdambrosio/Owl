@@ -2,11 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-<<<<<<< HEAD
 *.py~
-=======
-
->>>>>>> ee114f6b5a03d1744c426ced3100d8e70683ca82
 # C extensions
 *.so
 
@@ -218,3 +214,4 @@ tests/results/
 tests/usermodel_class.py
 tests/utils.py
 tests/vlite.ipynb
+tests/Sam/

@@ -12,7 +12,7 @@ import numpy as np
 import faiss
 import pickle
 import hashlib
-import readline
+#import readline
 import nltk
 from datetime import datetime, date, timedelta
 import openai
@@ -47,7 +47,7 @@ import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
-from SamCoT import ListDialog, LLM, GPT4
+from SamCoT import ListDialog, LLM, GPT4, TextEditDialog
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -618,20 +618,11 @@ class WebSearch(QThread):
       data = response.json()
       return data
 
-class PlanState():
-   def __init__(self, name, task_dscp):
-      self.name = name
-      self.task_dscp = task_dscp
-      self.sbar = None
-      self.sbar.status = None
-      self.plan = None
-      self.plan.status = None
-      
 class Planner():
    #
    ### we should 1 or 2 shot planner requests to LLM so it knows format!
    #
-    def __init__(self, ui, samCoT, model='alpaca'):
+   def __init__(self, ui, samCoT, model='alpaca'):
        self.model = model
        self.ui = ui
        self.samCoT = samCoT
@@ -653,11 +644,19 @@ Your conversation style is warm, gentle, humble, and engaging. """
        self.active_plan_state = None
 
 
-    def save_plan(self, task_name, plan):
+   def make_plan(self, name, task_dscp):
+      plan = {}
+      plan['name'] = name
+      plan['dscp'] = task_dscp
+      plan['sbar'] = {}
+      plan['steps'] = {}
+      return plan
+   
+   def save_plan(self, task_name, plan):
        with open(task_name+'Plan.json', 'w') as f:
           json.dump(plan, f, indent=4)
 
-    def load_plan(self, task_name):
+   def load_plan(self, task_name):
        try:
           with open(task_name+'Plan.json', 'r') as f:
              plan = json.load(f)
@@ -666,95 +665,123 @@ Your conversation style is warm, gentle, humble, and engaging. """
           print(f'plan load failure {str(e)}')
        return []
     
-    def select_plan(self):
-       for entry in self.names=[f"{self.samCoT.docHash[item]['name']}: {str(self.samCoT.docHash[item]['item'])[:48]}" for item in self.samCoT.docHash ]
-         picker = ListDialog(items)
-         result = picker.exec()
-         if result == QDialog.Accepted:
-            selected_index = picker.selected_index()
-            if selected_index != -1:  # -1 means no selection
-               self.active_plan_state = names[selected_index].split(':')[0]
-               return
-            else: # init new plan
-               plan_state = self.init_plan()
-               self.active_plan_state = plan_state
-               
+   def validate_plan(self, plan):
+      if plan is None or type(plan) != dict:
+         return False
+      if 'name' not in plan or 'sbar' not in plan or 'dscp' not in plan or 'steps' not in plan:
+         return False
+      return True
+   
+   def select_plan(self):
+       items=[f"{self.samCoT.docHash[item]['name']}: {str(self.samCoT.docHash[item]['item'])[:48]}" for item in self.samCoT.docHash if self.samCoT.docHash[item]['name'].startswith('plan')]
+       picker = ListDialog(items)
+       result = picker.exec()
+       if result == QDialog.Accepted:
+          selected_index = picker.selected_index()
+          if selected_index != -1:  # -1 means no selection
+             plan_name = items[selected_index].split(':')[0]
+             wm = self.samCoT.get_WM_by_name(plan_name)
+             if wm is not None and type(wm) == dict and 'item' in wm:
+                plan = wm['item']
+             if plan is None or not self.validate_plan(plan):
+                print(f'failed to load "{plan_name}"\n{plan}')
+                return None
+             else:
+                self.active_plan = plan
+                print(f"loaded plan {self.active_plan['name']}")
+       else: # init new plan
+          plan = self.init_plan()
+          if self.active_plan is None or not self.validate_plan(self.active_plan):
+             print(f'failed to load new plan\n"{plan}"')
+             return None
+          self.active_plan = plan
+          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
+       return self.active_plan
+    
+   def init_plan(self):
+       index_str = str(random.randint(0,999))+'_'
+       plan_suffix = self.samCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
+       if plan_suffix is None or not plan_suffix:
+          return
+       plan_name = 'plan'+index_str+plan_suffix
+       task_dscp = self.samCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
+       plan = self.make_plan(plan_name, task_dscp)
+       self.samCoT.create_AWM(plan, name=plan_name, confirm=False)
+       return plan
 
-    def init_plan(self):
-       name = self.samCoT.confirmation_prompt('Plan Name?', 'plan'+random.randint(0,4345))
-       task_dscp = self.samCoT.confirmation_prompt('Short description?',"do something useful")
-       self.plan_state = PlanState(name+'State', task_dscp)
-       self.samCoT.create_AWM(name, self.plan_state)
-       return plan_state
-       
-    def analyze(self, prefix, form):
-       self.sbar = None
-       if prefix is None:
-          prefix = 'tempClassName'
-          class_prefix_prompt = [SystemMessage(f"""Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}""")]
-          prefix_json = self.llm.ask(form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
-          print(f'***** prefix response {prefix_json}')
-          if type(prefix_json) is dict and 'name' in prefix_json.keys():
-             prefix = prefix_json['name']
-             print(f'******* task prefix: {prefix}')
-       else:
-          try:
-             with open(prefix+'UserRequirements.json', 'r') as pf:
-                user_responses = json.load(pf)
-                self.prefix = prefix
-                self.sbar = user_responses
-                if input('Use existing sbar?').strip().lower() == 'yes':
-                   return prefix, user_responses
-          except Exception as e:
-             print(f'no {prefix} SBAR found')
+   def run_plan(self):
+       if self.active_plan is None:
+          result = self.select_plan()
+          if not result: return None
+          else:
+             next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+             if not next: return
+       if self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
+          result = self.analyze()
+          if result is None: return None
+          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
+          next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+          if not next: return
+       if self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
+          result = self.plan()
+          if result is None: return None
+          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
+          next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+          if not next: return
+          self.ui.display_response('nothing further implemented yet')
+          
+   def analyze(self):
+      prefix = self.active_plan['name']
+      task_dscp = self.active_plan['dscp']
+      sbar = self.active_plan['sbar']
+      # Loop for obtaining user responses
+      # Generate interview questions for the remaining steps using GPT-4
+      interview_instructions = [
+         ("needs", "Generate an interview question to fill out specifications of the task the user wants to accomplish."),
+         ("background", "Generate an interview question to ask about any additional requirements of the task."),
+         ("observations", "Summarize the information about the task, and comment on any incompleteness in the definition."),
+      ]
+      messages = [SystemMessage("Reason step by step"),
+                  UserMessage("The task is to "+task_dscp)]
+      for step, instruction in interview_instructions:
+         messages.append(UserMessage(instruction))
+         if step != 'observations':
+            user_prompt = self.llm.ask('', messages, temp = 0.05, max_tokens=100)
+            if user_prompt is not None:
+               user_prompt = user_prompt.split('\n')[0]
+            print(f"\nAI : {step}, {user_prompt}")
+            past = ''
+            if sbar is not None and sbar == dict and step in self.active_plan['sbar']:
+               past = self.active_plan_state.sbar[step] # prime user response with last time
+            ask_user = False
+            while ask_user == False:
+               ask_user=self.samCoT.confirmation_popup(user_prompt, past)
+            sbar[step] = user_prompt+'\n'+ask_user
+            messages.append(AssistantMessage(user_prompt))
+            messages.append(UserMessage(ask_user))
+         else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
+            observations = self.llm.ask('', messages, max_tokens=150,temp = 0.05)
+            sbar['observations']=observations
+            print(f"\nAI : {step}, {observations}")
+            user_response = False
+            while user_response == False:
+               user_response = self.samCoT.confirmation_popup(observations, '')
+            sbar['observations']=observations+'\n'+user_response
+            # don't need to add a message since we're done with this conversation thread!
+            print(f"Requirements \n{sbar}")
+         try:
+            with open(prefix+'Sbar.json', 'w') as pf:
+               json.dump(sbar, pf)
+         except:
+            traceback.print_exc()
+         self.active_plan['sbar'] = sbar
+      return self.active_plan
 
-       user_responses = {}
-       # Loop for obtaining user responses
-       # Generate interview questions for the remaining steps using GPT-4
-       interview_instructions = [
-          ("needs", "Generate an interview question to determine the task the user wants to accomplish."),
-          ("background", "Generate an interview question to ask about any additional requirements of the task."),
-          ("observations", "Summarize the information about the task, and comment on any incompleteness in the definition."),
-       ]
-       messages = [SystemMessage("Reason step by step"),
-                   UserMessage("The task is to "+form)]
-       for step, instruction in interview_instructions:
-          messages.append(UserMessage(instruction))
-          if step != 'observations':
-             user_prompt = self.llm.ask('', messages, temp = 0.05)
-             print(f"\nAI : {step}, {user_prompt}")
-             past = ''
-             if self.sbar is not None and type(self.sbar) is dict and step in self.sbar.keys():
-                past = self.sbar[step] # prime user response with last time
-                readline.set_startup_hook(lambda: readline.insert_text(past))
-             try:
-                user_input = input(user_prompt)
-             finally:
-                readline.set_startup_hook()
-                user_responses[step] = user_prompt+'\n'+user_input
-                messages.append(AssistantMessage(user_prompt))
-                messages.append(UserMessage(user_input))
-          else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
-             observations = self.llm.ask('', messages, max_tokens=150,temp = 0.05)
-             user_responses['observations']=observations
-             print(f"\nAI : {step}, {observations}")
-             user_response = input("User: ")
-             user_responses['observations']=observations+'\n'+user_response
-             print(f"Requirements \n{user_responses}")
-       try:
-          with open(prefix+'UserRequirements.json', 'w') as pf:
-             json.dump(user_responses, pf)
-       except:
-          traceback.print_exc()
-          self.prefix = prefix
-          self.sbar = user_responses
-       return prefix, user_responses
-
-    def sbar_as_text(self):
+   def sbar_as_text(self):
        return f"\nTASK:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nReview:\n{self.sbar['observations']}\nEND TASK\n"
 
 
-    def plan(self):
+   def plan(self):
        
        plan_prompt=\
           """
@@ -767,7 +794,7 @@ The plan may include four agents:
   iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
   iv User: can provide input to the Driver and Assistant, and can interact with the system to review and approve the plan and participate in its execution.
 """
-       print(f'******* Developing Plan for {self.prefix}')
+       print(f'******* Developing Plan for {self.active_plan["name"]}')
 
        revision_prompt=\
           """
@@ -788,12 +815,12 @@ The plan may include four agents:
           messages = [SystemMessage("""You're tasked with creating a plan using a set of predefined actions. Each action has specific arguments and results. Below is the structure you should follow:\n'+planner_nl_list_prompt"""),
                       SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
                       SystemMessage(plan_prompt),
-                      UserMessage(f'TaskName: {self.prefix}\n{self.sbar_as_text()}')
+                      UserMessage(f"TaskName: {self.active_plan['name']}\n{json.dumps(self.active_plan['sbar'])}")
                       ]
           if first_time:
              first_time = False
           else:
-             messages.append(UserMessage('the User has provided the following information: '+self.sbar_as_text()))
+             messages.append(UserMessage('the User has provided the following information:\n'+json.dumps(self.active_plan['sbar']))),
              messages.append(UserMessage('Reason step by step'))
              messages.append(AssistantMessage("Plan:\n"+plan))
              messages.append(UserMessage('Critique: '+user_critique))
@@ -802,21 +829,21 @@ The plan may include four agents:
           #print(f'******* task state prompt:\n {gpt_message}')
           plan = self.llm.ask('', messages, template='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
-          print(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+          self.ui.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
-          user_critique = input('Critique: ')
-          if len(user_critique) <4:
+          user_critique = self.samCoT.confirmation_popup('Critique', '')
+          print(f'user_critique {user_critique}')
+          if user_critique != False and len(user_critique) <4:
              user_satisfied = True
              print("*******user satisfied with plan")
              break
           else:
              print('***** user not satisfield, retrying')
              
-       self.save_plan(self.prefix, plan)
+       self.active_plan['steps'] = plan
        # experiment - did we get an understandable plan?
-       step = self.interpreter.first(plan)
-       print(step)
-       return plan     
+       #step = self.interpreter.first(plan)
+       return self.active_plan
 
 if __name__ == '__main__':
    import Sam as sam

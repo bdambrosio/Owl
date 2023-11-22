@@ -411,7 +411,7 @@ Doc's input:
           ]
           analysis = self.llm.ask(lines, analysis_prompt, max_tokens=150, temp=0.2)
           if analysis is not None:
-              self.docEs = analysis.strip().split('\n')[0] # just use the first pp
+              self.docEs = analysis.strip().split('\n')[0:2] # just use the first 2 pp
           return self.docEs
        except Exception as e:
           traceback.print_exc()
@@ -447,7 +447,7 @@ Doc's input:
     def create_AWM(self, item, name=None, notes=None, confirm=True):
         print(f'SamCoT store entry {json.dumps(item)}')
         if confirm:
-            result = self.confirmation_popup("create New Active Memory?", item)
+            result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
                 return " "
             item = result
@@ -468,7 +468,8 @@ Doc's input:
                     item_type='str'
 
         id = generate_faiss_id(str(item))
-        name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
+        if name is None or confirm:
+            name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
 
         if id in self.docHash:
             id = id+1
@@ -545,6 +546,13 @@ Doc's input:
 
     def save_AWM (self):
        self.save_workingMemory()
+
+    def get_WM_by_name(self, name):
+        for item in self.docHash.values():
+            if 'name' in item and item['name'] == name:
+                return item
+        return None
+
 
     def recall_WM(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
         #
@@ -724,8 +732,8 @@ Respond only in JSON as shown in the above examples.
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         #print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
-        if type(analysis) is not dict and '{' in dict:
-            analysis = repair_json(analysis)
+        if type(analysis) != dict and ('{' in analysis):
+            analysis = self.repair_json(analysis)
         if type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
             print(f'SamCoT content {content}')
@@ -934,14 +942,13 @@ User Input:
        else: return ''
        
     def topic_analysis(self,profile_text):
-       #key_ents isn't being used right now?
-       keys_ents = self.get_keywords(self.memory.get('history'))
        #print(f'keywords {keys_ents}')
-       prompt = [SystemMessage("Assignment: Determine the main topics of a conversation based on the provided keywords below. The response should be an array of strings that represent the main topics discussed in the conversation based on the given keywords and named entities.\n"),
-                 UserMessage('Keywords and Named Entities:\n{{$input}}\n.'),
+       prompt = [SystemMessage(profile_text),
+                 ConversationHistory('history', 1000),
+                 UserMessage("Determine the main topics of the above conversation. The response should be an array of strings stating the main topics."),
                  AssistantMessage('')
                  ]
-       response = self.llm.ask(keys_ents, prompt, temp=0.1, max_tokens=75)
+       response = self.llm.ask('', prompt, temp=0.1, max_tokens=75)
        if response is not None:
           topic = response
           #print(f'topic_analysis topics{topic}')
