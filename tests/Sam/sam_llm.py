@@ -25,10 +25,12 @@ models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower())]
+models.append('orca-2-13b-16bit')
 
 templates = {"CodeLlama-34B-instruct-exl2":"",
              "Mistral-7B-OpenOrca-exl2":"",
              "platypus2-70b-instruct-gptq":"alpaca",
+             "platypus2-70b-instruct-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "Spicyboros-70b-22-GPTQ":"llama-2(?)",
@@ -36,7 +38,9 @@ templates = {"CodeLlama-34B-instruct-exl2":"",
              "ShiningValiant-4bpw-h6-exl2":"llama-2(?)",
              "Airoboros-L2-70b-312-GPTQ":"llama-2",
              "airoboros-c34b-3.1.2-8.0bpq-h6-exl2":"llama-2",
-             "mistral-airoboros-7b-GPTQ":"?"}
+             "mistral-airoboros-7b-GPTQ":"?",
+             "orca-2-13b-16bit":"chatml"
+             }
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:

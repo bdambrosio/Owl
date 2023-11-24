@@ -97,6 +97,7 @@ port = 5004
 
 GPT4='gpt-4-1106-preview'
 
+
 def generate_faiss_id(document):
     hash_object = hashlib.sha256()
     hash_object.update(document.encode("utf-8"))
@@ -232,6 +233,7 @@ class SamInnerVoice():
         for key in self.details.keys():
             for item in self.details[key]:
                 self.articles+=item['title']+'\n'
+        self.tokenizer = GPT3Tokenizer()
         
 
     def repair_json (self, item):
@@ -246,6 +248,7 @@ This repair should be performed recursively, including all field values.
 for example, in:
 {"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
 the inner form  {"action"...} should also be parsable as valid json.
+The provided TextString may have been prematurely truncated. If so, the repair should include adding any necessary JSON termination.
 Return ONLY the repaired json.
 
 TextString:
@@ -255,30 +258,32 @@ TextString:
          SystemMessage(prompt_text),
          AssistantMessage('')
       ]
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=150)
+      input_tokens = len(self.tokenizer.encode(item)) 
+      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=20+input_tokens*1.5)
       if response is not None:
          answer = response
          print(f'gpt4 repair {answer}')
          return answer
       else: return {'gpt4':'query failure'}
 
-    def AWM_has(self, name):
+    def has_AWM(self, name):
         if name in self.active_WM:
             return True
         else: return False
         
-    def AWM_read(self, name):
+    def get_AWM(self, name):
         if name in self.active_WM:
             return self.active_WM[name]
         else:
             return None
         
-    def AWM_write(self, name, value):
-        if name not in self.active_WM:
-            self.create_AWM(value, name=name)
-        self.active_WM[name]['item'] = value
-        self.active_WM[name]['type'] = str(type(value))
-        # pbly should update key if update of old item?
+        
+    #def put_AWM(self, name, value):
+    #    if name not in self.active_WM:
+    #        self.create_AWM(value, name=name)
+    #    self.active_WM[name]['item'] = value
+    #    self.active_WM[name]['type'] = str(type(value))
+
             
     def save_conv_history(self):
       global memory, profile
@@ -445,7 +450,7 @@ Doc's input:
     #
 
     def create_AWM(self, item, name=None, notes=None, confirm=True):
-        print(f'SamCoT store entry {json.dumps(item)}')
+        print(f'SamCoT create_AWM {name}, {item}')
         if confirm:
             result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
@@ -453,36 +458,39 @@ Doc's input:
             item = result
         item_type = 'str'
         if type(item) is dict: item_type='dict'
-        else: # see if it is json in string form
-            keep_trying = True
-            while keep_trying:
-                try:
-                    itemj = json.loads(item)
-                    print(f'create post loads {type(itemj)}')
-                    item_type='dict'
-                    item = itemj
-                    keep_trying = False
-                except Exception as e:
-                    result = self.confirmation_popup("not json, try again?", str(item))
-                    if not result: keep_trying = False
-                    item_type='str'
+        elif '{' in item: # see if it is json in string form
+            itemj = ''
+            try:
+                itemj = json.loads(item)
+            except:
+                itemj = self.repair_json(item)
+            if type(itemj) is dict:
+                item_type='dict'
+                item = itemj
 
-        id = generate_faiss_id(str(item))
+        # check if we have name already, at least in AWM
         if name is None or confirm:
             name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
-
-        if id in self.docHash:
-            id = id+1
-        key_prompt = [SystemMessage(f"""Generate a short descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
-                      ConversationHistory('history', 120),
-                      UserMessage(f'ITEM:\n{str(item)}'),
-                      AssistantMessage('')]
-        key_json = self.llm.ask('', key_prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
-        print(f' generated key: {key_json}')
-        if type(key_json) is dict and 'key' in key_json:
-            key = key_json['key']
+        if name is None or name not in self.active_WM:
+            id = generate_faiss_id(str(item))
+            if id in self.docHash:
+                id = id+1
         else:
-            key = str(item)[:120]
+            id = self.active_WM[name]['id']
+
+        if len(str(item)) > 32:
+            key_prompt = [SystemMessage(f"""Generate a very short (less that 10 tokens) descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
+                          ConversationHistory('history', 120),
+                          UserMessage(f'ITEM:\n{str(item)}'),
+                          AssistantMessage('')]
+            key_json = self.llm.ask('', key_prompt, max_tokens=15, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+            print(f' generated key: {key_json}')
+            if type(key_json) is dict and 'key' in key_json:
+                key = key_json['key']
+            else:
+                key = str(item)[:120]
+        else:
+            key = str(item)
         key = re.sub(r'[^a-z ]', '', key.lower())
         embed = self.embedder.encode(key)
         # add entry to Working memory
@@ -732,9 +740,9 @@ Respond only in JSON as shown in the above examples.
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
         #print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
-        if type(analysis) != dict and ('{' in analysis):
+        if analysis is not None and type(analysis) != dict and ('{' in analysis):
             analysis = self.repair_json(analysis)
-        if type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
+        if analysis is not None and type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
             print(f'SamCoT content {content}')
             if type(content) == dict and 'action' in content and content['action']=='article':

@@ -30,7 +30,7 @@ from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave.ChoiceResponseValidator import ChoiceResponseValidator
 from alphawave.TOMLResponseValidator import TOMLResponseValidator
 from alphawave_pyexts import utilityV2 as ut
-from alphawave_pyexts import LLMClient as llm
+#from alphawave_pyexts import LLMClient as llm
 from alphawave_pyexts import Openbook as op
 from alphawave.OSClient import OSClient
 from alphawave.OpenAIClient import OpenAIClient
@@ -284,7 +284,7 @@ By using this prompt, you can conduct a comprehensive evaluation of the text's q
 planner_nl_list_prompt =\
    """
 Plan Format:
-Your plan should be structured as a list of instantiated actions from the above action list. Each action instantiation will include the specified action, the arguments for that action, and the name to assign to the result. 
+Your plan must be a JSON list ( [...] ) of instantiated actions. Each action instantiation is a will include the specified action, the arguments for that action, and the name to assign to the result. 
 All names must appear in a result before the can be referenced as arguments.
 The order of the actions in the plan matters, as it represents the sequence in which they should be executed.
 
@@ -374,12 +374,13 @@ TextString:
          SystemMessage(prompt_text),
          AssistantMessage('')
       ]
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=150)
+      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=500, validator=JSONResponseValidator())
+      print(f'gpt4 repair {response}')
       if response is not None:
          answer = response
-         print(f'gpt4 repair {answer}')
          return answer
-      else: return {'gpt4':'query failure'}
+      else:
+         return None
 
    #
    ### Eval a form in AWM, assuming it is a plan-step
@@ -403,7 +404,10 @@ TextString:
          name = names[selected_index].split(':')[0]
          awm_entry = self.samCoT.active_WM[name]
          if type(awm_entry) is not dict:
-            entry = repair_json(awm_entry)
+            entry = self.repair_json(awm_entry)
+            if entry is None:
+               self.ui.display_response(f'unable to repair {awm_entry}')
+               continue
          else:
             entry = awm_entry
          if type(entry['item']) != dict:
@@ -415,33 +419,50 @@ TextString:
                try:
                   print(f"json loads failed {str(e)}, trying repair")
                   item = self.repair_json(entry['item'])
-                  dict_item = json.loads(item)
                   valid_json=True
                   print(f"repair succeeded")
                except:
                   self.ui.display_response(f'invalid json {str(e)}')
                   return "failed to convert to json"
-               
-         # ok, item is a dict, let's see if it is an action
-         if 'action' not in dict_item:
-            self.ui.display_response(f'item is not an action {item}')
-            continue
-         elif dict_item['action'] == 'article':
-            return self.eval_article(dict_item)
-         elif dict_item['action'] == 'assign':
-            return self.eval_assign(dict_item)
-         elif dict_item['action'] == 'first':
-            return self.eval_first(dict_item)
-         elif dict_item['action'] == 'web':
-            return self.eval_web(dict_item)
-         elif dict_item['action'] == 'difference':
-            return self.eval_difference(dict_item)
-         elif dict_item['action'] == 'tell':
-            return self.eval_tell(dict_item)
-         elif dict_item['action'] == 'wiki':
-            return self.eval_wiki(dict_item)
-         return 'no item selected or no item found'
-      return 'action not yet implemented'
+      # finally have clean json
+      return self.do_item(entry['item'])
+                              
+   def do_item(self, item):
+       dict_item = None
+       if type(item) == dict:
+          dict_item = item   
+       else:
+          print(f'do_item item isnt dict, trying loads')
+          try:
+             dict_item = json.loads(item)
+          except:
+             print(f'do_item loads failed, trying repair')
+             dict_item = self.repair_json(item)
+          if type(dict_item) != dict:
+             print(f'do_item repair failed {dict_item}')
+             return None
+       if 'action' not in dict_item:
+          self.ui.display_response(f'item is not an action {item}')
+          return 'action not yet implemented'
+       elif dict_item['action'] == 'article':
+          return self.do_article(dict_item)
+       elif dict_item['action'] == 'assign':
+          return self.do_assign(dict_item)
+       elif dict_item['action'] == 'first':
+          return self.do_first(dict_item)
+       elif dict_item['action'] == 'gpt4':
+          return self.do_gpt4(dict_item)
+       elif dict_item['action'] == 'web':
+          return self.do_web(dict_item)
+       elif dict_item['action'] == 'difference':
+          return self.do_difference(dict_item)
+       elif dict_item['action'] == 'tell':
+          return self.do_tell(dict_item)
+       elif dict_item['action'] == 'wiki':
+          return self.do_wiki(dict_item)
+       else:
+          self.ui.display_response(f"action not yet implemented {item['action']}")
+       return
    
 
    def parse_as_action(self, item):
@@ -459,21 +480,25 @@ TextString:
           return item['action'], args, result
 
    def resolve_arg(self, item):
+      """
+      find an argument in working memory.
+      """
       if item.startswith('$'):
-         if self.samCoT.AWM_has(item):
-            return samCoT.AWM_get(item)
+         if self.samCoT.has_AWM(item):
+            print(f"resolve_arg returning {self.samCoT.get_AWM(item)['item']}")
+            return self.samCoT.get_AWM(item)['item']
          else:
             raise InvalidAction(f"{item} referenced before definition")
       else: # presume a literal
          return item
       
-   def eval_article(self, titleAddr):
+   def do_article(self, titleAddr):
        print(f'article {action}')
        action, arguments, result = self.parse_as_action(action)
        self.samCoT.create_AWM(arguments, name=result, confirm=False)
        pass
 
-   def eval_assign(self, action):
+   def do_assign(self, action):
        #
        ## assign an item or literal as the value of a name
        ## example: {"action":"assign", "arguments":"abc", "result":"pi35"}
@@ -483,12 +508,16 @@ TextString:
        ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
        print(f'assign {action}')
        action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not str:
-          raise InvalidAction(f'argument for assign must be a literal or name: {str(item)}')       
-       arg0 = self.resolve_arg(arguments, 1)
-       self.samCoT.create_AWM(arguments[0], name=result, confirm=False)
+       if type(arguments) is list: # assign takes a single argument, extract it from arguments list
+          argument0 = arguments[0]
+       else:
+          argument0 = arguments
+       if type(argument0) is not str:
+          raise InvalidAction(f'argument for assign must be a literal or name: {json.dumps(action)}')       
+       arg0_resolved = self.resolve_arg(argument0)
+       self.samCoT.create_AWM(arg0_resolved, name=result, confirm=False)
 
-   def eval_choose(self, criterion, List):
+   def do_choose(self, criterion, List):
        prompt = Prompt([
           SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
           UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
@@ -501,7 +530,7 @@ TextString:
        else: 
           raise InvalidAction(f'choose returned None')
                  
-   def eval_first(self, List):
+   def do_first(self, List):
        action, arguments, result = self.parse_as_action(action)
        if type(arguments) is not list and type(arguments) is not dict:
           raise InvalidAction(f'argument for first must be list {arguments}')       
@@ -511,13 +540,13 @@ TextString:
           UserMessage(f'List:\n{list}\n')
        ])
        
-       response = self.samCot.llm.ask('', prompt)
+       response = self.llm.ask('', prompt)
        if response is not None:
           self.samCoT.AWM_write(response)
        else:
           return 'unknown'
        
-   def eval_difference(self, list1, list2):
+   def do_difference(self, list1, list2):
        # untested
        prompt = Prompt([
           SystemMessage('Following is a Context and a List. Select one Item from List that best aligns with Context. Use the following JSON format for your response:\n{"choice":Item}. Include the entire Item in your response'),
@@ -533,7 +562,7 @@ TextString:
           return answer
        else: return 'unknown'
 
-   def eval_tell(self, action):
+   def do_tell(self, action):
        #
        print(f'tell {action}')
        action, arguments, result = self.parse_as_action(action)
@@ -541,6 +570,22 @@ TextString:
           raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
        value = self.resolve_arg(arguments[0])
        self.ui.display_response(value)
+
+
+   def do_gpt4(self, action):
+       #
+       print(f'gpt {action}')
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is not list or type(arguments[0]) is not str:
+          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
+       prompt_text = ""
+       for arg in arguments:
+          resolved_arg = self.resolve_arg(arg)
+          prompt_text += str(resolved_arg)+'\n'
+       prompt = [SystemMessage(prompt_text)]
+       response = self.llm.ask("", prompt)
+       self.ui.display_response(response)
+       self.samCoT.create_AWM(response, name=result, confirm=False)
 
 
    def test_executable(self, value):
@@ -641,7 +686,7 @@ class Planner():
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
        self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, model=self.model)
-       self.active_plan_state = None
+       self.active_plan = None
 
 
    def make_plan(self, name, task_dscp):
@@ -725,10 +770,18 @@ Your conversation style is warm, gentle, humble, and engaging. """
        if self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
           result = self.plan()
           if result is None: return None
+          
           self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
           next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
-          self.ui.display_response('nothing further implemented yet')
+       print(f"run plan steps: {len(self.active_plan['steps'])}")
+       for step in self.active_plan['steps']:
+          next = self.samCoT.confirmation_popup(f'run {step}?', '')
+          if next is False:
+             print(f'run_plan step deny, stopping plan execution {next}')
+             return
+          print(f'run_plan step confirmed {next}')
+          self.interpreter.do_item(step)
           
    def analyze(self):
       prefix = self.active_plan['name']
@@ -812,10 +865,10 @@ The plan may include four agents:
        plan = None
        first_time = True
        while not user_satisfied:
-          messages = [SystemMessage("""You're tasked with creating a plan using a set of predefined actions. Each action has specific arguments and results. Below is the structure you should follow:\n'+planner_nl_list_prompt"""),
+          messages = [SystemMessage("""Your task is to create a plan using the set of predefined actions listed below. The plan must be a JSON list of action instantiations."""),
                       SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
                       SystemMessage(plan_prompt),
-                      UserMessage(f"TaskName: {self.active_plan['name']}\n{json.dumps(self.active_plan['sbar'])}")
+                      UserMessage(f"TaskName: {self.active_plan['name']}\n{json.dumps(self.active_plan['sbar'])}\n")
                       ]
           if first_time:
              first_time = False
@@ -839,11 +892,26 @@ The plan may include four agents:
              break
           else:
              print('***** user not satisfield, retrying')
-             
-       self.active_plan['steps'] = plan
-       # experiment - did we get an understandable plan?
-       #step = self.interpreter.first(plan)
-       return self.active_plan
+       return self.cast_steps_as_json(self, plan)
+    
+   def cast_steps_as_json(self, steps):
+      if type(steps) != dict:
+          try:
+             steps_j = json.loads(steps)
+          except:
+             steps_j = self.interpreter.repair_json(steps)
+             if steps_j is None:
+                self.ui.display_response(f'\nFailed to create valid JSON from text plan')
+             else:
+                steps_j = []
+                for s, step in enumerate(plan['steps']):
+                   if type(step) != dict:
+                      step_j = self.interpreter.repair_json(step)
+                      if step_j is None:
+                         self.ui.display_response(f'step {s} cannot be formatted as JSON')
+                      else:
+                         steps_j.append(step_j)
+      return steps_j
 
 if __name__ == '__main__':
    import Sam as sam

@@ -1,9 +1,17 @@
 import sys
 import pickle
 import json
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QVBoxLayout, QPushButton, QWidget, QMessageBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTextEdit, QTableWidgetItem, QVBoxLayout, QPushButton, QWidget, QMessageBox
+from PyQt5.QtCore import Qt, pyqtSignal
 
+class CustomTextEdit(QTextEdit):
+    textEdited = pyqtSignal(str)
+
+    def closeEvent(self, event):
+        edited_text = self.toPlainText()
+        self.textEdited.emit(edited_text)
+        super().closeEvent(event)
+        
 def strj(item):
     # convert item to string.
     # if item is dict, use json.dumps
@@ -69,6 +77,26 @@ class MainWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
         self.tableWidget.itemChanged.connect(self.onItemChanged)
+        self.setupTable()
+        
+    def setupTable(self):
+        self.tableWidget.cellClicked.connect(self.onCellClicked)
+
+    def onCellClicked(self, row, column):
+        if column == 1:  # Assuming 'item' is in column 1
+            item_content = self.tableWidget.item(row, column).text()
+            self.openTextEditWindow(item_content, row, column)
+
+    def openTextEditWindow(self, content, row, column):
+        self.textEditWindow = CustomTextEdit()
+        self.textEditWindow.setText(content)
+        self.textEditWindow.textEdited.connect(lambda text: self.onTextEditClosed(text, row, column))
+        self.textEditWindow.show()
+
+    def onTextEditClosed(self, text, row, column):
+        # Update the table and/or underlying data structure with the edited text
+        self.tableWidget.item(row, column).setText(text)
+        # If necessary, update other data structures or perform additional actions
 
     def onItemChanged(self, item):
         row = item.row()
