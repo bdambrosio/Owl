@@ -203,25 +203,25 @@ This plan uses semantic operations as building blocks for an iterative, intellig
 action_primitive_descriptions = \
    """
 [
-    {"action": "none", "arguments": "None", "result": "None", "description": "no action is needed."},
-    {"action": "append", "arguments": "$item1, $item2", "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
-    {"action": "article", "arguments": "($item1/literal1)", "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
-    {"action": "assign", "arguments": "($item1/literal1)", "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
-    {"action": "choose", "arguments": "$item1, "$item2", "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
-    {"action": "concatenate", "arguments": "$item1, $item2", "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
-    {"action": "difference", "arguments": "$item1, $item2", "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
-    {"action": "empty", "arguments": "$item1", "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "extract", "arguments": "($item1/literal1), $item2", "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
-    {"action": "first", "arguments": "$item1", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
-    {"action": "gpt4", "arguments": "$item1", "result": "$item2", "description": "ask gpt4 the query $item1 and assign the response to variable $item2"},
-    {"action": "integrate", "arguments": "$item1 ,$item2", "result": "$item3", "description": "combine $item1 and $item2 into a single cconsolidated text and assign it to variable $item3."},
-    {"action": "question", "arguments": "$item1", "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "recall", "arguments": "($item1/literal1)", "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
-    {"action": "request", "arguments": "$item1", "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
-    {"action": "sort", "arguments": "$item1, $item2", "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
-    {"action": "tell", "arguments": "$item1", "result": "None", "description": "present $item1 to the user."},
-    {"action": "web", "arguments": "($item1/literal1)", "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
-    {"action": "wiki", "arguments": "($item1/literal1)", "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
+    {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
+    {"action": "append", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
+    {"action": "article", "arguments": ["$item1/literal1"], "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
+    {"action": "assign", "arguments": ["$item1/literal1)"], "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
+    {"action": "choose", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
+    {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
+    {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
+    {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
+    {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
+    {"action": "gpt4", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke gpt4 with the instruction $item1 and details $item2. Assign the response to variable $item3"},
+    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single cconsolidated text and assign it to variable $item3."},
+    {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
+    {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
+    {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
+    {"action": "sort", "arguments": ["$item1", "$item2"], "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
+    {"action": "tell", "arguments": ["$item1"], "result": "$Trash", "description": "present $item1 to the user."},
+    {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
+    {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
 ]
 """
 
@@ -292,12 +292,12 @@ Example Plan (1-shot):
 
 Plan:
 [
-{"action": "assign", "arguments": "'Apple', item1", "result": "item1"},
-{"action": "assign", "arguments": EMPTYLIST, "result": "list1"},
-{"action": "assign", "arguments": "5", "result": "number1"},
-{"action": "append", "arguments": "number1, myList", "result": "updatedList"},
-{"action": "gpt4", "arguments": "What is the meaning of life?", "result": "response1"},
-{"action": "tell", "arguments": "response1", "result": "None"}
+{"action": "assign", "arguments": ["Apple", "$item1"], "result": "$item2"},
+{"action": "assign", "arguments": [], "result": "$item1"},
+{"action": "assign", "arguments": ["5"], "result": "$item1"},
+{"action": "append", "arguments": ["number1", "$list1"], "result": "$List2"},
+{"action": "gpt4", "arguments": ["What is the meaning of life?", "philosophy"], "result": "$response1"},
+{"action": "tell", "arguments": ["$response1"], "result": "$Trash"}
 ]
 """
 
@@ -713,7 +713,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
    def validate_plan(self, plan):
       if plan is None or type(plan) != dict:
          return False
-      if 'name' not in plan or 'sbar' not in plan or 'dscp' not in plan or 'steps' not in plan:
+      if 'name' not in plan or 'dscp' not in plan:
          return False
       return True
    
@@ -721,6 +721,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
        items=[f"{self.samCoT.docHash[item]['name']}: {str(self.samCoT.docHash[item]['item'])[:48]}" for item in self.samCoT.docHash if self.samCoT.docHash[item]['name'].startswith('plan')]
        picker = ListDialog(items)
        result = picker.exec()
+       plan = None
        if result == QDialog.Accepted:
           selected_index = picker.selected_index()
           if selected_index != -1:  # -1 means no selection
@@ -729,15 +730,15 @@ Your conversation style is warm, gentle, humble, and engaging. """
              if wm is not None and type(wm) == dict and 'item' in wm:
                 plan = wm['item']
              if plan is None or not self.validate_plan(plan):
-                print(f'failed to load "{plan_name}"\n{plan}')
+                self.ui.display_response(f'failed to load "{plan_name}", not found or missing name/dscp\n{plan}')
                 return None
              else:
                 self.active_plan = plan
                 print(f"loaded plan {self.active_plan['name']}")
        else: # init new plan
           plan = self.init_plan()
-          if self.active_plan is None or not self.validate_plan(self.active_plan):
-             print(f'failed to load new plan\n"{plan}"')
+          if plan is None:
+             print(f'failed to create new plan\n"{plan}"')
              return None
           self.active_plan = plan
           self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
@@ -761,13 +762,14 @@ Your conversation style is warm, gentle, humble, and engaging. """
           else:
              next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
              if not next: return
-       if self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
+       if 'sbar' not in self.active_plan or self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
           result = self.analyze()
           if result is None: return None
           self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
           next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
-       if self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
+       if 'steps' not in self.active_plan or self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
+          print(f'calling planner')
           result = self.plan()
           if result is None: return None
           
@@ -786,6 +788,8 @@ Your conversation style is warm, gentle, humble, and engaging. """
    def analyze(self):
       prefix = self.active_plan['name']
       task_dscp = self.active_plan['dscp']
+      if 'sbar' not in sels.active_plan:
+         self.active_plan['sbar'] = {}
       sbar = self.active_plan['sbar']
       # Loop for obtaining user responses
       # Generate interview questions for the remaining steps using GPT-4
@@ -836,6 +840,8 @@ Your conversation style is warm, gentle, humble, and engaging. """
 
    def plan(self):
        
+       if 'steps' not in self.active_plan:
+          self.active_plan['steps'] = {}
        plan_prompt=\
           """
 Reason step by step to create a plan for performing the TASK described below. 
@@ -892,7 +898,8 @@ The plan may include four agents:
              break
           else:
              print('***** user not satisfield, retrying')
-       return self.cast_steps_as_json(self, plan)
+       self.active_plan['steps'] = self.cast_steps_as_json(plan)
+       return self.active_plan
     
    def cast_steps_as_json(self, steps):
       if type(steps) != dict:
