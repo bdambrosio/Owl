@@ -297,7 +297,17 @@ def compute_keyword_weights(keywords):
     return keyword_weights
 
 
-
+def get_url(query, url, client, model, max_chars):
+    try:
+        keywords = query.split(' ')
+        weights = compute_keyword_weights(keywords)
+        full_text = \
+            process_urls(extract_query, keywords, weights, [url],
+                         search_level, client, model, VolatileMemory(), Functions(), GPT3Tokenizer, max_chars)
+    except:
+        traceback.print_exc()
+    return  full_text
+    
 def search_google(original_query, search_level, query_phrase, keywords, client, model, memory, functions, tokenizer, max_chars):
   start_time = time.time()
   all_urls=[]; urls_used=[]; urls_tried=[]

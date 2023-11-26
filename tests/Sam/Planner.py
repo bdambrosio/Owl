@@ -225,63 +225,29 @@ action_primitive_descriptions = \
 ]
 """
 
+quality_prompt =\
 """
-Evaluating the quality of a text can be multifaceted, depending on the type of text and the context in which it is used. Here are some common dimensions to consider for a critique:
-
-1. **Clarity**: Is the text clear and understandable? Does it communicate its points effectively?
-
-2. **Coherence**: Do the ideas flow logically? Is there a clear structure that guides the reader through the text?
-
-3. **Depth**: Does the text provide a thorough exploration of the topic? Does it offer insight beyond surface-level information?
-
-4. **Accuracy**: Are the facts presented in the text correct? Is the information reliable and supported by evidence?
-
-5. **Integrity**: Is the text free from bias and misleading information? Does it present the information honestly without manipulation?
-
-6. **Relevance**: Is the information presented relevant to the intended audience or purpose of the text?
-
-7. **Originality**: Does the text provide unique perspectives or information not found elsewhere?
-
-8. **Style**: Is the writing style appropriate for the audience and purpose? Is it engaging or does it enhance the content?
-
-9. **Grammar and Syntax**: Is the text grammatically correct? Are there errors in punctuation, spelling, or sentence structure?
-
-10. **Purpose Fulfillment**: Does the text achieve its intended purpose, whether it's to inform, persuade, entertain, or something else?
-
-11. **Credibility**: Are the author's credentials and the sources of information credible?
-
-12. **Impact**: Does the text have the desired effect on the reader? Does it provoke thought, elicit emotions, or spur action?
-
-13. **Cultural and Ethical Sensitivity**: Does the text respect cultural differences and adhere to ethical standards?
-
-When composing a prompt to evaluate the quality of a text, consider focusing on specific dimensions that are most relevant to the text in question. Here's an example of a prompt that could be used:
-
----
-"Please provide a quality evaluation of the attached text considering the following dimensions:
+Please provide a quality evaluation of the attached text considering the following dimensions:
 
 - Clarity: Assess the text's ability to convey its message in an understandable way.
 - Coherence: Critique the logical flow and structure of the text.
 - Depth and Insight: Evaluate the thoroughness of the topic exploration and the insights provided.
 - Accuracy and Evidence: Confirm the correctness of the facts and the presence of supporting evidence.
-- Integrity and Bias: Discuss the presence of bias or misrepresentation in the text.
+- Integrity and Bias: Evaluate the presence of bias or misrepresentation in the text.
 - Relevance: Determine the text's relevance to its intended audience and purpose.
 - Originality: Consider the uniqueness of the content provided.
 - Style and Engagement: Comment on the appropriateness and engagement level of the writing style.
-- Grammar and Syntax: Note any grammatical or syntactical errors.
+- Grammar and Syntax: Note any grammatical or syntactical errors that obscure the meaning of the text.
 - Purpose Fulfillment: Judge how well the text achieves its intended purpose.
 - Credibility: Examine the credibility of the author and sources.
-- Impact: Reflect on the effect the text has on the reader.
-- Cultural and Ethical Sensitivity: Evaluate the text's cultural sensitivity and adherence to ethical standards.
+- Impact: Reflect on the effect the text has on a knowledgeable reader working in the area.
 
 Provide examples and explanations to support your assessments for each dimension."
 
 ---
-
-By using this prompt, you can conduct a comprehensive evaluation of the text's quality across various important dimensions.
 """
 
-
-planner_nl_list_prompt =\
+planner_format_prompt =\
    """
 Plan Format:
 Your plan must be a JSON list ( [...] ) of instantiated actions. Each action instantiation is a will include the specified action, the arguments for that action, and the name to assign to the result. 
@@ -327,13 +293,14 @@ class InvalidAction(Exception):
 
        
 class PlanInterpreter():
-   def __init__(self, ui, samCoT, planner, profile=None, history=None, model='alpaca'):
-      self.model = model
+   def __init__(self, ui, samCoT, planner, profile=None, history=None, template='alpaca'):
+      self.template = template
       self.ui = ui
       self.samCoT = samCoT
       self.client = OSClient(api_key=None)
       self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
       self.llm = samCoT.llm
+      self.planner = planner
       self.functions = FunctionRegistry()
       self.tokenizer = GPT3Tokenizer()
       self.cvHistory = load_conv_history()  # load conversation history.
@@ -364,7 +331,7 @@ Please repair the text string so that loads can parse it and return a valid dict
 This repair should be performed recursively, including all field values.
 for example, in:
 {"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
-the inner form  {"action"...} should also be parsable as valid json.
+the inner form  {"action"...} should be valid json.
 Return ONLY the repaired json.
 
 TextString:
@@ -374,13 +341,78 @@ TextString:
          SystemMessage(prompt_text),
          AssistantMessage('')
       ]
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=500, validator=JSONResponseValidator())
-      print(f'gpt4 repair {response}')
+      print(f'gpt4 repair input {str(item)}')
+      input_tokens = len(self.tokenizer.encode(item)) 
+      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25), validator=JSONResponseValidator())
+      print(f'gpt4 repair response {response}')
+      return response
+
+   def cast_steps_as_json(self, steps):
+      if type(steps) != dict:
+          try:
+             steps = json.loads(steps)
+          except:
+             steps = self.interpreter.repair_json_list(steps)
+             if steps is None or steps is not list:
+                self.ui.display_response(f'\nFailed to create valid JSON list from text plan')
+                return
+            
+      final_steps = []
+      for s, step in enumerate(steps):
+         if type(step) == dict:
+            step_j = step
+         else:
+            try:
+             step_j = json.loads(step)
+            except:
+               step_j = self.repair_json(step)
+         if step_j is None:
+            self.ui.display_response(f'\nstep {s} cannot be formatted as JSON')
+            return
+         else:
+            final_steps.append(step_j)
+      print(f'plan steps as json list {json.dumps(final_steps, indent=4)}')
+      return final_steps
+
+   def repair_json_list (self, item):
+      #
+      ## this asks gpt-4 to repair text that doesn't parse as json, where response should be a list of JSON forms
+      #
+
+      prompt_text=\
+         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
+Please repair the text string so that loads can parse it and return a valid dict.
+This repair should be performed recursively, including all field values.
+for example, in:
+{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
+the inner form  {"action"...} should be valid json.
+Return ONLY the repaired json.
+
+TextString:
+{{$input}}
+"""
+      prompt = [
+         SystemMessage(prompt_text),
+         AssistantMessage('')
+      ]
+      print(f'gpt4 repair input {str(item)}')
+      input_tokens = len(self.tokenizer.encode(item)) 
+      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
       if response is not None:
-         answer = response
-         return answer
-      else:
-         return None
+         # won't handle nested lists very well
+         idx = response.find('[')
+         if idx > -1:
+            response = response[idx:]
+         idx = response.rfind(']')
+         if idx > -1:
+            response = response[:idx+1]
+         try:
+            responsej = json.loads(response.strip())
+            print(f'gpt4 repair response {response}')
+            return responsej
+         except:
+            self.ui.display_response(f'is this json?\n{response}')
+      return response
 
    #
    ### Eval a form in AWM, assuming it is a plan-step
@@ -448,14 +480,22 @@ TextString:
           return self.do_article(dict_item)
        elif dict_item['action'] == 'assign':
           return self.do_assign(dict_item)
+       elif dict_item['action'] == 'choose':
+          return self.do_choose(dict_item)
+       elif dict_item['action'] == 'compare':
+          return self.do_compare(dict_item)
+       elif dict_item['action'] == 'difference':
+          return self.do_difference(dict_item)
+       elif dict_item['action'] == 'extract':
+          return self.do_extract(dict_item)
        elif dict_item['action'] == 'first':
           return self.do_first(dict_item)
        elif dict_item['action'] == 'gpt4':
           return self.do_gpt4(dict_item)
+       elif dict_item['action'] == 'request':
+          return self.do_request(dict_item)
        elif dict_item['action'] == 'web':
           return self.do_web(dict_item)
-       elif dict_item['action'] == 'difference':
-          return self.do_difference(dict_item)
        elif dict_item['action'] == 'tell':
           return self.do_tell(dict_item)
        elif dict_item['action'] == 'wiki':
@@ -517,20 +557,124 @@ TextString:
        arg0_resolved = self.resolve_arg(argument0)
        self.samCoT.create_AWM(arg0_resolved, name=result, confirm=False)
 
-   def do_choose(self, criterion, List):
+   def do_choose(self, action):
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is list: # 
+          arg0 = arguments[0]
+          arg1 = arguments[1]
+       else:
+          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+       if type(arg0) is not str or type(arg1) is not str:
+          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
+       criteron = self.resolve_arg(arg0)
+       input_list = self.resolve_arg(arg1)
+       prompt = Prompt([
+          SystemMessage('Following is a criterion and a List. Select one entry from the List that best aligns with Criterion. Respond only with the chosen item. Include the entire item in your response.'),
+          UserMessage(f'Criterion:\n{criterion}\nList:\n{input_list}\n')
+       ])
+       
+       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
+       response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
+       if response is not None:
+          self.samCoT.create_AWM(response, name=result)
+       else: 
+          raise InvalidAction(f'choose returned None')
+                 
+   def do_compare(self, action):
+      # placeholder
+      return self.do_difference(action)
+
+   
+   def do_difference(self, action):
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is list: # 
+          arg0 = arguments[0]
+          arg1 = arguments[1]
+       else:
+          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+       if type(arg0) is not str or type(arg1) is not str:
+          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
+       criteron = self.resolve_arg(arg0)
+       input_list = self.resolve_arg(arg1)
+       # untested
+       prompt = Prompt([
+          SystemMessage('Following is a Context and a List. Select one Item from List that best aligns with Context. Use the following JSON format for your response:\n{"choice":Item}. Include the entire Item in your response'),
+          UserMessage(f'Context:\n{context}\nList:\n{choices}')
+       ])
+       
+       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
+       response = ut.run_wave(self.client, {"input":''}, prompt, options,
+                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
+                              logRepairs=False, validator=JSONResponseValidator())
+       if type(response) == dict and 'status' in response and response['status'] == 'success':
+          answer = response['message']['content']
+          self.samCoT.create_AWM(answer, name=result, confirm=False)
+          return answer
+
+       else: return 'unknown'
+
+   def do_extract(self, action):
+      action, arguments, result = self.parse_as_action(action)
+      if type(arguments) is list: # 
+         arg0 = arguments[0]
+         arg1 = arguments[1]
+      else:
+         self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+      if type(arg0) is not str or type(arg1) is not str:
+         raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
+      criterion = self.resolve_arg(arg0)
+      text = self.resolve_arg(arg1)
+      print(f'extract from\n{text}\n')
+      prompt = [
+         UserMessage(f'Following is a topic and a text. Extract information relevant to topic from the text.Be aware that the text may be partly or completely irrelevant.\nTopic:\n{criterion}\nText:\n{text}'),
+         AssistantMessage('')
+      ]
+      response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
+      if response is not None:
+         self.samCoT.create_AWM(response, name=result, confirm=False)
+         self.ui.display_response(f'{action}:\n{response}')
+         return 
+      else: 
+         self.samCoT.create_AWM('', name=result, confirm=False)
+         self.ui.display_response(f'{action}:\nNo Text Extracted')
+         return 'extract lookup and summary failure'
+      
+   def wiki(self, action):
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is list: # 
+          arg0 = arguments[0]
+          arg1 = arguments[1]
+       else:
+          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+       if type(arg0) is not str or type(arg1) is not str:
+          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
+       criteron = self.resolve_arg(arg0)
+       input_list = self.resolve_arg(arg1)
+       short_profile = profile.split('\n')[0]
+       query = query.strip()
+       #
+       #TODO rewrite query as answer (HyDE)
+       #
+       if len(query)> 0:
+          if self.op is None:
+             self.op = op.OpenBook()
+          wiki_lookup_response = self.op.search(query)
+          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
+          return wiki_lookup_summary
+
        prompt = Prompt([
           SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
           UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
        ])
        
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
+       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
        response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
        if response is not None:
           self.samCoT.AWM_write(result, response)
        else: 
           raise InvalidAction(f'choose returned None')
                  
-   def do_first(self, List):
+   def do_first(self, action):
        action, arguments, result = self.parse_as_action(action)
        if type(arguments) is not list and type(arguments) is not dict:
           raise InvalidAction(f'argument for first must be list {arguments}')       
@@ -546,32 +690,6 @@ TextString:
        else:
           return 'unknown'
        
-   def do_difference(self, list1, list2):
-       # untested
-       prompt = Prompt([
-          SystemMessage('Following is a Context and a List. Select one Item from List that best aligns with Context. Use the following JSON format for your response:\n{"choice":Item}. Include the entire Item in your response'),
-          UserMessage(f'Context:\n{context}\nList:\n{choices}')
-       ])
-       
-       options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.1, max_tokens=400)
-       response = ut.run_wave(self.client, {"input":''}, prompt, options,
-                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                              logRepairs=False, validator=JSONResponseValidator())
-       if type(response) == dict and 'status' in response and response['status'] == 'success':
-          answer = response['message']['content']
-          return answer
-       else: return 'unknown'
-
-   def do_tell(self, action):
-       #
-       print(f'tell {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list or type(arguments[0]) is not str:
-          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
-       value = self.resolve_arg(arguments[0])
-       self.ui.display_response(value)
-
-
    def do_gpt4(self, action):
        #
        print(f'gpt {action}')
@@ -586,6 +704,35 @@ TextString:
        response = self.llm.ask("", prompt)
        self.ui.display_response(response)
        self.samCoT.create_AWM(response, name=result, confirm=False)
+
+   def do_request(self, action):
+       #
+       print(f'request {action}')
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is not list or type(arguments[0]) is not str:
+          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
+       arg0 = arguments[0]
+       url = self.resolve_arg(arg0)
+       print(f' requesting url from server {url}')
+       try:
+          print(f"http://127.0.0.1:5005/retrieve?title={self.planner.active_plan['dscp']}&url={arg0}")
+          response = requests.get(f"http://127.0.0.1:5005/retrieve/?title={self.planner.active_plan['dscp']}&url={arg0}")
+          data = response.json()
+       except Exception as e:
+          print(f'request failed {str(e)}')
+          return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
+       if response is not None:
+          self.ui.display_response(data['text'][:1000])
+          self.samCoT.create_AWM(data['text'][:1000], name=result, confirm=False)
+
+   def do_tell(self, action):
+       #
+       print(f'tell {action}')
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is not list or type(arguments[0]) is not str:
+          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
+       value = self.resolve_arg(arguments[0])
+       self.ui.display_response(value)
 
 
    def test_executable(self, value):
@@ -629,7 +776,7 @@ explanation="<explanation of reason for value>"
           SystemMessage(interpreter_prompt),
           UserMessage(prompt_text),
        ])
-       prompt_options = PromptCompletionOptions(completion_type='chat', model=self.model, temperature = 0.2, max_tokens=100)
+       prompt_options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.2, max_tokens=100)
        
        print(f'action_selection starting analysis')
        analysis = ut.run_wave (self.client, {"input": value}, prompt, prompt_options,
@@ -667,8 +814,8 @@ class Planner():
    #
    ### we should 1 or 2 shot planner requests to LLM so it knows format!
    #
-   def __init__(self, ui, samCoT, model='alpaca'):
-       self.model = model
+   def __init__(self, ui, samCoT, template='alpaca'):
+       self.template = template
        self.ui = ui
        self.samCoT = samCoT
        self.client = OSClient(api_key=None)
@@ -685,7 +832,7 @@ class Planner():
        self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
-       self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, model=self.model)
+       self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, template=self.template)
        self.active_plan = None
 
 
@@ -766,15 +913,18 @@ Your conversation style is warm, gentle, humble, and engaging. """
           result = self.analyze()
           if result is None: return None
           self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+          next = self.samCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
        if 'steps' not in self.active_plan or self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
           print(f'calling planner')
           result = self.plan()
-          if result is None: return None
-          
+          if 'steps' in self.active_plan:
+             print(f"planner returned {len(self.active_plan['steps'])}")
+          else: 
+             print(f"planner didn't add 'steps' to plan!")
+             return
           self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+          next = self.samCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
        print(f"run plan steps: {len(self.active_plan['steps'])}")
        for step in self.active_plan['steps']:
@@ -788,7 +938,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
    def analyze(self):
       prefix = self.active_plan['name']
       task_dscp = self.active_plan['dscp']
-      if 'sbar' not in sels.active_plan:
+      if 'sbar' not in self.active_plan:
          self.active_plan['sbar'] = {}
       sbar = self.active_plan['sbar']
       # Loop for obtaining user responses
@@ -845,9 +995,9 @@ Your conversation style is warm, gentle, humble, and engaging. """
        plan_prompt=\
           """
 Reason step by step to create a plan for performing the TASK described below. 
-The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a subtask. The plan can be followed by notes/commentary using the same format as the plan itself. Respond only with the plan (and notes) using the above plan format.
+The plan should consist of a set of actions, where each step is one of the available Actions, specified in full, or a complete, concise, text statement of a subtask.  Control flow over the actions should be expressed by embedding the actions in python code. Use python ONLY for specifying control flow. Respond only with the plan (and notes) using the above plan format.
 
-The plan may include four agents:
+The plan may be decomposed into four agents :
   i Driver, the main actor in the plan, can access and update the State, and can perform actions as specified in the plan.
   ii State: stores all relevant information for the current task, include capability to create, read, update, and delete state elements. 
   iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
@@ -898,49 +1048,71 @@ The plan may include four agents:
              break
           else:
              print('***** user not satisfield, retrying')
-       self.active_plan['steps'] = self.cast_steps_as_json(plan)
+       self.active_plan['steps'] = self.interpreter.repair_json_list(plan)
        return self.active_plan
     
-   def cast_steps_as_json(self, steps):
-      if type(steps) != dict:
-          try:
-             steps_j = json.loads(steps)
-          except:
-             steps_j = self.interpreter.repair_json(steps)
-             if steps_j is None:
-                self.ui.display_response(f'\nFailed to create valid JSON from text plan')
-             else:
-                steps_j = []
-                for s, step in enumerate(plan['steps']):
-                   if type(step) != dict:
-                      step_j = self.interpreter.repair_json(step)
-                      if step_j is None:
-                         self.ui.display_response(f'step {s} cannot be formatted as JSON')
-                      else:
-                         steps_j.append(step_j)
-      return steps_j
-
 if __name__ == '__main__':
    import Sam as sam
    ui = sam.window
    ui.reflect=False # don't execute reflection loop, we're just using the UI
    cot = ui.samCoT
    pl = Planner(ui, cot)
-   print('******analyze news**************************')
-   #pl.analyze('news',"build a short list of fact-checked world news sources on the web")
-   print('******plan news********************')
-   #plan = pl.plan()
-   #print(f'\nplan\n{plan}\n')
-   print('******extract first step from news plan ***')
-   #step = pl.interpreter.first(plan)
-   print('*******test if first step is executable *************')
-   #pl.interpreter.test_executable(step)
-   json_str=pl.interpreter.repair_json("{'item': {'action':'tell', 'arguments': 'English, Latin', 'result':None}}")
-   print(json_str)
-   j=json.loads(json_str)
-   
-   print(j)
-   print(f"type j: {type(j)}")
-   print(f"type item: {type(j['item'])}")
-   
  
+   steps = """[
+    {"action": "request", "arguments": ["https://arxiv.org/abs/2311.05584"], "result": "$paper_content"},
+    {"action": "gpt4", "arguments": ["$paper_content", "extract key points"], "result": "$paper_key_points"},
+    {"action": "tell", "arguments": ["$paper_key_points"]},
+    {"action": "question", "arguments": ["Do you want to know more about Q-Learning or other methods?"], "result": "$user_choice"},
+    {"action": "web", "arguments": ["$user_choice in large language models"], "result": "$chosen_method_info"},
+    {"action": "tell", "arguments": ["$chosen_method_info"]},
+    {"action": "question", "arguments": ["Do you have any other questions?"], "result": "$user_question"},
+    {"action": "gpt4", "arguments": ["$user_question", "answer"], "result": "$user_question_answer"},
+    {"action": "tell", "arguments": ["$user_question_answer"]},
+    {"action": "none", "arguments": ["None"], "result": "$Trash"}
+   ]"""
+   json.loads(steps)
+
+   steps = pl.interpreter.repair_json_list(
+      """
+***** Plan *****
+Plan:
+
+1. {"action": "request", "arguments": ["https://arxiv.org/abs/2311.05584"], "result": "$paper_content"}
+    - Request the content of the paper from the provided URL.
+
+2. {"action": "extract", "arguments": ["Q-Learning", "$paper_content"], "result": "$q_learning_content"}
+    - Extract the content related to Q-Learning from the paper.
+
+3. {"action": "extract", "arguments": ["applications", "$q_learning_content"], "result": "$applications_content"}
+    - Extract the content related to applications of Q-Learning from the extracted Q-Learning content.
+
+4. {"action": "tell", "arguments": ["$q_learning_content"], "result": "$Trash"}
+    - Present the extracted Q-Learning content to the user.
+
+5. {"action": "tell", "arguments": ["$applications_content"], "result": "$Trash"}
+    - Present the extracted applications content to the user.
+
+6. {"action": "web", "arguments": ["other methods for goal-directed behavior in large language models"], "result": "$other_methods_content"}
+    - Perform a web search for other methods used for goal-directed behavior in large language models.
+
+7. {"action": "extract", "arguments": ["PPO", "$other_methods_content"], "result": "$ppo_content"}
+    - Extract the content related to PPO from the web search results.
+
+8. {"action": "extract", "arguments": ["DPO", "$other_methods_content"], "result": "$dpo_content"}
+    - Extract the content related to DPO from the web search results.
+
+9. {"action": "tell", "arguments": ["$ppo_content"], "result": "$Trash"}
+    - Present the extracted PPO content to the user.
+
+10. {"action": "tell", "arguments": ["$dpo_content"], "result": "$Trash"}
+    - Present the extracted DPO content to the user.
+
+11. {"action": "question", "arguments": ["Do you have any other questions or need further clarification?"], "result": "$user_response"}
+    - Ask the user if they have any other questions or need further clarification.
+"""
+)
+
+   print(f' type steps {type(steps)}')
+   print(f' type steps0 {type(steps[0])}')
+   
+   

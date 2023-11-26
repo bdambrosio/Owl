@@ -264,7 +264,7 @@ TextString:
          answer = response
          print(f'gpt4 repair {answer}')
          return answer
-      else: return {'gpt4':'query failure'}
+      else: return None
 
     def has_AWM(self, name):
         if name in self.active_WM:
