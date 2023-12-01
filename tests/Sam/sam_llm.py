@@ -1,4 +1,5 @@
 import sys, os
+import json
 #add local dir to search path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import socket
@@ -24,7 +25,7 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower() or 'yi' in d.lower())]
 models.append('orca-2-13b-16bit')
 
 templates = {"CodeLlama-34B-instruct-exl2":"",
@@ -39,7 +40,9 @@ templates = {"CodeLlama-34B-instruct-exl2":"",
              "Airoboros-L2-70b-312-GPTQ":"llama-2",
              "airoboros-c34b-3.1.2-8.0bpq-h6-exl2":"llama-2",
              "mistral-airoboros-7b-GPTQ":"?",
-             "orca-2-13b-16bit":"chatml"
+             "orca-2-13b-16bit":"chatml",
+             "Yi-34B-Chat-8bits":"chatml",
+             "tulu-2-dpo-70b-4.0bpw-h6-exl2": "zephyr"
              }
 
 model_number = -1
@@ -49,7 +52,16 @@ while model_number < 0 or model_number > len(models) -1:
         template = ''
         if models[i] in templates:
             template = templates[models[i]]
-        print(f'{i}. {models[i]} template: {template}')
+            context_size = 4096
+            try:
+                with open(models_dir+models[i]+'/config.json', 'r') as j:
+                    json_config = json.load(j)
+                    #print(f'config {json_config}')
+                    context_size = json_config["max_position_embeddings"]
+            except Exception as e:
+                print(f'failure to load json.config {str(e)}\n setting context to 4096')
+            print(f'{i}. {models[i]}, context: {context_size}, template: {template}')
+    
     number = input('input model # to load: ')
     try:
         model_number = int(number)
@@ -66,11 +78,21 @@ config.prepare()
 
 model = ExLlamaV2(config)
 print("Loading model: " + models[model_number])
-model.load([19, 24])
+model.load([20, 23])
 
 tokenizer = ExLlamaV2Tokenizer(config)
 
-cache = ExLlamaV2Cache(model, max_seq_len=6144)
+json_config = None
+context_size = 4096
+try:
+    with open(config.model_dir+'/config.json', 'r') as j:
+        json_config = json.load(j)
+        context_size = json_config["max_position_embeddings"]
+        print(f'loaded json.config, setting context to {context_size}')
+except Exception as e:
+    print(f'failure to load json.config {str(e)}\n setting context to 4096')
+    
+cache = ExLlamaV2Cache(model, max_seq_len=context_size)
 #cache = ExLlamaV2Cache(model, max_seq_len=4096)
 
 # Initialize generator

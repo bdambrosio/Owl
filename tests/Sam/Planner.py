@@ -79,17 +79,18 @@ action_primitive_names = \
    ["none",
     "append",
     "article",
-    "question",
+    "assign",
     "choose",
     "concatenate"
     "difference",
     "empty",
+    "entails",
     "extract",
     "first",
     "gpt4",
     "integrate",
+    "question",
     "recall",
-    "store"
     "request",
     "sort",
     "tell",
@@ -104,8 +105,8 @@ action_primitive_names = \
 #Elaborate - Expand on text with more details (how is this different from 'research' - autoextract topic to elaborate?)
 #Explain - Clarify meaning of concepts in text (explain what? how diff from elaborate)
 #Simplify - Rewrite text using simpler vocabulary (how diff from Explain?)
+
 #Combining Texts:
-#
 #Merge - Integrate content from two texts (topic? target len rel to source len?))
 #Compare - Find similarities and differences
 #Contrast - Focus on differences between two texts (topic? sentiment?)
@@ -211,10 +212,11 @@ action_primitive_descriptions = \
     {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
     {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
     {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "entails", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
     {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
     {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
     {"action": "gpt4", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke gpt4 with the instruction $item1 and details $item2. Assign the response to variable $item3"},
-    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single cconsolidated text and assign it to variable $item3."},
+    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
     {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
     {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
     {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
@@ -277,10 +279,10 @@ def generate_faiss_id(document):
 
 def load_conv_history():
     try:
-        with open('Sam.pkl', 'rb') as f:
+        with open('Owl.pkl', 'rb') as f:
            data = pickle.load(f)
            history = data['history']
-           print(f'loading conversation history for Sam')
+           print(f'loading conversation history for Owl')
            return history
     except Exception as e:
        print(f'Failure to load conversation history {str(e)}')
@@ -313,7 +315,7 @@ class PlanInterpreter():
       self.wmIndex = faiss.IndexIDMap(faiss.IndexFlatL2(384))
       # note many activities will use first paragraph only. Keep it relevant!
       
-      self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
+      self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
       self.profile = self.personality
@@ -352,7 +354,7 @@ TextString:
           try:
              steps = json.loads(steps)
           except:
-             steps = self.interpreter.repair_json_list(steps)
+             steps = self.repair_json_list(steps)
              if steps is None or steps is not list:
                 self.ui.display_response(f'\nFailed to create valid JSON list from text plan')
                 return
@@ -476,28 +478,42 @@ TextString:
        if 'action' not in dict_item:
           self.ui.display_response(f'item is not an action {item}')
           return 'action not yet implemented'
+       elif dict_item['action'] == 'append':
+          return self.do_append(dict_item)
        elif dict_item['action'] == 'article':
           return self.do_article(dict_item)
        elif dict_item['action'] == 'assign':
           return self.do_assign(dict_item)
        elif dict_item['action'] == 'choose':
           return self.do_choose(dict_item)
-       elif dict_item['action'] == 'compare':
-          return self.do_compare(dict_item)
+       elif dict_item['action'] == 'concatenate':
+          return self.do_concatenate(dict_item)
        elif dict_item['action'] == 'difference':
           return self.do_difference(dict_item)
+       elif dict_item['action'] == 'empty':
+          return self.do_empty(dict_item)
+       elif dict_item['action'] == 'entails':
+          return self.do_entails(dict_item)
        elif dict_item['action'] == 'extract':
           return self.do_extract(dict_item)
        elif dict_item['action'] == 'first':
           return self.do_first(dict_item)
        elif dict_item['action'] == 'gpt4':
           return self.do_gpt4(dict_item)
+       elif dict_item['action'] == 'integrate':
+          return self.do_integrate(dict_item)
+       elif dict_item['action'] == 'question':
+          return self.do_question(dict_item)
+       elif dict_item['action'] == 'recall':
+          return self.do_recall(dict_item)
        elif dict_item['action'] == 'request':
           return self.do_request(dict_item)
-       elif dict_item['action'] == 'web':
-          return self.do_web(dict_item)
+       elif dict_item['action'] == 'sort':
+          return self.do_sort(dict_item)
        elif dict_item['action'] == 'tell':
           return self.do_tell(dict_item)
+       elif dict_item['action'] == 'web':
+          return self.do_web(dict_item)
        elif dict_item['action'] == 'wiki':
           return self.do_wiki(dict_item)
        else:
@@ -639,41 +655,6 @@ TextString:
          self.ui.display_response(f'{action}:\nNo Text Extracted')
          return 'extract lookup and summary failure'
       
-   def wiki(self, action):
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is list: # 
-          arg0 = arguments[0]
-          arg1 = arguments[1]
-       else:
-          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
-       if type(arg0) is not str or type(arg1) is not str:
-          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
-       criteron = self.resolve_arg(arg0)
-       input_list = self.resolve_arg(arg1)
-       short_profile = profile.split('\n')[0]
-       query = query.strip()
-       #
-       #TODO rewrite query as answer (HyDE)
-       #
-       if len(query)> 0:
-          if self.op is None:
-             self.op = op.OpenBook()
-          wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
-          return wiki_lookup_summary
-
-       prompt = Prompt([
-          SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
-          UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
-       ])
-       
-       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
-       response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
-       if response is not None:
-          self.samCoT.AWM_write(result, response)
-       else: 
-          raise InvalidAction(f'choose returned None')
-                 
    def do_first(self, action):
        action, arguments, result = self.parse_as_action(action)
        if type(arguments) is not list and type(arguments) is not dict:
@@ -735,6 +716,58 @@ TextString:
        self.ui.display_response(value)
 
 
+   def do_web(self, action):
+       #
+       print(f'request {action}')
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is not list or type(arguments[0]) is not str:
+          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
+       arg0 = arguments[0]
+       try:
+          response = requests.get(f"http://127.0.0.1:5005/search/?query={arg0}")
+          data = response.json()
+       except Exception as e:
+          print(f'request failed {str(e)}')
+          return
+       if response is not None:
+          self.ui.display_response(data)
+          self.samCoT.create_AWM(data, name=result, confirm=False)
+
+   def wiki(self, action):
+       action, arguments, result = self.parse_as_action(action)
+       if type(arguments) is list: # 
+          arg0 = arguments[0]
+          arg1 = arguments[1]
+       else:
+          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+       if type(arg0) is not str or type(arg1) is not str:
+          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
+       criteron = self.resolve_arg(arg0)
+       input_list = self.resolve_arg(arg1)
+       short_profile = profile.split('\n')[0]
+       query = query.strip()
+       #
+       #TODO rewrite query as answer (HyDE)
+       #
+       if len(query)> 0:
+          if self.op is None:
+             self.op = op.OpenBook()
+          wiki_lookup_response = self.op.search(query)
+          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
+          return wiki_lookup_summary
+
+       prompt = Prompt([
+          SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
+          UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
+       ])
+       
+       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
+       response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
+       if response is not None:
+          self.samCoT.AWM_write(result, response)
+       else: 
+          raise InvalidAction(f'choose returned None')
+                 
    def test_executable(self, value):
        global action_primitive_descriptions, action_primitive_names
        value = value.strip()
@@ -829,7 +862,7 @@ class Planner():
        self.wmIndex = faiss.IndexIDMap(faiss.IndexFlatL2(384))
        # note many activities will use first paragraph only. Keep it relevant!
        self.cvHistory = load_conv_history()  # load conversation history.
-       self.personality = f"""You are Samantha, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
+       self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
        self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, template=self.template)
@@ -899,6 +932,8 @@ Your conversation style is warm, gentle, humble, and engaging. """
        plan_name = 'plan'+index_str+plan_suffix
        task_dscp = self.samCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
        plan = self.make_plan(plan_name, task_dscp)
+       self.active_plan = plan
+       
        self.samCoT.create_AWM(plan, name=plan_name, confirm=False)
        return plan
 
@@ -945,7 +980,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
       # Generate interview questions for the remaining steps using GPT-4
       interview_instructions = [
          ("needs", "Generate an interview question to fill out specifications of the task the user wants to accomplish."),
-         ("background", "Generate an interview question to ask about any additional requirements of the task."),
+         ("background", "Generate a followup interview question about any additional requirements of the task."),
          ("observations", "Summarize the information about the task, and comment on any incompleteness in the definition."),
       ]
       messages = [SystemMessage("Reason step by step"),
@@ -968,6 +1003,8 @@ Your conversation style is warm, gentle, humble, and engaging. """
             messages.append(UserMessage(ask_user))
          else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
             observations = self.llm.ask('', messages, max_tokens=150,temp = 0.05)
+            if observations is not None:
+               observations = observations.split('\n')[0]
             sbar['observations']=observations
             print(f"\nAI : {step}, {observations}")
             user_response = False

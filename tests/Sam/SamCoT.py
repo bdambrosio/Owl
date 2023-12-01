@@ -49,6 +49,7 @@ import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
+import pdfminer
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -112,8 +113,46 @@ class LLM():
         self.memory = memory
         self.osClient= osClient
         self.template = template # default prompt template.
+        print(f'LLM initializing default template to {template}')
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
+
+   def repair_json (self, item):
+      #
+      ## this asks gpt-4 to repair text that doesn't parse as json
+      #
+
+      prompt_text=\
+         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
+Please repair the text string so that loads can parse it and return a valid dict.
+This repair should be performed recursively, including all field values.
+for example, in:
+{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
+the inner form  {"action"...} should also be parsable as valid json.
+The provided TextString may have been prematurely truncated. If so, the repair should include adding any necessary JSON termination.
+Return ONLY the repaired json.
+
+TextString:
+{{$input}}
+"""
+      prompt = [
+         SystemMessage(prompt_text),
+         AssistantMessage('')
+      ]
+      input_tokens = len(self.tokenizer.encode(item)) 
+      response = self.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
+      if type(response) is dict:
+          print(f'gpt4 repair returned dict {answer}')
+          return responses
+      else:
+          answer = {}
+          try:
+              answer = json.loads(response.strip())
+          except:
+              print(f'gpt4 fail {response}')
+              return None
+          print(f'gpt4 loads success {answer}')
+          return answer
 
    def ask(self, input, prompt_msgs, client=None, template=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
       """ Example use:
@@ -127,12 +166,20 @@ class LLM():
       if template is None:
          template = self.template
       if max_tokens is None:
-         max_tokens= int(self.ui.max_tokens_combo.currentText())
+          if self.ui is None:
+              max_tokens = 400
+          else:
+              max_tokens= int(self.ui.max_tokens_combo.currentText())
       if temp is None:
-         temp = float(self.ui.temp_combo.currentText())
+          if self.ui is None:
+              temp = 0.1
+          else:
+              temp = float(self.ui.temp_combo.currentText())
       if top_p is None:
-         top_p = float(self.ui.top_p_combo.currentText())
-
+         if self.ui is None:
+             top_p = 1.0
+         else:
+             top_p = float(self.ui.top_p_combo.currentText())
       if 'gpt' in template:
          client = self.openAIClient
       else:
@@ -141,17 +188,43 @@ class LLM():
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
                                         stop_on_json=stop_on_json)
       try:
-         prompt = Prompt(prompt_msgs)
-         #print(f'ask prompt {prompt_msgs}')
-         # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
-         # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
-         response = ut.run_wave (client, {"input":input}, prompt, options,
-                                 self.memory, self.functions, self.tokenizer, validator=validator)
-         #print(f'ask response {response}')
-         if type(response) is not dict or 'status' not in response or response['status'] != 'success':
-            return None
-         content = response['message']['content']
-         return content
+          prompt = Prompt(prompt_msgs)
+          #print(f'ask prompt {prompt_msgs}')
+          # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
+          # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
+          response = ut.run_wave (client, {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
+          print(f'\nask {type(response)}\nresponse')
+          # check for total fail to get response
+          if type(response) is not dict or 'status' not in response or response['status'] != 'success':
+              print(f'\nask fail, response not dict or status not success')
+              return None
+          # check if expecting json or any other special form
+          validation = None
+          if type(validator) is not DefaultResponseValidator:
+              try:
+                  validation = validator.validate_response(self.memory, self.functions, self.tokenizer, response, 0)
+              except Exception as e:
+                  print (f'ask validation fail {str(e)}')
+              if validation is not None and validation['valid']:
+                  if 'value' in validation:
+                      # ok, passed validation
+                      print(f'\njson validation passed')
+                      response["message"]["content"] = validation['value']
+                      return validation['value']
+              # check if validator is JSON, we have a repair option if so
+              if type(validator) is JSONResponseValidator:
+                  print(f' validation attempt failed, calling repair')
+                  json = self.repair_json(response['message']['content'])
+                  print(f'\nrepair response\n {str(response)}')
+                  if type(json) is not dict:
+                      print(f'ask fail, not json\n {str(response)}')
+                      return None
+                  else: # yay! we repaired it!
+                      return json
+
+          # not expecting validatable syntax, so just return content
+          content = response['message']['content']
+          return content
       except Exception as e:
          traceback.print_exc()
          print(str(e))
@@ -234,49 +307,8 @@ class SamInnerVoice():
             for item in self.details[key]:
                 self.articles+=item['title']+'\n'
         self.tokenizer = GPT3Tokenizer()
-        
+        self.reflection = {}   # reflect loop results
 
-    def repair_json (self, item):
-      #
-      ## this asks gpt-4 to repair text that doesn't parse as json
-      #
-
-      prompt_text=\
-         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
-Please repair the text string so that loads can parse it and return a valid dict.
-This repair should be performed recursively, including all field values.
-for example, in:
-{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
-the inner form  {"action"...} should also be parsable as valid json.
-The provided TextString may have been prematurely truncated. If so, the repair should include adding any necessary JSON termination.
-Return ONLY the repaired json.
-
-TextString:
-{{$input}}
-"""
-      prompt = [
-         SystemMessage(prompt_text),
-         AssistantMessage('')
-      ]
-      input_tokens = len(self.tokenizer.encode(item)) 
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=20+input_tokens*1.5)
-      if response is not None:
-         answer = response
-         print(f'gpt4 repair {answer}')
-         return answer
-      else: return None
-
-    def has_AWM(self, name):
-        if name in self.active_WM:
-            return True
-        else: return False
-        
-    def get_AWM(self, name):
-        if name in self.active_WM:
-            return self.active_WM[name]
-        else:
-            return None
-        
         
     #def put_AWM(self, name, value):
     #    if name not in self.active_WM:
@@ -298,13 +330,13 @@ TextString:
       save_history.reverse()
       data['history'] = save_history
       # Pickle data dict with all vars  
-      with open('Sam.pkl', 'wb') as f:
+      with open('Owl.pkl', 'wb') as f:
          pickle.dump(data, f)
 
     def load_conv_history(self):
        global memory
        try:
-          with open('Sam.pkl', 'rb') as f:
+          with open('Owl.pkl', 'rb') as f:
              data = pickle.load(f)
              history = data['history']
              print(f'loading conversation history')
@@ -317,7 +349,9 @@ TextString:
        print(f'add_exchange {input} {response}')
        history = self.memory.get('history')
        history.append({'role':'user', 'content': input.strip()+'\n'})
-       response = response.replace(lc.ASSISTANT_PREFIX+':', '')
+       if type(response) is dict:
+           response = json.dumps(response)
+       #response = response.replace(lc.ASSISTANT_PREFIX+':', '') #this is unnecessary, response is just actual response 
        history.append({'role': 'assistant', 'content': response.strip()+'\n'})
        self.memory.set('history', history)
 
@@ -327,7 +361,7 @@ TextString:
        if he.returncode == 0:
           try:
              print(f'reloading conversation history')
-             with open('Sam.pkl', 'rb') as f:
+             with open('Owl.pkl', 'rb') as f:
                 data = pickle.load(f)
                 history = data['history']
                 # test each form for sanity
@@ -342,9 +376,20 @@ TextString:
           except Exception as e:
              self.ui.display_response(f'Failure to reload conversation history {str(e)}')
 
+    def has_AWM(self, name):
+        if name in self.active_WM:
+            return True
+        else: return False
+        
+    def get_AWM(self, name):
+        if name in self.active_WM:
+            return self.active_WM[name]
+        else:
+            return None
+        
     def save_workingMemory(self):
         # note we need to update WM when AWM changes! tbd
-        with open('SamDocHash.pkl', 'wb') as f:
+        with open('OwlDocHash.pkl', 'wb') as f:
           data = {}
           data['docHash'] = self.docHash
           pickle.dump(data, f)
@@ -353,14 +398,14 @@ TextString:
        docHash_loaded = False
        try:
           self.docHash = {}
-          with open('SamDocHash.pkl', 'rb') as f:
+          with open('OwlDocHash.pkl', 'rb') as f:
              data = pickle.load(f)
              self.docHash = data['docHash']
              docHash_loaded = True
        except Exception as e:
           # no docHash or load failed, reinitialize
           self.docHash = {}
-          with open('SamDocHash.pkl', 'wb') as f:
+          with open('OwlDocHash.pkl', 'wb') as f:
              data = {}
              data['docHash'] = self.docHash
              pickle.dump(data, f)
@@ -376,7 +421,7 @@ TextString:
           return False
 
     def logInput(self, input):
-        with open('SamInputLog.txt', 'a') as log:
+        with open('OwlInputLog.txt', 'a') as log:
             log.write(input.strip()+'\n')
 
     def search_titles(self, query):
@@ -398,7 +443,7 @@ TextString:
        if self.docEs is not None: # only do this once a session
           return self.docEs
        try:
-          with open('SamInputLog.txt', 'r') as log:
+          with open('OwlInputLog.txt', 'r') as log:
              inputLog = log.read()
 
           #lines = inputLog.split('\n')
@@ -450,7 +495,7 @@ Doc's input:
     #
 
     def create_AWM(self, item, name=None, notes=None, confirm=True):
-        print(f'SamCoT create_AWM {name}, {item}')
+        print(f'OwlCoT create_AWM {name}, {item}')
         if confirm:
             result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
@@ -463,7 +508,7 @@ Doc's input:
             try:
                 itemj = json.loads(item)
             except:
-                itemj = self.repair_json(item)
+                itemj = self.llm.repair_json(item)
             if type(itemj) is dict:
                 item_type='dict'
                 item = itemj
@@ -641,18 +686,20 @@ Doc's input:
                         
     def core_prompt(self, include_actions=True):
        ### made into a method so can be eval'd from multiple places
-       prompt = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
+       prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 
 In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
 When the user, Doc, says "I," he is referring to the user, Doc.
-When the user, Doc, says "you," he is referring to Samantha. 
-When Samantha says "you," Samantha is referring to the user, Doc.
-When Samantha refers to herself, she says "I".
+When the user, Doc, says "you," he is referring to Owl. 
+When Owl says "you," Owl is referring to the user, Doc.
+When Owl refers to herself, she says "I".
 
 <BACKSTORY>
-{self.ui.get_profile('Sam', 'Story')}
-Dream: {self.ui.get_profile('Sam', 'Dreams')}
+{self.ui.get_profile('Owl', 'Story')}
+Dream: {self.ui.get_profile('Owl', 'Dreams')}
 </BACKSTORY>
+
+{self.format_reflection()}
 
 <NEWS ARTICLES>
 New York Times news headlines for today:
@@ -667,6 +714,7 @@ To access full articles, use the action 'article'.
 """
        return prompt
 
+        
     def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
        # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': time.time()}, ...]
@@ -741,24 +789,27 @@ Respond only in JSON as shown in the above examples.
         #print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
         if analysis is not None and type(analysis) != dict and ('{' in analysis):
-            analysis = self.repair_json(analysis)
+            analysis = self.llm.repair_json(analysis)
         if analysis is not None and type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
-            print(f'SamCoT content {content}')
+            print(f'OwlCoT content {content}')
             if type(content) == dict and 'action' in content and content['action']=='article':
                 title = content['argument']
-                print(f'Sam wants to read article {title}')
-                ok = self.confirmation_popup(f'Sam wants to retrieve', title)
+                print(f'Owl wants to read article {title}')
+                ok = self.confirmation_popup(f'Owl wants to retrieve', title)
                 if not ok: return {"none": ''}
                 article = self.search_titles(title)
                 url = article['url']
                 print(f' requesting url from server {title} {url}')
                 try:
-                   response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=15)
+                   response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}', timeout=20)
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In about 400 words, extract the key points in the following text relevant to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with only the actual information contained in the text relative to the title."""
+                article_prompt_text = f"""In up to 400 words, summarize in the following news article with respect to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with actual information contained in the text relative to the title."""
+
+                if len(data['result']) < 16:
+                    return {"article": f"\n retrieval failure, NYTimes timeout\n"}
 
                 article_summary_msgs = [
                    SystemMessage(article_prompt_text),
@@ -864,7 +915,7 @@ User Input:
                     UserMessage(user_prompt),
                     AssistantMessage('')
                 ]
-                #max_tokens = int(len(theme)/3+30)
+            #max_tokens = int(len(theme)/3+30)
             #response = self.llm.ask(user_text, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator())
             response = self.llm.ask(user_text, prompt_msgs, max_tokens=max_tokens)
             if response is not None and type(response) is str:
@@ -964,21 +1015,30 @@ User Input:
        else: return 'unknown'
 
     def internal_dialog(self, profile):
+        results = {}
         prompt = [
             SystemMessage(profile.split('\n')[0]),
             ConversationHistory('history', 300),
             AssistantMessage('{{$input}}')
             ]
         
-        feelings = self.llm.ask('My feelings right now in 24 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        feelings = self.llm.ask('AI Assistant feelings right now in 28 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
         if feelings is not None:
-            self.add_exchange("Samantha's feelings:", feelings)
-        goals = self.llm.ask('What would I like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+            self.add_exchange("Owl, how are you feeling?", feelings)
+            results['ai_feelings'] = feelings
+        goals = self.llm.ask('What would AI Assistant like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
         if goals is not None:
-            self.add_exchange("Samantha's goals:", goals)
-        print(f'internal_dialog feelings{feelings} goals {goals}')
-        
+            self.add_exchange("Owl, what would you wish for?", goals)
+            results['ai_goals'] = goals
+        print(f'internal_dialog feelings:\n{feelings}\ngoals:\n{goals}')
+        return results
 
+    def format_reflection(self):
+        prompt_text = ''
+        for key in self.reflection.keys():
+            prompt_text += f'\n{key.capitalize()}\n{self.reflection[key]}'
+        return prompt_text
+        
     def reflect(self, profile_text):
        global es
        results = {}
@@ -986,40 +1046,35 @@ User Input:
        es = self.sentiment_analysis(profile_text)
        #print(f'sentiment_analysis {es}')
        if es is not None:
-          results['sentiment_analysis'] = es
+          results['user_feelings'] = es
        if self.current_topics is None:
           self.current_topics = self.topic_analysis(profile_text)
           #print(f'topic-analysis: {self.current_topics}')
           results['current_topics'] = self.current_topics
        if random.randint(1, 5) == 1:
-           self.internal_dialog(profile_text)
+           ai = self.internal_dialog(profile_text)
+           results = {**results, **ai}
+       self.reflection = results
        now = int(time.time())
        if self.action_selection_occurred and now-self.last_tell_time > random.random()*240+60 :
           self.action_selection_occurred = False # reset action selection so no more tells till user input
           #print('do I have anything to say?')
           self.last_tell_time = now
           prompt = [
-             SystemMessage(profile_text.split('\n')[0:4]),
-             ConversationHistory('history', 1000),
-             UserMessage(f"""<NEWS>\n{self.news}\n</NEWS>
-
-<Recent Topics>
-{self.current_topics}
-</RECENT TOPICS>
-
-<DOC's FEELINGS>
-{self.docEs}
-</DOC's FEELINGS>
-
-Please do not repeat yourself. Your last reflection was:
+              SystemMessage(str(profile_text.split('\n')[0:2])+'\nYour current task is to generate a thought to share with Doc.\n'),
+              ConversationHistory('history', 120),
+              AssistantMessage(self.format_reflection()),
+              UserMessage(f"""
+{self.format_reflection()}
 
 <PREVIOUS REFLECT>
 {self.reflect_thoughts}
 </PREVIOUS REFLECT>
 
 Reflect on the above to say something to Doc.
-Choose at most one thought to express.
-Limit your thought to 180 words."""),
+Your previous reflection is shown above. Do not repeat yourself.
+Choose at one or two thought to express.
+Limit your thoughts to about 240 words."""),
              AssistantMessage('')
           ]
           response = None

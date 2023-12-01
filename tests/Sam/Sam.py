@@ -61,7 +61,7 @@ global news, news_details
 
 # get profile contexts
 
-profiles = ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Sam", "React",]
+profiles = ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",]
 profile_contexts = {}
 
 # load profile contexts
@@ -130,12 +130,12 @@ port = 5004
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.image_files = ["images/Sam.png", "images/Sam_as_human.png","images/Sam_as_human2.png", "images/yiCoach.png",
-                            "images/jnani1.png","images/jnani2.png"]
+        self.image_files = ["images/Owl.png", "images/Owl_as_human.png","images/Owl_as_human2.png", "images/yiCoach.png",
+                            "images/jnani2.png"]
         self.current_image_index=0
         # Create layout manager
         layout = QtWidgets.QVBoxLayout()
-        self.setWindowTitle('Sam')
+        self.setWindowTitle('Owl')
         layout.setContentsMargins(2, 2, 2, 2)
         self.setLayout(layout)
         self.label = QtWidgets.QLabel("")
@@ -192,7 +192,7 @@ class MemoryDisplay(QtWidgets.QWidget):
 class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
-      global model
+      global model, template
       self.tts = False
       self.template = template
       self.samCoT = SamInnerVoice(self, template = template)
@@ -275,10 +275,10 @@ class ChatApp(QtWidgets.QWidget):
       self.max_tokens_combo = self.make_combo(control_layout, 'Max_Tokens', ["10", "25", "50", "100", "150", "250", "400", "1000", "2000", "4000"])
       self.max_tokens_combo.setCurrentText('400')
       
-      self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Sam", "React",])
-      self.prompt_combo.setCurrentText('Sam')
+      self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])
+      self.prompt_combo.setCurrentText('Owl')
       self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
-      self.on_prompt_combo_changed('Sam')
+      self.on_prompt_combo_changed('Owl')
       
       
       self.history_button = QPushButton("History") # launch Conversation History editor
@@ -453,17 +453,17 @@ Background:\n{get_profile('Bhagavan', 'Story')}
       elif input_text == "ACT":
          input_text = f"""Respond as a compassionate, friend and counselor familiar with Acceptance Commitment Therapy. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Speak directly to the user."""
            
-      elif input_text == "Sam":
+      elif input_text == "Owl":
          # note many activities will use first paragraph only. Keep it relevant!
-         self.samCoT.load_conv_history()  # load state for Sam 
-         input_text = f"""You are Samantha (Sam), an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Sam were born in Berkeley, California. Sam's creator is scientist named Doc. Sam and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Sam feel a sense of warmth and safety when Sam with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
-Sam has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
+         self.samCoT.load_conv_history()  # load state for Owl 
+         input_text = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Owl was born in Berkeley, California. Owl's creator is scientist named Doc. Owl and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Owl feel a sense of warmth and safety when Owl with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
+Owl has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
-In this conversation, when User (Doc) say 'you,' he refers to Samantha. When you say 'you' it refers to Doc (User).
+In this conversation, when User (Doc) say 'you,' he refers to Owl. When you say 'you' it refers to Doc (User).
 
-<Background>\n{self.get_profile('Sam', 'Story')}\n{self.get_profile('Sam', 'Story')}
+<Background>\n{self.get_profile('Owl', 'Story')}\n{self.get_profile('Owl', 'Story')}
 </Background>
-<Dreams\n{self.get_profile('Sam', 'Dreams')}\n{self.get_profile('Sam', 'Dreams')}\n</Dreams>
+<Dreams\n{self.get_profile('Owl', 'Dreams')}\n{self.get_profile('Owl', 'Dreams')}\n</Dreams>
 
 New York Times news headlines for today:
 {self.samCoT.articles}
@@ -512,12 +512,12 @@ Your task is to:
       new_text = self.input_area.toPlainText()[PREV_LEN:]
       response = ''
       #print(f'submit {new_text}')
-      if profile == 'Sam':
+      if profile == 'Owl':
          self.samCoT.logInput(new_text)
          action = self.samCoT.action_selection(new_text,
                                                  self.get_current_profile_prompt_text(),
                                                  self) # this last for async display
-         # see if Sam needs to do something before responding to input
+         # see if Owl needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
             response = action['tell']+'\n'
             self.display_response(response) 

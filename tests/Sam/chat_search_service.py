@@ -108,14 +108,14 @@ def read_pdf(filepath):
         pdf_text += page_text
         print(f"Page Number: {page_number}, tokens: {len(tokenizer.encode(page_text))}")
     return info, pdf_text
-
+  
 @app.get("/retrieve/")
 async def retrieve(title: str, url: str, max_chars: int = 4000):
   global client, memory, functions, tokenizer
   response_text = ''
   try:
-    query_phrase, keywords = ut.get_search_phrase_and_keywords(client, title, model, memory, functions, tokenizer)
-    keyword_weights = gs.compute_keyword_weights(keywords)
+    #query_phrase, keywords = ut.get_search_phrase_and_keywords(client, title, model, memory, functions, tokenizer)
+    #keyword_weights = gs.compute_keyword_weights(keywords)
     with warnings.catch_warnings():
       warnings.simplefilter('ignore')
       chrome_options = Options()
@@ -130,10 +130,10 @@ async def retrieve(title: str, url: str, max_chars: int = 4000):
 
       result = ''
       with webdriver.Chrome(options=chrome_options) as dr:
-        print(f'*****setting page load timeout {5} {url}')
-        dr.set_page_load_timeout(5)
+        print(f'*****setting page load timeout {15} {url}')
+        dr.set_page_load_timeout(15)
         dr.get(url)
-        time.sleep(10)
+        #time.sleep(10)
         response = dr.page_source
           
       if url.endswith('pdf'):
@@ -142,7 +142,7 @@ async def retrieve(title: str, url: str, max_chars: int = 4000):
           return {"result":f"url has no filename {url}"}
         print(f'reading pdf {download_dir+url[idx+1:]}')
         pdf_info, pdf_text = read_pdf(download_dir+url[idx+1:])
-        return {"result": pdf_info, "text": pdf_text}
+        return {"result": pdf_text, "info": pdf_info}
 
       soup = BeautifulSoup(response, "html.parser")
       all_text = soup.get_text()
@@ -155,6 +155,7 @@ async def retrieve(title: str, url: str, max_chars: int = 4000):
       all_text = all_text.split('</style>')[0]
       
       final_text = re.sub(r'(\n){2,}', '\n', all_text)
+      print(f'retrieve returning {len(final_text)} chars')
       return {"result":final_text}
   except selenium.common.exceptions.TimeoutException as e:
     print(str(e))

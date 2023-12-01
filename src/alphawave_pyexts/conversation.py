@@ -465,7 +465,7 @@ register_conv_template(
     Conversation(
         name="zephyr",
         system="",
-        roles=("<|user|>", "<|assistant|>", "<|system|>"),
+        roles=("\n<|user|>", "\n<|assistant|>", "<|system|>"),
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
