@@ -130,8 +130,8 @@ port = 5004
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.image_files = ["images/Owl.png", "images/Owl_as_human.png","images/Owl_as_human2.png", "images/yiCoach.png",
-                            "images/jnani2.png"]
+        self.image_files = ["images/Owl.png", "images/Owl2.png", "images/Owl_as_human.png","images/Owl_as_human2.png",
+                            "images/yiCoach.png", "images/jnani2.png"]
         self.current_image_index=0
         # Create layout manager
         layout = QtWidgets.QVBoxLayout()

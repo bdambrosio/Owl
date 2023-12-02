@@ -149,7 +149,7 @@ TextString:
           try:
               answer = json.loads(response.strip())
           except:
-              print(f'gpt4 fail {response}')
+              print(f'gpt4 repair loads fail {response}')
               return None
           print(f'gpt4 loads success {answer}')
           return answer
@@ -193,7 +193,7 @@ TextString:
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
           response = ut.run_wave (client, {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
-          print(f'\nask {type(response)}\nresponse')
+          #print(f'\nask {type(response)}\nresponse')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
               print(f'\nask fail, response not dict or status not success')
@@ -208,14 +208,14 @@ TextString:
               if validation is not None and validation['valid']:
                   if 'value' in validation:
                       # ok, passed validation
-                      print(f'\njson validation passed')
+                      #print(f'\njson validation passed')
                       response["message"]["content"] = validation['value']
                       return validation['value']
               # check if validator is JSON, we have a repair option if so
               if type(validator) is JSONResponseValidator:
                   print(f' validation attempt failed, calling repair')
                   json = self.repair_json(response['message']['content'])
-                  print(f'\nrepair response\n {str(response)}')
+                  #print(f'\nrepair response\n {str(response)}')
                   if type(json) is not dict:
                       print(f'ask fail, not json\n {str(response)}')
                       return None
@@ -346,15 +346,21 @@ class SamInnerVoice():
           self.memory.set('history', [])
 
     def add_exchange(self, input, response):
-       print(f'add_exchange {input} {response}')
+       #print(f'add_exchange {input} {response}')
        history = self.memory.get('history')
-       history.append({'role':'user', 'content': input.strip()+'\n'})
+       usr_msg = {'role':'user', 'content': input.strip()+'\n'}
+       history.append(usr_msg)
        if type(response) is dict:
            response = json.dumps(response)
        #response = response.replace(lc.ASSISTANT_PREFIX+':', '') #this is unnecessary, response is just actual response 
-       history.append({'role': 'assistant', 'content': response.strip()+'\n'})
+       asst_msg = {'role': 'assistant', 'content': response.strip()+'\n'}
+       history.append(asst_msg)
        self.memory.set('history', history)
-
+       with open('owl_ch.json', 'a') as f:
+           f.write(json.dumps(usr_msg)+'\n')
+           f.write(json.dumps(asst_msg)+'\n')
+       return
+   
     def historyEditor(self):
        self.save_conv_history() # save current history so we can edit it
        he = subprocess.run(['python3', 'historyEditor.py'])
@@ -374,7 +380,10 @@ class SamInnerVoice():
                       print(f' problem with this form in conversation history, skipping {d}')
                 self.memory.set('history', sanitized_history)
           except Exception as e:
-             self.ui.display_response(f'Failure to reload conversation history {str(e)}')
+             if self.ui is not None:
+                 self.ui.display_response(f'Failure to reload conversation history {str(e)}')
+             else:
+                 print(f'Failure to reload conversation history {str(e)}')
 
     def has_AWM(self, name):
         if name in self.active_WM:
@@ -411,7 +420,19 @@ class SamInnerVoice():
              pickle.dump(data, f)
        return self.get_workingMemory_available_keys()
       
-
+    def wm_entry_printform(self, entry):
+        show_item = entry.copy()
+        if 'embed' in show_item:
+            del show_item['embed']
+        return json.dumps(show_item)
+    
+    def get_WM_topics(self):
+        wm_topics = []
+        for key in self.docHash:
+            if self.docHash[key]['name'].startswith('Topic: '):
+                wm_topics.append(self.docHash[key])
+        return wm_topics
+    
     def confirmation_popup(self, action, argument):
        dialog = TextEditDialog(action, argument)
        result = dialog.exec_()
@@ -425,7 +446,7 @@ class SamInnerVoice():
             log.write(input.strip()+'\n')
 
     def search_titles(self, query):
-        print(f'search_titles: {query}')
+        #print(f'search_titles: {query}')
         titles = []; articles = []
         for key in self.details.keys():
             for item in self.details[key]:
@@ -495,7 +516,7 @@ Doc's input:
     #
 
     def create_AWM(self, item, name=None, notes=None, confirm=True):
-        print(f'OwlCoT create_AWM {name}, {item}')
+        #print(f'OwlCoT create_AWM {name}, {item}')
         if confirm:
             result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
@@ -567,7 +588,10 @@ Doc's input:
                       return 'edit aborted by user'
                    json_item = json.loads(editted_item)
                 except Exception as e:
-                   self.ui.display_response(f'invalid json {str(e)}')
+                   if self.ui is not None:
+                       self.ui.display_response(f'invalid json {str(e)}')
+                   else:
+                       print(f'invalid json {str(e)}')
                    continue
                 valid_json = True
                 self.active_WM[name]=json_item
@@ -634,14 +658,14 @@ Doc's input:
         # gather all docs
         for id in self.docHash:
             # gather all potential docs
-            candidate_ids.append(id)
+            candidate_ids.append(np.int64(id))
             vectors.append(self.docHash[id]['embed'])
           
         # add all matching docs to index:
         index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
         vectors_np = np.array(vectors)
-        ids_np = np.array(candidate_ids)
-        print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
+        ids_np = np.array(candidate_ids, dtype=np.int64)
+        print(f'vectors {vectors_np.shape}, ids {type(ids_np)} {ids_np.shape}')
         index.add_with_ids(vectors_np, ids_np)
         distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
         print("Distances:", distances)
@@ -695,11 +719,11 @@ When Owl says "you," Owl is referring to the user, Doc.
 When Owl refers to herself, she says "I".
 
 <BACKSTORY>
-{self.ui.get_profile('Owl', 'Story')}
-Dream: {self.ui.get_profile('Owl', 'Dreams')}
+{self.ui.get_profile('Owl', 'Story') if self.ui is not None else ''}
+Dream: {self.ui.get_profile('Owl', 'Dreams') if self.ui is not None else ''}
 </BACKSTORY>
 
-{self.format_reflection()}
+{self.format_reflection() if self.ui is not None else ''}
 
 <NEWS ARTICLES>
 New York Times news headlines for today:
@@ -873,7 +897,9 @@ Respond only in JSON as shown in the above examples.
 
     def tell(self, theme, user_text, widget, short_profile):
         response = None
-        max_tokens = int(int(self.ui.max_tokens_combo.currentText())/1.5)
+        max_tokens = 400
+        if self.ui is not None:
+            max_tokens = int(int(self.ui.max_tokens_combo.currentText())/1.5)
         try:
             if theme is None:
                 # fallthrough, respond directly
@@ -1129,7 +1155,6 @@ Limit your thoughts to about 240 words."""),
        response = self.llm.ask(query, prompt, template=GPT4, max_tokens=400)
        if response is not None:
           answer = response
-          print(f'gpt4 answered')
           return answer
        else: return {'gpt4':'query failure'}
 
@@ -1156,17 +1181,23 @@ Limit your thoughts to about 240 words."""),
          elif type(search_result['result']) is str:
             if self.web_widget is not None:
                self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
-         return "web search succeded"
+         self.add_exchange("Search result:\n", str(search_result['result'])+'\n')
+         return '\nWeb result:\n'+str(search_result['result'])+'\n'
          # return response
       else:
          return 'web search failed'
 
 class WebSearch(QThread):
    finished = pyqtSignal(dict)
-   def __init__(self, query, ui):
+   def __init__(self, query, ui, max_tokens=None):
       super().__init__()
       self.query = query
-      self.ui = ui
+      if max_tokens != None:
+          self.max_tokens = max_tokens
+      elif ui !=  None:
+          self.max_tokens= int(ui.max_tokens_combo.currentText())
+      else:
+          self.max_tokens = 300
       
    def run(self):
       with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1175,7 +1206,7 @@ class WebSearch(QThread):
          self.finished.emit(result)  # Emit the result string.
          
    def long_running_task(self):
-       max_tokens = int(self.ui.max_tokens_combo.currentText())
+       max_tokens = int(self.max_tokens)
        response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={GPT4}&max_chars={max_tokens*4}')
        data = response.json()
        return data

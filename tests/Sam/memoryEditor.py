@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
         try:
             self.docHash = {}
             self.metaData = {}
-            with open('SamDocHash.pkl', 'rb') as f:
+            with open('OwlDocHash.pkl', 'rb') as f:
                 data = pickle.load(f)
                 self.docHash = data['docHash']
         except Exception as e:
@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
         buttonReply = QMessageBox.question(self, 'Save Confirmation', "Are you sure you want to save the entire document?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if buttonReply == QMessageBox.Yes:
             try:
-                with open('SamDocHash.pkl', 'wb') as f:
+                with open('OwlDocHash.pkl', 'wb') as f:
                     pickle.dump({'docHash': self.docHash}, f)
                 QMessageBox.information(self, 'Success', 'Document successfully saved.')
             except Exception as e:
