@@ -583,7 +583,7 @@ Your task is to:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
       print(f'cursor has selected, len {len(selectedText)}')
-      self.samCoT.create_AWM(selectedText)
+      self.samCoT.create_awm(selectedText)
          
    def recall_WM(self): # create a new working memory item and put it in active memory
       selectedText = ''
@@ -593,19 +593,19 @@ Your task is to:
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      self.samCoT.recall_WM(selectedText)
+      self.samCoT.recall_wm(selectedText)
          
    def edit_AWM(self): # edit an active working memory item
-      self.samCoT.edit_AWM()
+      self.samCoT.edit_awm()
          
    def eval_AWM(self): # edit an active working memory item
       self.planner.interpreter.eval_AWM()
          
    def gc_AWM(self): # release a working memory item from active memory
-      self.samCoT.gc_AWM()
+      self.samCoT.gc_awm()
          
    def save_AWM(self): # save active working memory items
-      self.samCoT.save_AWM()
+      self.samCoT.save_awm()
 
 
    def plan(self): # select or create a plan

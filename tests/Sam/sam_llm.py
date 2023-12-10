@@ -25,7 +25,9 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
+print(subdirs)
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower() or 'yi' in d.lower())]
+print(models)
 models.append('orca-2-13b-16bit')
 
 templates = {"CodeLlama-34B-instruct-exl2":"",
@@ -42,7 +44,8 @@ templates = {"CodeLlama-34B-instruct-exl2":"",
              "mistral-airoboros-7b-GPTQ":"?",
              "orca-2-13b-16bit":"chatml",
              "Yi-34B-Chat-8bits":"chatml",
-             "tulu-2-dpo-70b-4.0bpw-h6-exl2": "zephyr"
+             "tulu-2-dpo-70b-4.0bpw-h6-exl2": "zephyr",
+             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr"
              }
 
 model_number = -1

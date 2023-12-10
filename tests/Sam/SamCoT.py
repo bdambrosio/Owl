@@ -57,6 +57,9 @@ NYT_API_KEY = os.getenv("NYT_API_KEY")
 sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
+
+ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+
 # List all available models
 try:
     models = openai.Model.list()
@@ -99,8 +102,10 @@ port = 5004
 GPT4='gpt-4-1106-preview'
 
 
-def generate_faiss_id(document):
+def generate_faiss_id(allocated_p):
     faiss_id = random.randint(1, 333333333)
+    while allocated_p(faiss_id):
+        faiss_id = random.randint(1, 333333333)
     return faiss_id
 
 class LLM():
@@ -596,9 +601,7 @@ Doc's input:
         if name is None or confirm:
             name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
         if name is None or name not in self.active_wm:
-            id = generate_faiss_id(str(item))
-            if id in self.docHash:
-                id = id+1
+            id = generate_faiss_id(lambda x: (x in self.docHash)) 
         else:
             id = self.active_wm[name]['id']
 
@@ -915,8 +918,8 @@ Input: {{{{$input}}}}
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In up to 400 words, summarize in the following news article with respect to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with actual information contained in the text relative to the title."""
-
+                article_prompt_text = f"""In up to 400 words, provide a detailed synopsis of the following news article. Do not include commentary on the content or your process.
+"""
                 if len(data['result']) < 16:
                     return {"article": f"\n retrieval failure, NYTimes timeout\n"}
 
@@ -1149,6 +1152,8 @@ User Input:
         prompt_text = ''
         for key in self.reflection.keys():
             prompt_text += f'\n{key.capitalize()}\n{self.reflection[key]}'
+            if key == 'user_feelings':
+                prompt_text += '\nI will consider these user_feelings in choosing the tone of my response and explore the topic, offering insights and perspectives that address the underlying concerns.\n'
         return prompt_text
         
     def reflect(self, profile_text):

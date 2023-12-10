@@ -540,9 +540,9 @@ TextString:
       find an argument in working memory.
       """
       if item.startswith('$'):
-         if self.samCoT.has_AWM(item):
-            print(f"resolve_arg returning {self.samCoT.get_AWM(item)['item']}")
-            return self.samCoT.get_AWM(item)['item']
+         if self.samCoT.has_awm(item):
+            print(f"resolve_arg returning {self.samCoT.get_awm(item)['item']}")
+            return self.samCoT.get_awm(item)['item']
          else:
             raise InvalidAction(f"{item} referenced before definition")
       else: # presume a literal
@@ -551,7 +551,7 @@ TextString:
    def do_article(self, titleAddr):
        print(f'article {action}')
        action, arguments, result = self.parse_as_action(action)
-       self.samCoT.create_AWM(arguments, name=result, confirm=False)
+       self.samCoT.create_awm(arguments, name=result, confirm=False)
        pass
 
    def do_assign(self, action):
@@ -571,7 +571,7 @@ TextString:
        if type(argument0) is not str:
           raise InvalidAction(f'argument for assign must be a literal or name: {json.dumps(action)}')       
        arg0_resolved = self.resolve_arg(argument0)
-       self.samCoT.create_AWM(arg0_resolved, name=result, confirm=False)
+       self.samCoT.create_awm(arg0_resolved, name=result, confirm=False)
 
    def do_choose(self, action):
        action, arguments, result = self.parse_as_action(action)
@@ -592,7 +592,7 @@ TextString:
        options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
        response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
        if response is not None:
-          self.samCoT.create_AWM(response, name=result)
+          self.samCoT.create_awm(response, name=result)
        else: 
           raise InvalidAction(f'choose returned None')
                  
@@ -624,7 +624,7 @@ TextString:
                               logRepairs=False, validator=JSONResponseValidator())
        if type(response) == dict and 'status' in response and response['status'] == 'success':
           answer = response['message']['content']
-          self.samCoT.create_AWM(answer, name=result, confirm=False)
+          self.samCoT.create_awm(answer, name=result, confirm=False)
           return answer
 
        else: return 'unknown'
@@ -647,11 +647,11 @@ TextString:
       ]
       response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
       if response is not None:
-         self.samCoT.create_AWM(response, name=result, confirm=False)
+         self.samCoT.create_awm(response, name=result, confirm=False)
          self.ui.display_response(f'{action}:\n{response}')
          return 
       else: 
-         self.samCoT.create_AWM('', name=result, confirm=False)
+         self.samCoT.create_awm('', name=result, confirm=False)
          self.ui.display_response(f'{action}:\nNo Text Extracted')
          return 'extract lookup and summary failure'
       
@@ -667,7 +667,7 @@ TextString:
        
        response = self.llm.ask('', prompt)
        if response is not None:
-          self.samCoT.AWM_write(response)
+          self.samCoT.create_awm(response, name=result)
        else:
           return 'unknown'
        
@@ -684,7 +684,7 @@ TextString:
        prompt = [SystemMessage(prompt_text)]
        response = self.llm.ask("", prompt)
        self.ui.display_response(response)
-       self.samCoT.create_AWM(response, name=result, confirm=False)
+       self.samCoT.create_awm(response, name=result, confirm=False)
 
    def do_request(self, action):
        #
@@ -704,7 +704,7 @@ TextString:
           return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
        if response is not None:
           self.ui.display_response(data['text'][:1000])
-          self.samCoT.create_AWM(data['text'][:1000], name=result, confirm=False)
+          self.samCoT.create_awm(data['text'][:1000], name=result, confirm=False)
 
    def do_tell(self, action):
        #
@@ -731,7 +731,7 @@ TextString:
           return
        if response is not None:
           self.ui.display_response(data)
-          self.samCoT.create_AWM(data, name=result, confirm=False)
+          self.samCoT.create_awm(data, name=result, confirm=False)
 
    def wiki(self, action):
        action, arguments, result = self.parse_as_action(action)
@@ -764,7 +764,7 @@ TextString:
        options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
        response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
        if response is not None:
-          self.samCoT.AWM_write(result, response)
+          self.samCoT.awm_write(result, response)
        else: 
           raise InvalidAction(f'choose returned None')
                  
@@ -934,7 +934,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
        plan = self.make_plan(plan_name, task_dscp)
        self.active_plan = plan
        
-       self.samCoT.create_AWM(plan, name=plan_name, confirm=False)
+       self.samCoT.create_awm(plan, name=plan_name, confirm=False)
        return plan
 
    def run_plan(self):
