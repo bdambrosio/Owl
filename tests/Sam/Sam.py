@@ -91,9 +91,6 @@ def get_profile(profile, theme):
 
 CURRENT_PROFILE_PROMPT_TEXT = ''
 
-def get_cururent_profile_prompt_text():
-   return CURRENT_PROFILE_PROMPT_TEXT
-
 
 FORMAT=True
 PREV_LEN=0
@@ -514,9 +511,7 @@ Your task is to:
       #print(f'submit {new_text}')
       if profile == 'Owl':
          self.samCoT.logInput(new_text)
-         action = self.samCoT.action_selection(new_text,
-                                                 self.get_current_profile_prompt_text(),
-                                                 self) # this last for async display
+         action = self.samCoT.action_selection(new_text, self) # this last for async display
          # see if Owl needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
             response = action['tell']+'\n'
@@ -645,7 +640,7 @@ Your task is to:
       if not self.reflect:
          return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
-      response = self.samCoT.reflect(self.get_current_profile_prompt_text())
+      response = self.samCoT.reflect()
       #print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'tell' in response.keys():

@@ -653,7 +653,7 @@ register_conv_template(
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
-        sep="<|im_end|>",
+        sep="<|im_end|>\n",
         sep2='',
         stop_token_ids=[50278, 0],
         response_prime=True,

@@ -26,26 +26,17 @@ models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 print(subdirs)
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'dolphin' in d.lower() or 'yi' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'xaberius' in d.lower())]
 print(models)
-models.append('orca-2-13b-16bit')
 
-templates = {"CodeLlama-34B-instruct-exl2":"",
-             "Mistral-7B-OpenOrca-exl2":"",
-             "platypus2-70b-instruct-gptq":"alpaca",
+templates = {"CodeLlama-34B-instruct-exl2":"chatml",
+             "una-xaberius-34b-v1beta":"",
              "platypus2-70b-instruct-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
-             "Spicyboros-70b-22-GPTQ":"llama-2(?)",
-             "dolphin-34b-exl2":"llama-2(?)",
              "ShiningValiant-4bpw-h6-exl2":"llama-2(?)",
-             "Airoboros-L2-70b-312-GPTQ":"llama-2",
-             "airoboros-c34b-3.1.2-8.0bpq-h6-exl2":"llama-2",
-             "mistral-airoboros-7b-GPTQ":"?",
              "orca-2-13b-16bit":"chatml",
-             "Yi-34B-Chat-8bits":"chatml",
-             "tulu-2-dpo-70b-4.0bpw-h6-exl2": "zephyr",
-             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr"
+             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
              }
 
 model_number = -1
@@ -55,7 +46,6 @@ while model_number < 0 or model_number > len(models) -1:
         template = ''
         if models[i] in templates:
             template = templates[models[i]]
-            context_size = 4096
             try:
                 with open(models_dir+models[i]+'/config.json', 'r') as j:
                     json_config = json.load(j)

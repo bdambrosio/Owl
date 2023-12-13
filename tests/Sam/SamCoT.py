@@ -64,7 +64,8 @@ ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
 try:
     models = openai.Model.list()
     for model in models.data:
-        print(model.id)
+        if model.id.startswith('gpt'):
+            print(model.id)
 except openai.error.OpenAIError as e:
     print(e)
 
@@ -197,7 +198,7 @@ TextString:
           #print(f'ask prompt {prompt_msgs}')
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
-          response = ut.run_wave (client, {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
+          response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
           print(f'\nask {type(response)}\n{response}')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
@@ -337,8 +338,8 @@ class SamInnerVoice():
       h_len = 0
       save_history = []
       for item in range(len(history)-1, -1, -1):
-         if h_len+len(str(history[item])) < 8000:
-            h_len += len(str(history[item]))
+         if h_len+len(json.dumps(history[item])) < 8000:
+            h_len += len(history[item])
             save_history.append(history[item])
       save_history.reverse()
       data['history'] = save_history
@@ -349,14 +350,20 @@ class SamInnerVoice():
     def load_conv_history(self):
        global memory
        try:
-          with open('Owl.pkl', 'rb') as f:
-             data = pickle.load(f)
-             history = data['history']
-             print(f'loading conversation history')
-             self.memory.set('history', history)
+           history = []
+           with open('Owl.pkl', 'rb') as f:
+               data = pickle.load(f)
+               print(f'loading conversation history')
+               for item in data['history']:
+                   try:
+                       history.append(item)
+                   except Exception as e:
+                       print(f'Failure to read history item as json: {str(e)}\n  {item}')
+                       continue
+                   self.memory.set('history', history)
        except Exception as e:
-          print(f'Failure to load conversation history {str(e)}')
-          self.memory.set('history', [])
+           print(f'Failure to load conversation history {str(e)}')
+           self.memory.set('history', [])
 
     def add_exchange(self, input, response):
        #print(f'add_exchange {input} {response}')
@@ -774,7 +781,8 @@ Doc's input:
                         
     def core_prompt(self, include_actions=True):
        ### made into a method so can be eval'd from multiple places
-       prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy. In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
+       prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours.
+You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy. In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
 When the user, Doc, says "I," he is referring to the user, Doc. When the user, Doc, says "you," he is referring to Owl. When Owl says "you," Owl is referring to the user, Doc. When Owl refers to herself, she says "I".
 
 <BACKSTORY>
@@ -800,6 +808,10 @@ To access full articles, use the action 'article'.
     def short_prompt(self):
         full_prompt = self.core_prompt(include_actions=False).split('\n')
         return '\n'.join([paragraph + '\n' for paragraph in full_prompt[:2]])
+        
+    def v_short_prompt(self):
+        full_prompt = self.core_prompt(include_actions=False).split('\n')
+        return '\n'.join([paragraph + '\n' for paragraph in full_prompt[:1]])
         
     def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
@@ -843,7 +855,7 @@ Respond only in JSON as shown in the above examples.
 
 """
 
-    def action_selection(self, input, profile, widget):
+    def action_selection(self, input, widget):
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
@@ -851,8 +863,8 @@ Respond only in JSON as shown in the above examples.
         # classify input to select wm_topic to include in prompt
         wm_topic = None
         try:
-            prompt = [SystemMessage(self.short_prompt()),
-                      UserMessage(f"""Your task is to determine the main topic of the following user input
+            prompt = [SystemMessage(f"""{self.v_short_prompt()}
+Your task is to determine the main topic of the following user input.
 The topic must be one of:\n{self.format_topic_names()}
 The response must be a JSON form including the topic selected from above: 
 {{"topic": '<topic_name>'}}
@@ -870,6 +882,8 @@ Input: {{{{$input}}}}
                     wm_topic = self.find_wm_topic(topic_name)
                     if wm_topic is not None and type(wm_topic) is dict:
                         wm_topic = wm_topic['item']
+                    else:
+                        print(f"\nCan't find topic from response: {response}\n")
         except Exception as e:
             traceback.print_exc()
             print(str(e))
@@ -1156,10 +1170,11 @@ User Input:
                 prompt_text += '\nI will consider these user_feelings in choosing the tone of my response and explore the topic, offering insights and perspectives that address the underlying concerns.\n'
         return prompt_text
         
-    def reflect(self, profile_text):
+    def reflect(self):
        global es
        results = {}
        print('reflection begun')
+       profile_text = self.get_short_prompt()
        es = self.sentiment_analysis(profile_text)
        #print(f'sentiment_analysis {es}')
        if es is not None:
