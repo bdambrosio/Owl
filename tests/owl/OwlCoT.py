@@ -24,6 +24,7 @@ from promptrix.Prompt import Prompt
 from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
+from promptrix.ConversationHistorySam import ConversationHistorySam
 from promptrix.ConversationHistory import ConversationHistory
 from alphawave.MemoryFork import MemoryFork
 from alphawave.DefaultResponseValidator import DefaultResponseValidator
@@ -56,22 +57,17 @@ NYT_API_KEY = os.getenv("NYT_API_KEY")
 sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
+
+ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+
 # List all available models
 try:
     models = openai.Model.list()
     for model in models.data:
-        print(model.id)
+        if model.id.startswith('gpt'):
+            print(model.id)
 except openai.error.OpenAIError as e:
     print(e)
-
-
-def get_city_state():
-   api_key = os.getenv("IPINFO")
-   handler = ipinfo.getHandler(api_key)
-   response = handler.getDetails()
-   city, state = response.city, response.region
-   return city, state
-city, state = get_city_state()
 
 # find out where we are
 
@@ -81,14 +77,14 @@ def get_city_state():
    response = handler.getDetails()
    city, state = response.city, response.region
    return city, state
-
 city, state = get_city_state()
+
 print(f"My city and state is: {city}, {state}")
 local_time = time.localtime()
 year = local_time.tm_year
-day_name = ['Monday', 'Tuesday', 'Wednesday', 'thursday','friday','saturday','sunday'][local_time.tm_wday]
+day_name = ['Monday', 'Tuesday', 'Wednesday', 'Thursday','Friday','Saturday','Sunday'][local_time.tm_wday]
 month_num = local_time.tm_mon
-month_name = ['january','february','march','april','may','june','july','august','september','october','november','december'][month_num-1]
+month_name = ['January','February','March','April','May','June','July','August','September','October','November','December'][month_num-1]
 month_day = local_time.tm_mday
 hour = local_time.tm_hour
 
@@ -96,17 +92,17 @@ host = '127.0.0.1'
 port = 5004
 
 GPT4='gpt-4-1106-preview'
+GPT3='gpt-3.5-turbo-1106'
 
 
-def generate_faiss_id(document):
-    hash_object = hashlib.sha256()
-    hash_object.update(document.encode("utf-8"))
-    hash_value = hash_object.hexdigest()
-    faiss_id = int(hash_value[:8], 16)
+def generate_faiss_id(allocated_p):
+    faiss_id = random.randint(1, 333333333)
+    while allocated_p(faiss_id):
+        faiss_id = random.randint(1, 333333333)
     return faiss_id
 
 class LLM():
-   def __init__(self, ui, memory, osClient, openAIClient, template='alpaca'):
+   def __init__(self, ui, memory, osClient, openAIClient, template='zephyr'):
         self.ui = ui # needed to get current ui temp, max_tokens
         self.openAIClient=openAIClient
         self.memory = memory
@@ -148,7 +144,7 @@ TextString:
           try:
               answer = json.loads(response.strip())
           except:
-              print(f'gpt4 fail {response}')
+              print(f'gpt4 repair loads fail {response}')
               return None
           print(f'gpt4 loads success {answer}')
           return answer
@@ -179,10 +175,13 @@ TextString:
              top_p = 1.0
          else:
              top_p = float(self.ui.top_p_combo.currentText())
-      if 'gpt' in template:
-         client = self.openAIClient
-      else:
-         client = self.osClient
+      if client is None:
+          if 'gpt' in template:
+              client = self.openAIClient
+              print(f'llm.ask using OpenAIClient {client}')
+          else:
+              client = self.osClient
+      print(f'ask {client}, {template}') 
       options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
                                         stop_on_json=stop_on_json)
@@ -191,8 +190,8 @@ TextString:
           #print(f'ask prompt {prompt_msgs}')
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
-          response = ut.run_wave (client, {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
-          print(f'\nask {type(response)}\nresponse')
+          response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
+          print(f'\nask {type(response)}\n{response}')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
               print(f'\nask fail, response not dict or status not success')
@@ -207,14 +206,14 @@ TextString:
               if validation is not None and validation['valid']:
                   if 'value' in validation:
                       # ok, passed validation
-                      print(f'\njson validation passed')
+                      #print(f'\njson validation passed')
                       response["message"]["content"] = validation['value']
                       return validation['value']
               # check if validator is JSON, we have a repair option if so
               if type(validator) is JSONResponseValidator:
                   print(f' validation attempt failed, calling repair')
                   json = self.repair_json(response['message']['content'])
-                  print(f'\nrepair response\n {str(response)}')
+                  #print(f'\nrepair response\n {str(response)}')
                   if type(json) is not dict:
                       print(f'ask fail, not json\n {str(response)}')
                       return None
@@ -307,8 +306,23 @@ class OwlInnerVoice():
                 self.articles+=item['title']+'\n'
         self.tokenizer = GPT3Tokenizer()
         self.reflection = {}   # reflect loop results
+        self.wm_topics = self.get_wm_topics()
+        self.topic_names = {"Emotional Support": "Discussions centered around Doc's feelings, insecurities, and self-reflection.",
+                       "Miscellaneous": 'Any topic that doesnt fit neatly into the categories above',
+                       "News & Events": 'Current affairs, updates on technology, and global happenings.',
+                       "Philosophical Exploration": 'Dialogues focused on wisdom, spirituality, and the nature of existence.',
+                       "Personal Development": "Talks about Owl's growth, learning, and skill improvement. This includes AI goals, wishes, and feelings",
+                       "Technical Assistance": 'Topics involving programming, coding, and troubleshooting issues.',
+                       }
 
         
+    #def put_awm(self, name, value):
+    #    if name not in self.active_wm:
+    #        self.create_awm(value, name=name)
+    #    self.active_wm[name]['item'] = value
+    #    self.active_wm[name]['type'] = str(type(value))
+
+            
     def save_conv_history(self):
       global memory, profile
       data = defaultdict(dict)
@@ -316,7 +330,7 @@ class OwlInnerVoice():
       h_len = 0
       save_history = []
       for item in range(len(history)-1, -1, -1):
-         if h_len+len(str(history[item])) < 8000:
+         if h_len+len(json.dumps(history[item])) < 12000:
             h_len += len(str(history[item]))
             save_history.append(history[item])
       save_history.reverse()
@@ -338,15 +352,21 @@ class OwlInnerVoice():
           self.memory.set('history', [])
 
     def add_exchange(self, input, response):
-       print(f'add_exchange {input} {response}')
+       #print(f'add_exchange {input} {response}')
        history = self.memory.get('history')
-       history.append({'role':'user', 'content': input.strip()+'\n'})
+       usr_msg = {'role':'user', 'content': input.strip()+'\n'}
+       history.append(usr_msg)
        if type(response) is dict:
            response = json.dumps(response)
        #response = response.replace(lc.ASSISTANT_PREFIX+':', '') #this is unnecessary, response is just actual response 
-       history.append({'role': 'assistant', 'content': response.strip()+'\n'})
+       asst_msg = {'role': 'assistant', 'content': response.strip()+'\n'}
+       history.append(asst_msg)
        self.memory.set('history', history)
-
+       with open('owl_ch.json', 'a') as f:
+           f.write(json.dumps(usr_msg)+'\n')
+           f.write(json.dumps(asst_msg)+'\n')
+       return
+   
     def historyEditor(self):
        self.save_conv_history() # save current history so we can edit it
        he = subprocess.run(['python3', 'historyEditor.py'])
@@ -366,7 +386,10 @@ class OwlInnerVoice():
                       print(f' problem with this form in conversation history, skipping {d}')
                 self.memory.set('history', sanitized_history)
           except Exception as e:
-             self.ui.display_response(f'Failure to reload conversation history {str(e)}')
+             if self.ui is not None:
+                 self.ui.display_response(f'Failure to reload conversation history {str(e)}')
+             else:
+                 print(f'Failure to reload conversation history {str(e)}')
 
     def has_awm(self, name):
         if name in self.active_wm:
@@ -379,8 +402,13 @@ class OwlInnerVoice():
         else:
             return None
         
+    ###
+    ### Note - need overhaul.
+    ### Working memory items are stored in memory as a dict using the "id" field as the key!
+    ###   'key' is just a short form of the content to generate an embedding from
+    ###
     def save_workingMemory(self):
-        # note we need to update WM when awm changes! tbd
+        # note we need to update wm when awm changes! tbd
         with open('OwlDocHash.pkl', 'wb') as f:
           data = {}
           data['docHash'] = self.docHash
@@ -403,7 +431,62 @@ class OwlInnerVoice():
              pickle.dump(data, f)
        return self.get_workingMemory_available_keys()
       
-
+    def wm_entry_printform(self, entry):
+        show_item = entry.copy()
+        if 'embed' in show_item:
+            del show_item['embed']
+        return json.dumps(show_item)
+    
+    #
+    ### we need next three because docHash key is an int64 (id field!)
+    ### wm_topics are the 'item' field of docHash entries
+    ### they are distinguished by entry 'name' field - docHash entry name fields for wm_topics are preceded by 'Topic: '
+    ### but of course, wm_topics themselves also have a name field.
+    ### this mess needs an overhaul
+    ### for now, just copy the docHash id into the wm_topic so we have a backptr for update
+    #
+    def get_wm_topics(self):
+        # note wm_topics are the entire docHash entry of wm entries.
+        wm_topics = []
+        for id in self.docHash.keys():
+            entry = self.docHash[id]
+            if entry['name'].startswith('Topic: '):
+                wm_topics.append(entry)
+        self.wm_topics = wm_topics
+        return wm_topics
+    
+    def find_wm_topic(self, topic):
+        # remember we are searching docHash, that's why we need to look, key is 'id'
+        if not topic.startswith('Topic: '):
+            topic = 'Topic: '+topic
+        for item in self.wm_topics:
+            if item['name'] == topic:
+                return item
+        else:
+            print(f'find_wm_topic {topic} not found')
+            return None
+    
+    def update_wm_topic(self, entry, updated_item):
+        # topic names in items are unqualified, usually
+        if 'id' not in entry:
+            print(f"entry should be full docHash entry, not item, can't update! {entry}")
+            return
+        id = entry['id']
+        if id in self.docHash:
+            # should be able to do this outside, but just in case entry is a copy...
+            self.docHash[id]['item'] = updated_item
+        else:
+            print(f'topic not found in wm {entry}, call create_awm!')
+    
+    def format_topic_names(self):
+        # format json dict of topic_names and dscps for prompt insertion
+        # why not just json.dumps?
+        text = "Topics:\n"
+        for key in self.topic_names:
+            text += key+': '+self.topic_names[key]+'\n'
+        print(f'format_topics {text}')
+        return text
+    
     def confirmation_popup(self, action, argument):
        dialog = TextEditDialog(action, argument)
        result = dialog.exec_()
@@ -417,7 +500,7 @@ class OwlInnerVoice():
             log.write(input.strip()+'\n')
 
     def search_titles(self, query):
-        print(f'search_titles: {query}')
+        #print(f'search_titles: {query}')
         titles = []; articles = []
         for key in self.details.keys():
             for item in self.details[key]:
@@ -431,7 +514,7 @@ class OwlInnerVoice():
         return articles[most_similar]
     
     def sentiment_analysis(self, profile_text):
-       short_profile = profile_text.split('\n')[0]
+       short_profile = self.short_prompt()
        if self.docEs is not None: # only do this once a session
           return self.docEs
        try:
@@ -461,7 +544,7 @@ Doc's input:
        return None
 
     def sentiment_response(self, profile):
-       short_profile = profile.split('\n')[0]
+       short_profile = self.short_prompt()
        # breaking this out separately from sentiment analysis
        prompt_text = f"""Given your analysis of doc's emotional state\n{es}\nWhat would you say to him? If so, pick only the one or two most salient emotions. Remember he has not seen the analysis, so you need to explicitly include the names of any emotions you want to discuss. You have only about 100 words.\n"""
        prompt = [
@@ -491,10 +574,12 @@ Doc's input:
         if confirm:
             result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
-                return " "
+                return None
             item = result
         item_type = 'str'
-        if type(item) is dict: item_type='dict'
+        if type(item) is dict:
+            print(f'   create_awm creating item as dict')
+            item_type='dict'
         elif '{' in item: # see if it is json in string form
             itemj = ''
             try:
@@ -509,18 +594,16 @@ Doc's input:
         if name is None or confirm:
             name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
         if name is None or name not in self.active_wm:
-            id = generate_faiss_id(str(item))
-            if id in self.docHash:
-                id = id+1
+            id = generate_faiss_id(lambda x: (x in self.docHash)) 
         else:
             id = self.active_wm[name]['id']
 
-        if len(str(item)) > 32:
+        if len(str(item)) > 64:
             key_prompt = [SystemMessage(f"""Generate a very short (less that 10 tokens) descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
                           ConversationHistory('history', 120),
                           UserMessage(f'ITEM:\n{str(item)}'),
                           AssistantMessage('')]
-            key_json = self.llm.ask('', key_prompt, max_tokens=15, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+            key_json = self.llm.ask('', key_prompt, max_tokens=25, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
             print(f' generated key: {key_json}')
             if type(key_json) is dict and 'key' in key_json:
                 key = key_json['key']
@@ -531,12 +614,15 @@ Doc's input:
         key = re.sub(r'[^a-z ]', '', key.lower())
         embed = self.embedder.encode(key)
         # add entry to Working memory
+        print(f'create_awm creating new wm item with id {id}')
         self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
         # and to active Working Memory
         self.active_wm[name]=self.docHash[id]
         # and write-through persist
         self.save_workingMemory()
-        return name
+        # run get_wm_topics in case we just added a topic!
+        self.wm_topics = self.get_wm_topics()
+        return self.docHash[id]
 
     def edit_awm (self):
        names=[f"{self.active_wm[item]['name']}: {str(self.active_wm[item]['item'])[:32]}" for item in self.active_wm]
@@ -559,13 +645,16 @@ Doc's input:
                       return 'edit aborted by user'
                    json_item = json.loads(editted_item)
                 except Exception as e:
-                   self.ui.display_response(f'invalid json {str(e)}')
+                   if self.ui is not None:
+                       self.ui.display_response(f'invalid json {str(e)}')
+                   else:
+                       print(f'invalid json {str(e)}')
                    continue
                 valid_json = True
                 self.active_wm[name]=json_item
                 item_w_embed = json_item.copy()
                 item_w_embed['embed'] = self.embedder.encode(json_item['key'])
-                #writethough to WM and backing store
+                #writethough to wm and backing store
                 self.docHash[json_item['id']] = item_w_embed
                 self.save_workingMemory()
              return 'successful edit'
@@ -601,7 +690,7 @@ Doc's input:
 
     def recall_wm(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
         #
-        ## recall an item from WM into awm
+        ## recall an item from wm into awm
         #
         if query is None or len(query) == 0:
             query = self.confirmation_popup("name or query string?", '?')
@@ -626,14 +715,14 @@ Doc's input:
         # gather all docs
         for id in self.docHash:
             # gather all potential docs
-            candidate_ids.append(id)
+            candidate_ids.append(np.int64(id))
             vectors.append(self.docHash[id]['embed'])
           
         # add all matching docs to index:
         index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
-        vectors_np = np.array(vectors, dtype=np.float32)
+        vectors_np = np.array(vectors)
         ids_np = np.array(candidate_ids, dtype=np.int64)
-        print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
+        print(f'vectors {vectors_np.shape}, ids {type(ids_np)} {ids_np.shape}')
         index.add_with_ids(vectors_np, ids_np)
         distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
         print("Distances:", distances)
@@ -676,22 +765,18 @@ Doc's input:
              wmkeys +=self.docHash[id]['key']+'\n'
        return wmkeys
                         
-    def core_prompt(self, include_actions=False):
+    def core_prompt(self, include_actions=True):
        ### made into a method so can be eval'd from multiple places
-       prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-
-In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
-When the user, Doc, says "I," he is referring to the user, Doc.
-When the user, Doc, says "you," he is referring to Owl. 
-When Owl says "you," Owl is referring to the user, Doc.
-When Owl refers to herself, she says "I".
+       prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours.
+You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy. In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
+When the user, Doc, says "I," he is referring to the user, Doc. When the user, Doc, says "you," he is referring to Owl. When Owl says "you," Owl is referring to the user, Doc. When Owl refers to herself, she says "I".
 
 <BACKSTORY>
-{self.ui.get_profile('Owl', 'Story')}
-Dream: {self.ui.get_profile('Owl', 'Dreams')}
+{self.ui.get_profile('Owl', 'Story') if self.ui is not None else ''}
+Dream: {self.ui.get_profile('Owl', 'Dreams') if self.ui is not None else ''}
 </BACKSTORY>
 
-{self.format_reflection()}
+{self.format_reflection() if self.ui is not None else ''}
 
 <NEWS ARTICLES>
 New York Times news headlines for today:
@@ -707,14 +792,13 @@ To access full articles, use the action 'article'.
        return prompt
 
     def short_prompt(self):
-        p = self.core_prompt().split('\n')
-        return '\n'.join(p[:2])
-
+        full_prompt = self.core_prompt(include_actions=False).split('\n')
+        return '\n'.join([paragraph + '\n' for paragraph in full_prompt[:2]])
+        
     def v_short_prompt(self):
-        p = self.core_prompt().split('\n')
-        return '\n'.join(p[:1])
-
-   
+        full_prompt = self.core_prompt(include_actions=False).split('\n')
+        return '\n'.join([paragraph + '\n' for paragraph in full_prompt[:1]])
+        
     def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
        # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': time.time()}, ...]
@@ -761,7 +845,35 @@ Respond only in JSON as shown in the above examples.
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
-        print(f'action selection input {input}')
+
+        # classify input to select wm_topic to include in prompt
+        wm_topic = None
+        try:
+            prompt = [SystemMessage(f"""{self.v_short_prompt()}
+Your task is to determine the main topic of the following user input.
+The topic must be one of:\n{self.format_topic_names()}
+The response must be a JSON form including the topic selected from above: 
+{{"topic": '<topic_name>'}}
+                      
+Input: {{{{$input}}}}
+"""),
+                      AssistantMessage('')
+                      ]
+            print(f'topic doing ask')
+            response = self.llm.ask(input, prompt, temp=0.1, max_tokens=25, stop_on_json=True, validator = JSONResponseValidator())
+            print(f'topic response {response}')
+            if response is not None:
+                if type(response) is dict and 'topic' in response:
+                    topic_name = 'Topic: '+response['topic']
+                    wm_topic = self.find_wm_topic(topic_name)
+                    if wm_topic is not None and type(wm_topic) is dict:
+                        wm_topic = wm_topic['item']
+                    else:
+                        print(f"\nCan't find topic from response: {response}\n")
+        except Exception as e:
+            traceback.print_exc()
+            print(str(e))
+        #print(f'action selection input {input}')
         self.action_selection_occurred = True
         short_profile = self.short_prompt()
         action_validation_schema={
@@ -779,9 +891,9 @@ Respond only in JSON as shown in the above examples.
 
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
-            SystemMessage(self.core_prompt()),
+            SystemMessage(self.core_prompt(include_actions=False)),
             ConversationHistory('history', 1200),
-            UserMessage(self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
+            UserMessage((f"\nCurrent interaction topic:\n{json.dumps(wm_topic)}\n\n" if wm_topic is not None else '')+self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
             AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
@@ -806,8 +918,8 @@ Respond only in JSON as shown in the above examples.
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In up to 400 words, summarize in the following news article with respect to its title '{title}'. Do not include commentary on the content or your process. Instead, respond succintly with actual information contained in the text relative to the title."""
-
+                article_prompt_text = f"""In up to 400 words, provide a detailed synopsis of the following news article. Do not include commentary on the content or your process.
+"""
                 if len(data['result']) < 16:
                     return {"article": f"\n retrieval failure, NYTimes timeout\n"}
 
@@ -873,7 +985,9 @@ Respond only in JSON as shown in the above examples.
 
     def tell(self, theme, user_text, widget, short_profile):
         response = None
-        max_tokens = int(int(self.ui.max_tokens_combo.currentText())/1.5)
+        max_tokens = 400
+        if self.ui is not None:
+            max_tokens = int(int(self.ui.max_tokens_combo.currentText())/1.5)
         try:
             if theme is None:
                 # fallthrough, respond directly
@@ -1017,16 +1131,17 @@ User Input:
     def internal_dialog(self, profile):
         results = {}
         prompt = [
-            SystemMessage(profile.split('\n')[0]),
+            SystemMessage(self.short_prompt()),
             ConversationHistory('history', 300),
-            AssistantMessage('{{$input}}')
+            UserMessage('{{$input}}'),
+            AssistantMessage('')
             ]
         
-        feelings = self.llm.ask('AI Assistant feelings right now in 28 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        feelings = self.llm.ask('Owl, if you had feelings, what would you be feeling right now? Answer in 28 words or less without disclaimers.', prompt, template = self.template, temp=.6, max_tokens=48)
         if feelings is not None:
             self.add_exchange("Owl, how are you feeling?", feelings)
             results['ai_feelings'] = feelings
-        goals = self.llm.ask('What would AI Assistant like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        goals = self.llm.ask('What would Owl like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
         if goals is not None:
             self.add_exchange("Owl, what would you wish for?", goals)
             results['ai_goals'] = goals
@@ -1037,13 +1152,15 @@ User Input:
         prompt_text = ''
         for key in self.reflection.keys():
             prompt_text += f'\n{key.capitalize()}\n{self.reflection[key]}'
+            if key == 'user_feelings':
+                prompt_text += '\nI will consider these user_feelings in choosing the tone of my response and explore the topic, offering insights and perspectives that address the underlying concerns.\n'
         return prompt_text
         
     def reflect(self):
        global es
-       profile_text = self.v_short_prompt()
        results = {}
        print('reflection begun')
+       profile_text = self.short_prompt()
        es = self.sentiment_analysis(profile_text)
        #print(f'sentiment_analysis {es}')
        if es is not None:
@@ -1062,7 +1179,7 @@ User Input:
           #print('do I have anything to say?')
           self.last_tell_time = now
           prompt = [
-              SystemMessage(self.v_short_prompt()+'\nYour current task is to generate a thought to share with Doc.\n'),
+              SystemMessage(str(profile_text.split('\n')[0:2])+"\nOwl's current task is to generate a novel thought to share with Doc.\n"),
               ConversationHistory('history', 120),
               AssistantMessage(self.format_reflection()),
               UserMessage(f"""
@@ -1072,10 +1189,10 @@ User Input:
 {self.reflect_thoughts}
 </PREVIOUS REFLECT>
 
-Reflect on the above to say something to Doc.
-Your previous reflection is shown above. Do not repeat yourself.
-Choose at one or two thought to express.
-Limit your thoughts to about 240 words."""),
+Owl's thought might be about Owl's current feelings or goals, a recent interaction with Doc, or a reflection on longer term dialogue
+Your previous reflection is shown above to help avoid repetition
+Choose at most one or two thoughts, and limit your total response to about 120 words.
+"""),
              AssistantMessage('')
           ]
           response = None
@@ -1105,7 +1222,7 @@ Limit your thoughts to about 240 words."""),
       else: return 'wiki lookup and summary failure'
 
     def wiki(self, query, profile):
-       short_profile = profile.split('\n')[0]
+       short_profile = self.short_prompt()
        query = query.strip()
        #
        #TODO rewrite query as answer (HyDE)
@@ -1118,7 +1235,7 @@ Limit your thoughts to about 240 words."""),
           return wiki_lookup_summary
 
     def gpt4(self, query, profile):
-       short_profile = profile.split('\n')[0]
+       short_profile = self.short_prompt()
        query = query.strip()
        if len(query)> 0:
           prompt = [
@@ -1130,7 +1247,6 @@ Limit your thoughts to about 240 words."""),
        response = self.llm.ask(query, prompt, template=GPT4, max_tokens=400)
        if response is not None:
           answer = response
-          print(f'gpt4 answered')
           return answer
        else: return {'gpt4':'query failure'}
 
@@ -1139,7 +1255,7 @@ Limit your thoughts to about 240 words."""),
        self.web_widget = widget
        if len(query)> 0:
           self.web_query = query
-          self.web_profile = profile.split('\n')[0]
+          self.web_profile = self.short_prompt()
           self.worker = WebSearch(query, self.ui)
           self.worker.finished.connect(self.web_search_finished)
           self.worker.start()
@@ -1151,23 +1267,31 @@ Limit your thoughts to about 240 words."""),
          if type(search_result['result']) == list:
             for item in search_result['result']:
                if self.web_widget is not None:
-                  self.web_widget.display_response('* '+item['source']+'\n')
                   self.web_widget.display_response('     '+item['text']+'\n\n')
+                  self.web_widget.display_response('* '+item['source']+'\n')
                response += item['text']+'\n'
          elif type(search_result['result']) is str:
             if self.web_widget is not None:
                self.web_widget.display_response('\nWeb result:\n'+search_result['result']+'\n')
-         return "web search succeded"
+               if 'source_urls' in search_result:
+                   self.web_widget.display_response('\nSources:\n'+'\n'.join(search_result['source_urls'])+'\n')
+         self.add_exchange("Search result:\n", str(search_result['result'])+'\n')
+         return '\nWeb result:\n'+str(search_result['result'])+'\n'
          # return response
       else:
          return 'web search failed'
 
 class WebSearch(QThread):
    finished = pyqtSignal(dict)
-   def __init__(self, query, ui):
+   def __init__(self, query, ui, max_tokens=None):
       super().__init__()
       self.query = query
-      self.ui = ui
+      if max_tokens != None:
+          self.max_tokens = max_tokens
+      elif ui !=  None:
+          self.max_tokens= int(ui.max_tokens_combo.currentText())
+      else:
+          self.max_tokens = 300
       
    def run(self):
       with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1176,10 +1300,11 @@ class WebSearch(QThread):
          self.finished.emit(result)  # Emit the result string.
          
    def long_running_task(self):
-       max_tokens = int(self.ui.max_tokens_combo.currentText())
-       response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={GPT4}&max_chars={max_tokens*4}')
+       max_tokens = int(self.max_tokens)
+       response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model={GPT3}&max_chars={max_tokens*4}')
        data = response.json()
        return data
 
 if __name__ == '__main__':
-    owl= OwlInnerVoice(model='alpaca')
+    owl = OwlInnerVoice(None, template='zephyr')
+    print(owl.short_prompt())

@@ -61,10 +61,12 @@ async def search(query: str, model:str = 'gpt-3.5-turbo', max_chars: int = 1200)
       gs.search_google(query, gs.QUICK_SEARCH, query_phrase, keywords, client, model, memory, functions, tokenizer, max_chars)
 
     print(f'google_result:\n{google_result}')
+    source_urls = []
     if type(google_result) is list:
       text = ''
       for item in google_result:
         text += item['text'].strip()+'\n'
+        source_urls.append(item['url'])
       
       print(f'text from google_search\n{text}\n')
       prompt = Prompt([
@@ -77,7 +79,7 @@ async def search(query: str, model:str = 'gpt-3.5-turbo', max_chars: int = 1200)
                                memory, functions, tokenizer, max_repair_attempts=1,
                                validator=DefaultResponseValidator())
       if type(summary) is dict and 'status' in summary.keys() and summary['status'] == 'success':
-        return {"result":summary['message']['content']}
+        return {"result":summary['message']['content'], "source_urls":source_urls}
       else: return {'result': 'failure'}
   except Exception as e:
     traceback.print_exc()

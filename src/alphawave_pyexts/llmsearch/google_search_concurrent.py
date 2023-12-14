@@ -338,9 +338,10 @@ def search_google(original_query, search_level, query_phrase, keywords, client, 
     # interleave both lists now that duplicates are removed
     urls = [val for tup in zip_longest(orig_phrase_urls, gpt_phrase_urls) for val in tup if val is not None]
     all_urls = copy.deepcopy(urls)
-    full_text = \
+    digest_w_urls = \
         process_urls(extract_query, keywords, weights, all_urls, search_level, client, model, memory, functions, tokenizer, max_chars)
   except:
       traceback.print_exc()
-  return  full_text
+  print(f'\n\nFinal google search result\n{digest_w_urls}\n')
+  return  digest_w_urls
 

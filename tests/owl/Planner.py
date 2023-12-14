@@ -225,36 +225,6 @@ action_primitive_descriptions = \
     {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
     {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
 ]
-"""
-
-quality_prompt =\
-"""
-Please provide a quality evaluation of the attached text considering the following dimensions:
-
-- Clarity: Assess the text's ability to convey its message in an understandable way.
-- Coherence: Critique the logical flow and structure of the text.
-- Depth and Insight: Evaluate the thoroughness of the topic exploration and the insights provided.
-- Accuracy and Evidence: Confirm the correctness of the facts and the presence of supporting evidence.
-- Integrity and Bias: Evaluate the presence of bias or misrepresentation in the text.
-- Relevance: Determine the text's relevance to its intended audience and purpose.
-- Originality: Consider the uniqueness of the content provided.
-- Style and Engagement: Comment on the appropriateness and engagement level of the writing style.
-- Grammar and Syntax: Note any grammatical or syntactical errors that obscure the meaning of the text.
-- Purpose Fulfillment: Judge how well the text achieves its intended purpose.
-- Credibility: Examine the credibility of the author and sources.
-- Impact: Reflect on the effect the text has on a knowledgeable reader working in the area.
-
-Provide examples and explanations to support your assessments for each dimension."
-
----
-"""
-
-planner_format_prompt =\
-   """
-Plan Format:
-Your plan must be a JSON list ( [...] ) of instantiated actions. Each action instantiation is a will include the specified action, the arguments for that action, and the name to assign to the result. 
-All names must appear in a result before the can be referenced as arguments.
-The order of the actions in the plan matters, as it represents the sequence in which they should be executed.
 
 Example Plan (1-shot):
 

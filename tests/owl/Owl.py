@@ -195,7 +195,6 @@ class ChatApp(QtWidgets.QWidget):
             else:
                super().keyPressEvent(event)
             
-
       self.input_area = MyTextEdit(self)
       self.input_area.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
       #self.input_area.setAcceptRichText(True)
