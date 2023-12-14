@@ -47,7 +47,7 @@ import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
-from SamCoT import ListDialog, LLM, GPT4, TextEditDialog
+from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -295,13 +295,13 @@ class InvalidAction(Exception):
 
        
 class PlanInterpreter():
-   def __init__(self, ui, samCoT, planner, profile=None, history=None, template='alpaca'):
+   def __init__(self, ui, owlCoT, planner, profile=None, history=None, template='alpaca'):
       self.template = template
       self.ui = ui
-      self.samCoT = samCoT
+      self.owlCoT = owlCoT
       self.client = OSClient(api_key=None)
       self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-      self.llm = samCoT.llm
+      self.llm = owlCoT.llm
       self.planner = planner
       self.functions = FunctionRegistry()
       self.tokenizer = GPT3Tokenizer()
@@ -422,10 +422,10 @@ TextString:
       
    def eval_AWM (self):
       #
-      ## note this and samCoT should be written in a way that doesn't require direct access/manipulation of samCoT data!
+      ## note this and owlCoT should be written in a way that doesn't require direct access/manipulation of owlCoT data!
       #
-      names=[f"{item['name']}: {(item['item'] if type(item['item']) == str else json.dumps(item['item']))[:32]}" for item in self.samCoT.active_WM.values()]
-      #names=[f"{item}" for item in self.samCoT.active_WM.values()]
+      names=[f"{item['name']}: {(item['item'] if type(item['item']) == str else json.dumps(item['item']))[:32]}" for item in self.owlCoT.active_WM.values()]
+      #names=[f"{item}" for item in self.owlCoT.active_WM.values()]
       valid_json = False
       while not valid_json: # loop untill we have found a valid json item that is an action
          picker = ListDialog(names)
@@ -436,7 +436,7 @@ TextString:
          if selected_index == -1:  # -1 means no selection
             return 'user failed to select entry for eval'
          name = names[selected_index].split(':')[0]
-         awm_entry = self.samCoT.active_WM[name]
+         awm_entry = self.owlCoT.active_WM[name]
          if type(awm_entry) is not dict:
             entry = self.repair_json(awm_entry)
             if entry is None:
@@ -540,9 +540,9 @@ TextString:
       find an argument in working memory.
       """
       if item.startswith('$'):
-         if self.samCoT.has_awm(item):
-            print(f"resolve_arg returning {self.samCoT.get_awm(item)['item']}")
-            return self.samCoT.get_awm(item)['item']
+         if self.owlCoT.has_awm(item):
+            print(f"resolve_arg returning {self.owlCoT.get_awm(item)['item']}")
+            return self.owlCoT.get_awm(item)['item']
          else:
             raise InvalidAction(f"{item} referenced before definition")
       else: # presume a literal
@@ -551,7 +551,7 @@ TextString:
    def do_article(self, titleAddr):
        print(f'article {action}')
        action, arguments, result = self.parse_as_action(action)
-       self.samCoT.create_awm(arguments, name=result, confirm=False)
+       self.owlCoT.create_awm(arguments, name=result, confirm=False)
        pass
 
    def do_assign(self, action):
@@ -571,7 +571,7 @@ TextString:
        if type(argument0) is not str:
           raise InvalidAction(f'argument for assign must be a literal or name: {json.dumps(action)}')       
        arg0_resolved = self.resolve_arg(argument0)
-       self.samCoT.create_awm(arg0_resolved, name=result, confirm=False)
+       self.owlCoT.create_awm(arg0_resolved, name=result, confirm=False)
 
    def do_choose(self, action):
        action, arguments, result = self.parse_as_action(action)
@@ -592,7 +592,7 @@ TextString:
        options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
        response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
        if response is not None:
-          self.samCoT.create_awm(response, name=result)
+          self.owlCoT.create_awm(response, name=result)
        else: 
           raise InvalidAction(f'choose returned None')
                  
@@ -624,7 +624,7 @@ TextString:
                               logRepairs=False, validator=JSONResponseValidator())
        if type(response) == dict and 'status' in response and response['status'] == 'success':
           answer = response['message']['content']
-          self.samCoT.create_awm(answer, name=result, confirm=False)
+          self.owlCoT.create_awm(answer, name=result, confirm=False)
           return answer
 
        else: return 'unknown'
@@ -647,11 +647,11 @@ TextString:
       ]
       response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
       if response is not None:
-         self.samCoT.create_awm(response, name=result, confirm=False)
+         self.owlCoT.create_awm(response, name=result, confirm=False)
          self.ui.display_response(f'{action}:\n{response}')
          return 
       else: 
-         self.samCoT.create_awm('', name=result, confirm=False)
+         self.owlCoT.create_awm('', name=result, confirm=False)
          self.ui.display_response(f'{action}:\nNo Text Extracted')
          return 'extract lookup and summary failure'
       
@@ -667,7 +667,7 @@ TextString:
        
        response = self.llm.ask('', prompt)
        if response is not None:
-          self.samCoT.create_awm(response, name=result)
+          self.owlCoT.create_awm(response, name=result)
        else:
           return 'unknown'
        
@@ -684,7 +684,7 @@ TextString:
        prompt = [SystemMessage(prompt_text)]
        response = self.llm.ask("", prompt)
        self.ui.display_response(response)
-       self.samCoT.create_awm(response, name=result, confirm=False)
+       self.owlCoT.create_awm(response, name=result, confirm=False)
 
    def do_request(self, action):
        #
@@ -704,7 +704,7 @@ TextString:
           return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
        if response is not None:
           self.ui.display_response(data['text'][:1000])
-          self.samCoT.create_awm(data['text'][:1000], name=result, confirm=False)
+          self.owlCoT.create_awm(data['text'][:1000], name=result, confirm=False)
 
    def do_tell(self, action):
        #
@@ -731,7 +731,7 @@ TextString:
           return
        if response is not None:
           self.ui.display_response(data)
-          self.samCoT.create_awm(data, name=result, confirm=False)
+          self.owlCoT.create_awm(data, name=result, confirm=False)
 
    def wiki(self, action):
        action, arguments, result = self.parse_as_action(action)
@@ -764,7 +764,7 @@ TextString:
        options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
        response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
        if response is not None:
-          self.samCoT.awm_write(result, response)
+          self.owlCoT.awm_write(result, response)
        else: 
           raise InvalidAction(f'choose returned None')
                  
@@ -847,13 +847,13 @@ class Planner():
    #
    ### we should 1 or 2 shot planner requests to LLM so it knows format!
    #
-   def __init__(self, ui, samCoT, template='alpaca'):
+   def __init__(self, ui, owlCoT, template='alpaca'):
        self.template = template
        self.ui = ui
-       self.samCoT = samCoT
+       self.owlCoT = owlCoT
        self.client = OSClient(api_key=None)
        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-       self.llm = samCoT.llm # use same model?
+       self.llm = owlCoT.llm # use same model?
        self.max_tokens = 4000
        self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
        self.current_topics = None # topics under discussion - mostly a keyword list
@@ -865,7 +865,7 @@ class Planner():
        self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
 You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
 Your conversation style is warm, gentle, humble, and engaging. """
-       self.interpreter = PlanInterpreter(self.ui, self.samCoT, self, template=self.template)
+       self.interpreter = PlanInterpreter(self.ui, self.owlCoT, self, template=self.template)
        self.active_plan = None
 
 
@@ -898,7 +898,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
       return True
    
    def select_plan(self):
-       items=[f"{self.samCoT.docHash[item]['name']}: {str(self.samCoT.docHash[item]['item'])[:48]}" for item in self.samCoT.docHash if self.samCoT.docHash[item]['name'].startswith('plan')]
+       items=[f"{self.owlCoT.docHash[item]['name']}: {str(self.owlCoT.docHash[item]['item'])[:48]}" for item in self.owlCoT.docHash if self.owlCoT.docHash[item]['name'].startswith('plan')]
        picker = ListDialog(items)
        result = picker.exec()
        plan = None
@@ -906,7 +906,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
           selected_index = picker.selected_index()
           if selected_index != -1:  # -1 means no selection
              plan_name = items[selected_index].split(':')[0]
-             wm = self.samCoT.get_WM_by_name(plan_name)
+             wm = self.owlCoT.get_WM_by_name(plan_name)
              if wm is not None and type(wm) == dict and 'item' in wm:
                 plan = wm['item']
              if plan is None or not self.validate_plan(plan):
@@ -921,20 +921,20 @@ Your conversation style is warm, gentle, humble, and engaging. """
              print(f'failed to create new plan\n"{plan}"')
              return None
           self.active_plan = plan
-          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
+          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
        return self.active_plan
     
    def init_plan(self):
        index_str = str(random.randint(0,999))+'_'
-       plan_suffix = self.samCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
+       plan_suffix = self.owlCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
        if plan_suffix is None or not plan_suffix:
           return
        plan_name = 'plan'+index_str+plan_suffix
-       task_dscp = self.samCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
+       task_dscp = self.owlCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
        plan = self.make_plan(plan_name, task_dscp)
        self.active_plan = plan
        
-       self.samCoT.create_awm(plan, name=plan_name, confirm=False)
+       self.owlCoT.create_awm(plan, name=plan_name, confirm=False)
        return plan
 
    def run_plan(self):
@@ -942,13 +942,13 @@ Your conversation style is warm, gentle, humble, and engaging. """
           result = self.select_plan()
           if not result: return None
           else:
-             next = self.samCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+             next = self.owlCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
              if not next: return
        if 'sbar' not in self.active_plan or self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
           result = self.analyze()
           if result is None: return None
-          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.samCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['dscp'])
+          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
+          next = self.owlCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
        if 'steps' not in self.active_plan or self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
           print(f'calling planner')
@@ -958,12 +958,12 @@ Your conversation style is warm, gentle, humble, and engaging. """
           else: 
              print(f"planner didn't add 'steps' to plan!")
              return
-          self.samCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.samCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['dscp'])
+          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
+          next = self.owlCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['dscp'])
           if not next: return
        print(f"run plan steps: {len(self.active_plan['steps'])}")
        for step in self.active_plan['steps']:
-          next = self.samCoT.confirmation_popup(f'run {step}?', '')
+          next = self.owlCoT.confirmation_popup(f'run {step}?', '')
           if next is False:
              print(f'run_plan step deny, stopping plan execution {next}')
              return
@@ -997,7 +997,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
                past = self.active_plan_state.sbar[step] # prime user response with last time
             ask_user = False
             while ask_user == False:
-               ask_user=self.samCoT.confirmation_popup(user_prompt, past)
+               ask_user=self.owlCoT.confirmation_popup(user_prompt, past)
             sbar[step] = user_prompt+'\n'+ask_user
             messages.append(AssistantMessage(user_prompt))
             messages.append(UserMessage(ask_user))
@@ -1009,7 +1009,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
             print(f"\nAI : {step}, {observations}")
             user_response = False
             while user_response == False:
-               user_response = self.samCoT.confirmation_popup(observations, '')
+               user_response = self.owlCoT.confirmation_popup(observations, '')
             sbar['observations']=observations+'\n'+user_response
             # don't need to add a message since we're done with this conversation thread!
             print(f"Requirements \n{sbar}")
@@ -1077,7 +1077,7 @@ The plan may include four agents:
           #plan, plan_steps = ut.get_plan(plan_text)
           self.ui.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
-          user_critique = self.samCoT.confirmation_popup('Critique', '')
+          user_critique = self.owlCoT.confirmation_popup('Critique', '')
           print(f'user_critique {user_critique}')
           if user_critique != False and len(user_critique) <4:
              user_satisfied = True
@@ -1089,10 +1089,10 @@ The plan may include four agents:
        return self.active_plan
     
 if __name__ == '__main__':
-   import Sam as sam
-   ui = sam.window
+   import Owl as owl
+   ui = owl.window
    ui.reflect=False # don't execute reflection loop, we're just using the UI
-   cot = ui.samCoT
+   cot = ui.owlCoT
    pl = Planner(ui, cot)
  
    steps = """[

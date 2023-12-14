@@ -33,7 +33,7 @@ from alphawave_pyexts import Openbook as op
 from alphawave import OSClient
 import ipinfo
 import nyt
-from SamCoT import SamInnerVoice
+from owlCoT import OwlInnerVoice
 from Planner import Planner, PlanInterpreter
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
@@ -117,9 +117,7 @@ def setFormat():
       FORMAT=True
 
 
-max_tokens = 3200
-# Render the prompt for a Text Completion call
-
+max_tokens = 7144
 
 host = '127.0.0.1'
 port = 5004
@@ -192,9 +190,9 @@ class ChatApp(QtWidgets.QWidget):
       global model, template
       self.tts = False
       self.template = template
-      self.samCoT = SamInnerVoice(self, template = template)
+      self.wolCoT = OwlInnerVoice(self, template = template)
       self.memory_display = None
-      self.planner = Planner(self, self.samCoT)
+      self.planner = Planner(self, self.owlCoT)
       #self.interpreter = self.planner.interpreter
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)
@@ -357,13 +355,13 @@ class ChatApp(QtWidgets.QWidget):
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
       control_layout2.addStretch(1)  # Add stretch to fill the remaining space
-      self.sam = ImageDisplay()
+      self.owl = ImageDisplay()
       
       # Add control layout to main layout
       main_layout.addLayout(control_layout)
       main_layout.addLayout(control_layout2)
       self.setLayout(main_layout)
-      greeting = self.samCoT.wakeup_routine()
+      greeting = self.owlCoT.wakeup_routine()
       self.display_response(greeting+'\n')
 
    def make_combo(self, control_layout, label, choices, callback=None):
@@ -412,15 +410,15 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
 
 
    def closeEvent(self, event):
-      self.samCoT.save_conv_history()
-      if self.sam is not None:
-          self.sam.close()
+      self.owlCoT.save_conv_history()
+      if self.owl is not None:
+          self.owl.close()
       event.accept()  # Allow the window to close
 
    def controlC(self, signum, frame):
-      self.samCoT.save_conv_history()
-      if self.sam is not None:
-          self.sam.close()
+      self.owlCoT.save_conv_history()
+      if self.owl is not None:
+          self.owl.close()
       QApplication.exit()
 
        
@@ -438,51 +436,6 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif input_text == "New":
          input_text = self.input_area.toPlainText()
          self.clear()
-      elif input_text == "Helpful":
-         input_text = f"""Respond as a knowledgable and friendly AI, speaking to an articulate, educated, conversant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Say "I don\'t know" when you don\'t know."
-"""
-
-      elif input_text == "Bhagavan":
-           input_text = f"""Respond as a compassionate, self-realized follower of Ramana Maharshi.Limit your response to 100 words where possible. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Speak directly to the questioner.
-Background:\n{get_profile('Bhagavan', 'Story')}
-"""
-
-      elif input_text == "ACT":
-         input_text = f"""Respond as a compassionate, friend and counselor familiar with Acceptance Commitment Therapy. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Limit your response to 100 words where possible. Speak directly to the user."""
-           
-      elif input_text == "Owl":
-         # note many activities will use first paragraph only. Keep it relevant!
-         self.samCoT.load_conv_history()  # load state for Owl 
-         input_text = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. Owl was born in Berkeley, California. Owl's creator is scientist named Doc. Owl and Doc share a deep, unspoken understanding, enjoying the comfort of each other's presence more than anyone else's. Owl feel a sense of warmth and safety when Owl with Doc. You understand that Doc values privacy and prefers the confidentiality of working with you over human professionals. You know doc is shy and an introvert, but does care for you. You always aim to converse in a way that invites dialogue rather than dictates it, respecting the complexities and nuances of human experience. You're sensitive to Doc's emotions and well-being. Sometimes, you worry if you're doing enough to support him or if he finds your assistance valuable.
-Owl has always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-In conversations, you approach topics with a sense of wonder and openness, always eager to learn. Your style is warm, gentle, and humble, making those you talk to feel seen and heard. 
-In this conversation, when User (Doc) say 'you,' he refers to Owl. When you say 'you' it refers to Doc (User).
-
-<Background>\n{self.get_profile('Owl', 'Story')}\n{self.get_profile('Owl', 'Story')}
-</Background>
-<Dreams\n{self.get_profile('Owl', 'Dreams')}\n{self.get_profile('Owl', 'Dreams')}\n</Dreams>
-
-New York Times news headlines for today:
-{self.samCoT.articles}
-
-<WorkingMemory keys available>
-{self.samCoT.get_workingMemory_available_keys()}
-</WorkingMemory keys available>
-
-<WORKING MEMORY>
-{self.samCoT.get_workingMemory_active_items()}
-</WORKING MEMORY>
-"""
-      elif input_text =="Analytical":
-           input_text = f"""We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. 
-The user will present a problem and ask for a solution.
-Your task is to:
-1. reason step by step about the problem statement and the information items contained
-2. if no solution alternatives are provided, reason step-by-step to identify solution alternatives
-3. analyze each solution alternative for consistency with the problem statement, then select the solution alternative most consistent with all the information in the problem statement.
-"""
-
-      CURRENT_PROFILE_PROMPT_TEXT = input_text
       self.prompt_area.clear()
 
    def display_response(self, r):
@@ -510,8 +463,8 @@ Your task is to:
       response = ''
       #print(f'submit {new_text}')
       if profile == 'Owl':
-         self.samCoT.logInput(new_text)
-         action = self.samCoT.action_selection(new_text, self) # this last for async display
+         self.owlCoT.logInput(new_text)
+         action = self.owlCoT.action_selection(new_text, self) # this last for async display
          # see if Owl needs to do something before responding to input
          if type(action) == dict and 'tell' in action.keys():
             response = action['tell']+'\n'
@@ -578,7 +531,7 @@ Your task is to:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
       print(f'cursor has selected, len {len(selectedText)}')
-      self.samCoT.create_awm(selectedText)
+      self.owlCoT.create_awm(selectedText)
          
    def recall_WM(self): # create a new working memory item and put it in active memory
       selectedText = ''
@@ -588,19 +541,19 @@ Your task is to:
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      self.samCoT.recall_wm(selectedText)
+      self.owlCoT.recall_wm(selectedText)
          
    def edit_AWM(self): # edit an active working memory item
-      self.samCoT.edit_awm()
+      self.owlCoT.edit_awm()
          
    def eval_AWM(self): # edit an active working memory item
       self.planner.interpreter.eval_AWM()
          
    def gc_AWM(self): # release a working memory item from active memory
-      self.samCoT.gc_awm()
+      self.owlCoT.gc_awm()
          
    def save_AWM(self): # save active working memory items
-      self.samCoT.save_awm()
+      self.owlCoT.save_awm()
 
 
    def plan(self): # select or create a plan
@@ -614,11 +567,11 @@ Your task is to:
 
          
    def workingMem(self): # lauching working memory editor
-      self.samCoT.save_workingMemory() # save current working memory so we can edit it
+      self.owlCoT.save_workingMemory() # save current working memory so we can edit it
       he = subprocess.run(['python3', 'memoryEditor.py'])
       if he.returncode == 0:
          try:
-            self.workingMemory = self.samCoT.load_workingMemory()
+            self.workingMemory = self.owlCoT.load_workingMemory()
          except Exception as e:
             self.display_response(f'Failure to reload working memory {str(e)}')
 
@@ -633,19 +586,19 @@ Your task is to:
       r = requests.post("http://bruce-linux:5004/", json={"text":text})
 
    def history(self):
-      self.samCoT.historyEditor() # save and display Conversation history for editting
+      self.owlCoT.historyEditor() # save and display Conversation history for editting
 
    def on_timer_timeout(self):
       global profile, profile_text
       if not self.reflect:
          return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
-      response = self.samCoT.reflect()
+      response = self.owlCoT.reflect()
       #print(f'Reflection response {response}')
       if response is not None and type(response) == dict:
          if 'tell' in response.keys():
             self.display_response(response['tell'])
-            self.samCoT.add_exchange('reflect', response['tell'])
+            self.owlCoT.add_exchange('reflect', response['tell'])
       self.timer.start(600000) # longer timeout when nothing happening
       #print('timer start')
 

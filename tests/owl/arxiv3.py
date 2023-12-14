@@ -40,7 +40,7 @@ from alphawave_pyexts import LLMClient as lc
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
-from SamCoT import LLM, ListDialog, generate_faiss_id
+from OwlCoT import LLM, ListDialog, generate_faiss_id
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from Planner import Planner
@@ -61,10 +61,10 @@ embedding_model = AutoAdapterModel.from_pretrained("allenai/specter2_aug2023refr
 embedding_adapter_name = embedding_model.load_adapter("allenai/specter2_aug2023refresh", source="hf", set_active=True)
 
 
-import Sam as sam
-ui = sam.window
+import Owl as owl
+ui = owl.window
 ui.reflect=False # don't execute reflection loop, we're just using the UI
-cot = ui.samCoT
+cot = ui.owlCoT
 pl = Planner(ui, cot)
  
 
@@ -671,6 +671,6 @@ if __name__ == '__main__':
     #search('Gene Expression Microarray Analysis')
     #search(search=True)
     summarize_text("Direct Policy Optimization", search=False)
-    #pdf_filepath  = '/home/bruce/Downloads/alphawave/tests/Sam/arxiv/papers/0712.3569v1.MicroRNA_Systems_Biology.pdf'
+    #pdf_filepath  = '/home/bruce/Downloads/alphawave/tests/Owl/arxiv/papers/0712.3569v1.MicroRNA_Systems_Biology.pdf'
     #print(requests.post(url="http://localhost:8070/api/processFulltextDocument", data=f"input=@{pdf_filepath}") )
     #search_sections("miRNA liRNA cancer")
