@@ -295,7 +295,7 @@ class OwlInnerVoice():
         self.action_selection_occurred = False
         self.load_workingMemory()
         # active working memory is a list of working memory items inserted into select_action prompt
-        self.active_WM = {}
+        self.active_wm = {}
         self.workingMemoryNewNameIndex = 1
         self.reflect_thoughts = ''
         get_city_state()
@@ -309,13 +309,6 @@ class OwlInnerVoice():
         self.reflection = {}   # reflect loop results
 
         
-    #def put_AWM(self, name, value):
-    #    if name not in self.active_WM:
-    #        self.create_AWM(value, name=name)
-    #    self.active_WM[name]['item'] = value
-    #    self.active_WM[name]['type'] = str(type(value))
-
-            
     def save_conv_history(self):
       global memory, profile
       data = defaultdict(dict)
@@ -375,19 +368,19 @@ class OwlInnerVoice():
           except Exception as e:
              self.ui.display_response(f'Failure to reload conversation history {str(e)}')
 
-    def has_AWM(self, name):
-        if name in self.active_WM:
+    def has_awm(self, name):
+        if name in self.active_wm:
             return True
         else: return False
         
-    def get_AWM(self, name):
-        if name in self.active_WM:
-            return self.active_WM[name]
+    def get_awm(self, name):
+        if name in self.active_wm:
+            return self.active_wm[name]
         else:
             return None
         
     def save_workingMemory(self):
-        # note we need to update WM when AWM changes! tbd
+        # note we need to update WM when awm changes! tbd
         with open('OwlDocHash.pkl', 'wb') as f:
           data = {}
           data['docHash'] = self.docHash
@@ -489,12 +482,12 @@ Doc's input:
 
     #
     ## Working Memory routines - maybe split into separate file?
-    ## What is AWM?
-    ## AWM is the set of working memory items that are Active, that is, included in prompt
+    ## What is awm?
+    ## awm is the set of working memory items that are Active, that is, included in prompt
     #
 
-    def create_AWM(self, item, name=None, notes=None, confirm=True):
-        print(f'OwlCoT create_AWM {name}, {item}')
+    def create_awm(self, item, name=None, notes=None, confirm=True):
+        print(f'OwlCoT create_awm {name}, {item}')
         if confirm:
             result = self.confirmation_popup("create New Active Memory?", item if type(item) != dict else json.dumps(item, indent=2))
             if not result:
@@ -512,15 +505,15 @@ Doc's input:
                 item_type='dict'
                 item = itemj
 
-        # check if we have name already, at least in AWM
+        # check if we have name already, at least in awm
         if name is None or confirm:
             name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
-        if name is None or name not in self.active_WM:
+        if name is None or name not in self.active_wm:
             id = generate_faiss_id(str(item))
             if id in self.docHash:
                 id = id+1
         else:
-            id = self.active_WM[name]['id']
+            id = self.active_wm[name]['id']
 
         if len(str(item)) > 32:
             key_prompt = [SystemMessage(f"""Generate a very short (less that 10 tokens) descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
@@ -540,13 +533,13 @@ Doc's input:
         # add entry to Working memory
         self.docHash[id] = {"id":id, "name": name, "item":item, "type": item_type, "key":key, "notes":notes, "embed":embed, "timestamp":time.time()}
         # and to active Working Memory
-        self.active_WM[name]=self.docHash[id]
+        self.active_wm[name]=self.docHash[id]
         # and write-through persist
         self.save_workingMemory()
         return name
 
-    def edit_AWM (self):
-       names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
+    def edit_awm (self):
+       names=[f"{self.active_wm[item]['name']}: {str(self.active_wm[item]['item'])[:32]}" for item in self.active_wm]
        picker = ListDialog(names)
        result = picker.exec()
        if result == QDialog.Accepted:
@@ -554,7 +547,7 @@ Doc's input:
           print(f'Selected Item Index: {selected_index}') 
           if selected_index != -1:  # -1 means no selection
              name = names[selected_index].split(':')[0]
-             item = self.active_WM[name]
+             item = self.active_wm[name]
              valid_json = False
              while not valid_json:
                 try:
@@ -569,7 +562,7 @@ Doc's input:
                    self.ui.display_response(f'invalid json {str(e)}')
                    continue
                 valid_json = True
-                self.active_WM[name]=json_item
+                self.active_wm[name]=json_item
                 item_w_embed = json_item.copy()
                 item_w_embed['embed'] = self.embedder.encode(json_item['key'])
                 #writethough to WM and backing store
@@ -580,35 +573,35 @@ Doc's input:
        else:
           return 'edit aborted by user'
 
-    def gc_AWM (self):
+    def gc_awm (self):
        # aquire name through prompt
-       names=[f"{self.active_WM[item]['name']}: {str(self.active_WM[item]['item'])[:32]}" for item in self.active_WM]
+       names=[f"{self.active_wm[item]['name']}: {str(self.active_wm[item]['item'])[:32]}" for item in self.active_wm]
        picker = ListDialog(names)
        result = picker.exec()
        if result == QDialog.Accepted:
           selected_index = picker.selected_index()
           name = names[selected_index].split(':')[0]
           try:
-             del self.active_WM[name]
+             del self.active_wm[name]
              return 'item released from Active memory '
           except Exception as e:
-             print(f'attempt to release active_WM entry {name} failed {str(e)}')
+             print(f'attempt to release active_wm entry {name} failed {str(e)}')
        else:
          return 'recall aborted by user'
 
-    def save_AWM (self):
+    def save_awm (self):
        self.save_workingMemory()
 
-    def get_WM_by_name(self, name):
+    def get_wm_by_name(self, name):
         for item in self.docHash.values():
             if 'name' in item and item['name'] == name:
                 return item
         return None
 
 
-    def recall_WM(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
+    def recall_wm(self, query, profile=None, retrieval_count=5, retrieval_threshold=.8):
         #
-        ## recall an item from WM into AWM
+        ## recall an item from WM into awm
         #
         if query is None or len(query) == 0:
             query = self.confirmation_popup("name or query string?", '?')
@@ -616,15 +609,15 @@ Doc's input:
                 return
         query = query
         # maybe already loaded?
-        if query in self.active_WM:
-            return self.active_WM[query]
+        if query in self.active_wm:
+            return self.active_wm[query]
         # test if query string matches a Working Memory item name, if so assume that is target.
         for item in self.docHash.values():
             if 'name' in item and item['name'].lower() == query:
                 full_item = item.copy()
                 if 'embed' in full_item: # remove embed from active memory items
                     del full_item['embed']
-                self.active_WM[full_item['name']]=full_item
+                self.active_wm[full_item['name']]=full_item
                 return full_item
         query_embed = self.embedder.encode(query)
         # gather docs matching tag filter
@@ -638,8 +631,8 @@ Doc's input:
           
         # add all matching docs to index:
         index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
-        vectors_np = np.array(vectors)
-        ids_np = np.array(candidate_ids)
+        vectors_np = np.array(vectors, dtype=np.float32)
+        ids_np = np.array(candidate_ids, dtype=np.int64)
         print(f'vectors {vectors_np.shape}, ids {ids_np.shape}')
         index.add_with_ids(vectors_np, ids_np)
         distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
@@ -669,7 +662,7 @@ Doc's input:
                 full_item = self.docHash[results[selected_index][0]].copy()
                 if 'embed' in full_item: # remove embed from active memory items
                     del full_item['embed']
-                self.active_WM[full_item['name']]=full_item
+                self.active_wm[full_item['name']]=full_item
                 return full_item
             else:
                 return None
@@ -683,7 +676,7 @@ Doc's input:
              wmkeys +=self.docHash[id]['key']+'\n'
        return wmkeys
                         
-    def core_prompt(self, include_actions=True):
+    def core_prompt(self, include_actions=False):
        ### made into a method so can be eval'd from multiple places
        prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours. You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
 
@@ -713,12 +706,20 @@ To access full articles, use the action 'article'.
 """
        return prompt
 
-        
+    def short_prompt(self):
+        p = self.core_prompt().split('\n')
+        return '\n'.join(p[:2])
+
+    def v_short_prompt(self):
+        p = self.core_prompt().split('\n')
+        return '\n'.join(p[:1])
+
+   
     def get_workingMemory_active_names(self):
        # activeWorkingMemory is list of items?
        # eg: [{'key': 'A unique friendship', 'item': 'a girl, Hope, and a tarantula, rambutan, were great friends', 'timestamp': time.time()}, ...]
        wm_active_names = []
-       for item in self.active_WM:
+       for item in self.active_wm:
           if 'name' in item:
              wm_active_names.append(item['name'])
        return wm_active_names
@@ -726,8 +727,8 @@ To access full articles, use the action 'article'.
     def get_workingMemory_active_items(self):
        # the idea here is to format current working memory entries for insertion into prompt
        workingMemory_str = ''
-       for entry in self.active_WM:
-          workingMemory_str += f"\t{self.active_WM[entry]['name']}: {self.active_WM[entry]['item']}\n"
+       for entry in self.active_wm:
+          workingMemory_str += f"\t{self.active_wm[entry]['name']}: {self.active_wm[entry]['item']}\n"
        return workingMemory_str
 
     def available_actions(self):
@@ -756,13 +757,13 @@ Respond only in JSON as shown in the above examples.
 
 """
 
-    def action_selection(self, input, profile, widget):
+    def action_selection(self, input, widget):
         #
         ## see if an action is called for given conversation context and most recent exchange
         #
-        #print(f'action selection input {input}')
+        print(f'action selection input {input}')
         self.action_selection_occurred = True
-        short_profile = profile.split('\n')[0]
+        short_profile = self.short_prompt()
         action_validation_schema={
             "action": {
                 "type":"string",
@@ -778,7 +779,7 @@ Respond only in JSON as shown in the above examples.
 
         #print(f'action_selection {input}\n{response}')
         prompt_msgs=[
-            SystemMessage(self.core_prompt(include_actions=False)),
+            SystemMessage(self.core_prompt()),
             ConversationHistory('history', 1200),
             UserMessage(self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
             AssistantMessage('')
@@ -854,7 +855,7 @@ Respond only in JSON as shown in the above examples.
             elif type(content) == dict and 'action' in content and content['action']=='recall':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
-                   result = self.recall_WM(query, profile=short_profile)
+                   result = self.recall_wm(query, profile=short_profile)
                    self.add_exchange(query, result)
                    return {"recall":result}
             elif type(content) == dict and 'action' in content and content['action']=='store':
@@ -1038,8 +1039,9 @@ User Input:
             prompt_text += f'\n{key.capitalize()}\n{self.reflection[key]}'
         return prompt_text
         
-    def reflect(self, profile_text):
+    def reflect(self):
        global es
+       profile_text = self.v_short_prompt()
        results = {}
        print('reflection begun')
        es = self.sentiment_analysis(profile_text)
@@ -1060,7 +1062,7 @@ User Input:
           #print('do I have anything to say?')
           self.last_tell_time = now
           prompt = [
-              SystemMessage(str(profile_text.split('\n')[0:2])+'\nYour current task is to generate a thought to share with Doc.\n'),
+              SystemMessage(self.v_short_prompt()+'\nYour current task is to generate a thought to share with Doc.\n'),
               ConversationHistory('history', 120),
               AssistantMessage(self.format_reflection()),
               UserMessage(f"""

@@ -259,7 +259,7 @@ def extract_keywords(text):
             keywords.append(word)
     return keywords
 
-def search(search=False):
+def plan_search(web=False):
     global plans
     plan = None
     if len(plans)> 0:
@@ -297,7 +297,7 @@ def search(search=False):
         plan['arxiv_keywords'] = keywords
     else:
         keywords = plan['arxiv_keywords']
-    summarize_text(keywords,plan['sbar'],  search=search)
+    search(keywords,plan['sbar'],  web=web)
 
 def get_articles(query, library_file=paper_library_filepath, top_k=10):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
@@ -573,7 +573,7 @@ def create_chunks_grobid(pdf_filepath):
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
 
-def summarize_text(query, sbar={"needs":'', "background":'', "observations":''}, search=False):
+def search(query, sbar={"needs":'', "background":'', "observations":''}, web=False):
     
     """Query is a *list* of keywords or phrases
     This function does the following:
@@ -624,7 +624,7 @@ End your synopsis response as follows:
     end_idx = response.rfind('End Synopsis')
     if end_idx < 0:
         end_idx = len(response)
-    print(response[:end_idx-1])
+    return(response[:end_idx-1])
 
 class Conversation:
     def __init__(self):
@@ -665,12 +665,5 @@ Begin!"""
 
 #chat_test_response = summarize_text("PPO reinforcement learning sequence generation")
 if __name__ == '__main__':
-    #get_articles('PPO Optimization')
-    #print(summarize_text('Prediction of tissue-of-origin of early stage cancers using serum miRNomes'))
-    #print(summarize_text('Gene Expression Microarray Analysis'))
-    #search('Gene Expression Microarray Analysis')
-    #search(search=True)
-    summarize_text("Direct Policy Optimization", search=False)
-    #pdf_filepath  = '/home/bruce/Downloads/alphawave/tests/Owl/arxiv/papers/0712.3569v1.MicroRNA_Systems_Biology.pdf'
-    #print(requests.post(url="http://localhost:8070/api/processFulltextDocument", data=f"input=@{pdf_filepath}") )
-    #search_sections("miRNA liRNA cancer")
+    search("Direct Policy Optimization", web=False)
+    

@@ -417,15 +417,15 @@ TextString:
       return response
 
    #
-   ### Eval a form in AWM, assuming it is a plan-step
+   ### Eval a form in awm, assuming it is a plan-step
    #
       
-   def eval_AWM (self):
+   def eval_awm (self):
       #
       ## note this and owlCoT should be written in a way that doesn't require direct access/manipulation of owlCoT data!
       #
-      names=[f"{item['name']}: {(item['item'] if type(item['item']) == str else json.dumps(item['item']))[:32]}" for item in self.owlCoT.active_WM.values()]
-      #names=[f"{item}" for item in self.owlCoT.active_WM.values()]
+      names=[f"{item['name']}: {(item['item'] if type(item['item']) == str else json.dumps(item['item']))[:32]}" for item in self.owlCoT.active_wm.values()]
+      #names=[f"{item}" for item in self.owlCoT.active_wm.values()]
       valid_json = False
       while not valid_json: # loop untill we have found a valid json item that is an action
          picker = ListDialog(names)
@@ -436,7 +436,7 @@ TextString:
          if selected_index == -1:  # -1 means no selection
             return 'user failed to select entry for eval'
          name = names[selected_index].split(':')[0]
-         awm_entry = self.owlCoT.active_WM[name]
+         awm_entry = self.owlCoT.active_wm[name]
          if type(awm_entry) is not dict:
             entry = self.repair_json(awm_entry)
             if entry is None:
@@ -906,7 +906,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
           selected_index = picker.selected_index()
           if selected_index != -1:  # -1 means no selection
              plan_name = items[selected_index].split(':')[0]
-             wm = self.owlCoT.get_WM_by_name(plan_name)
+             wm = self.owlCoT.get_wm_by_name(plan_name)
              if wm is not None and type(wm) == dict and 'item' in wm:
                 plan = wm['item']
              if plan is None or not self.validate_plan(plan):

@@ -33,7 +33,7 @@ from alphawave_pyexts import Openbook as op
 from alphawave import OSClient
 import ipinfo
 import nyt
-from owlCoT import OwlInnerVoice
+from OwlCoT import OwlInnerVoice
 from Planner import Planner, PlanInterpreter
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
@@ -59,11 +59,9 @@ hour = local_time.tm_hour
 
 global news, news_details
 
-# get profile contexts
-
-profiles = ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",]
+profiles = ["Owl"] # there used to be others...
 profile_contexts = {}
-
+profile = "Owl"
 # load profile contexts
 
 for profile in profiles:
@@ -119,9 +117,6 @@ def setFormat():
 
 max_tokens = 7144
 
-host = '127.0.0.1'
-port = 5004
-
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -156,41 +151,13 @@ class ImageDisplay(QtWidgets.QWidget):
             # Update the image displayed
             self.update_image()
 
-class MemoryDisplay(QtWidgets.QWidget):
-   def __init__(self):
-       super().__init__()
-       self.setWindowTitle("Working Memory")
-
-       self.layout = QVBoxLayout()
-       self.list_widget = QListWidget()
-       self.list_widget.setWordWrap(True)  # Enable word wrapping
-       self.list_widget.setResizeMode(QtWidgets.QListView.Adjust)  # Adjust item height
-       self.layout.addWidget(self.list_widget)
-
-       self.button = QPushButton("Clear")
-       self.button.clicked.connect(self.clear_list)
-       self.layout.addWidget(self.button)
-
-       self.setLayout(self.layout)
-
-   def display_working_memory(self, memory):
-        self.list_widget.clear()
-        for item in memory:
-            list_item = QListWidgetItem(str(item))
-            list_item.setTextAlignment(Qt.AlignJustify)
-            self.list_widget.addItem(list_item)
-
-   def clear_list(self):
-       self.list_widget.clear()
-
-
 class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
       global model, template
       self.tts = False
       self.template = template
-      self.wolCoT = OwlInnerVoice(self, template = template)
+      self.owlCoT = OwlInnerVoice(self, template = template)
       self.memory_display = None
       self.planner = Planner(self, self.owlCoT)
       #self.interpreter = self.planner.interpreter
@@ -270,10 +237,10 @@ class ChatApp(QtWidgets.QWidget):
       self.max_tokens_combo = self.make_combo(control_layout, 'Max_Tokens', ["10", "25", "50", "100", "150", "250", "400", "1000", "2000", "4000"])
       self.max_tokens_combo.setCurrentText('400')
       
-      self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])
-      self.prompt_combo.setCurrentText('Owl')
-      self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
-      self.on_prompt_combo_changed('Owl')
+      #self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])
+      #self.prompt_combo.setCurrentText('Owl')
+      #self.prompt_combo.currentIndexChanged.connect(self.on_prompt_combo_changed)
+      #self.on_prompt_combo_changed('Owl')
       
       
       self.history_button = QPushButton("History") # launch Conversation History editor
@@ -295,41 +262,41 @@ class ChatApp(QtWidgets.QWidget):
       control_layout.addWidget(self.tts_button)
 
 
-      self.create_AWM_button = QPushButton("Create AWM")
-      self.create_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.create_AWM_button.setFont(self.widgetFont)
-      self.create_AWM_button.clicked.connect(self.create_AWM)
-      control_layout2.addWidget(self.create_AWM_button)
+      self.create_awm_button = QPushButton("Create awm")
+      self.create_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.create_awm_button.setFont(self.widgetFont)
+      self.create_awm_button.clicked.connect(self.create_awm)
+      control_layout2.addWidget(self.create_awm_button)
       
-      self.recall_WM_button = QPushButton("Recall WM")
-      self.recall_WM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.recall_WM_button.setFont(self.widgetFont)
-      self.recall_WM_button.clicked.connect(self.recall_WM)
-      control_layout2.addWidget(self.recall_WM_button)
+      self.recall_wm_button = QPushButton("Recall WM")
+      self.recall_wm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.recall_wm_button.setFont(self.widgetFont)
+      self.recall_wm_button.clicked.connect(self.recall_wm)
+      control_layout2.addWidget(self.recall_wm_button)
       
-      self.edit_AWM_button = QPushButton("Edit AWM")
-      self.edit_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.edit_AWM_button.setFont(self.widgetFont)
-      self.edit_AWM_button.clicked.connect(self.edit_AWM)
-      control_layout2.addWidget(self.edit_AWM_button)
+      self.edit_awm_button = QPushButton("Edit awm")
+      self.edit_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.edit_awm_button.setFont(self.widgetFont)
+      self.edit_awm_button.clicked.connect(self.edit_awm)
+      control_layout2.addWidget(self.edit_awm_button)
       
-      self.eval_AWM_button = QPushButton("Eval AWM")
-      self.eval_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.eval_AWM_button.setFont(self.widgetFont)
-      self.eval_AWM_button.clicked.connect(self.eval_AWM)
-      control_layout2.addWidget(self.eval_AWM_button)
+      self.eval_awm_button = QPushButton("Eval awm")
+      self.eval_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.eval_awm_button.setFont(self.widgetFont)
+      self.eval_awm_button.clicked.connect(self.eval_awm)
+      control_layout2.addWidget(self.eval_awm_button)
       
-      self.gc_AWM_button = QPushButton("gc AWM")
-      self.gc_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.gc_AWM_button.setFont(self.widgetFont)
-      self.gc_AWM_button.clicked.connect(self.gc_AWM)
-      control_layout2.addWidget(self.gc_AWM_button)
+      self.gc_awm_button = QPushButton("gc awm")
+      self.gc_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.gc_awm_button.setFont(self.widgetFont)
+      self.gc_awm_button.clicked.connect(self.gc_awm)
+      control_layout2.addWidget(self.gc_awm_button)
       
-      self.save_AWM_button = QPushButton("Save AWM")
-      self.save_AWM_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.save_AWM_button.setFont(self.widgetFont)
-      self.save_AWM_button.clicked.connect(self.save_AWM)
-      control_layout2.addWidget(self.save_AWM_button)
+      self.save_awm_button = QPushButton("Save awm")
+      self.save_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.save_awm_button.setFont(self.widgetFont)
+      self.save_awm_button.clicked.connect(self.save_awm)
+      control_layout2.addWidget(self.save_awm_button)
       
       spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
       control_layout2.addItem(spacer)  # Add spacer to the layout
@@ -352,6 +319,21 @@ class ChatApp(QtWidgets.QWidget):
       self.step_plan_button.clicked.connect(self.step_plan)
       control_layout2.addWidget(self.step_plan_button)
 
+      spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
+      control_layout2.addItem(spacer)  # Add spacer to the layout
+
+      self.arxiv_button = QPushButton("ARXIV Search")
+      self.arxiv_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.arxiv_button.setFont(self.widgetFont)
+      self.arxiv_button.clicked.connect(self.arxiv)
+      control_layout2.addWidget(self.arxiv_button)
+      
+      self.arxiv_bg_button = QPushButton("ARXIV Search BG")
+      self.arxiv_bg_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.arxiv_bg_button.setFont(self.widgetFont)
+      self.arxiv_bg_button.clicked.connect(self.arxiv_bg)
+      control_layout2.addWidget(self.arxiv_bg_button)
+      
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
       control_layout2.addStretch(1)  # Add stretch to fill the remaining space
@@ -422,6 +404,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       QApplication.exit()
 
        
+   # do not delete, need this for prompt dynamic content refresh during reflection
    def on_prompt_combo_changed(self, index):
       global profile, CURRENT_PROFILE_PROMPT_TEXT
       if type(index)==str:
@@ -461,54 +444,53 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       self.timer.start(600000)
       new_text = self.input_area.toPlainText()[PREV_LEN:]
       response = ''
-      #print(f'submit {new_text}')
-      if profile == 'Owl':
-         self.owlCoT.logInput(new_text)
-         action = self.owlCoT.action_selection(new_text, self) # this last for async display
-         # see if Owl needs to do something before responding to input
-         if type(action) == dict and 'tell' in action.keys():
-            response = action['tell']+'\n'
-            self.display_response(response) 
-            return
-         if type(action) == dict and 'article' in action.keys():
-            #{"article":'<article body>'}
-            # get and display article retrieval
-            response = '\nArticle summary:\n'+action['article']+'\n'
-            self.display_response(response) # article summary text
-            #self.run_query('Comments?')
-            return
-         elif type(action) == dict and 'web' in action.keys():
-            #{"web":'<compiled search results>'}
-            self.display_response(action['web'])
-            #self.run_query('')
-            return
-         elif type(action) == dict and 'wiki' in action.keys():
-            #{"wiki":'<compiled search results>'}
-            self.display_response(action['wiki'])
-            #self.run_query(input)
-            return
-         elif type(action) == dict and 'gpt4' in action.keys():
-            #{"gpt4":'<gpt4 response>'}
-            self.display_response(action['gpt4'])
-            #self.run_query(input)
-            return
-         elif type(action) == dict and 'recall' in action.keys():
-            #{"recall":'{"id":id, "key":key, "timestamp":timestamp, "item":text or json or ...}
-            self.display_response(action['recall'])
-            return
-         elif type(action) == dict and 'store' in action.keys():
-            #{"store":'<key used to store item>'}
-            self.display_response(action['store'])
-            #self.run_query(input)
-            return
-         elif type(action) == dict and 'question' in action.keys():
-            #{"ask":'<question>'}
-            question = action['question'] # add something to indicate internal activity?
-            self.display_response(question)
-            return
-         else:
-            self.display_response(str(action))
-            return
+      print(f'submit {new_text}')
+      self.owlCoT.logInput(new_text)
+      action = self.owlCoT.action_selection(new_text, self) # this last for async display
+      # see if Owl needs to do something before responding to input
+      if type(action) == dict and 'tell' in action.keys():
+         response = action['tell']+'\n'
+         self.display_response(response) 
+         return
+      if type(action) == dict and 'article' in action.keys():
+         #{"article":'<article body>'}
+         # get and display article retrieval
+         response = '\nArticle summary:\n'+action['article']+'\n'
+         self.display_response(response) # article summary text
+         #self.run_query('Comments?')
+         return
+      elif type(action) == dict and 'web' in action.keys():
+         #{"web":'<compiled search results>'}
+         self.display_response(action['web'])
+         #self.run_query('')
+         return
+      elif type(action) == dict and 'wiki' in action.keys():
+         #{"wiki":'<compiled search results>'}
+         self.display_response(action['wiki'])
+         #self.run_query(input)
+         return
+      elif type(action) == dict and 'gpt4' in action.keys():
+         #{"gpt4":'<gpt4 response>'}
+         self.display_response(action['gpt4'])
+         #self.run_query(input)
+         return
+      elif type(action) == dict and 'recall' in action.keys():
+         #{"recall":'{"id":id, "key":key, "timestamp":timestamp, "item":text or json or ...}
+         self.display_response(action['recall'])
+         return
+      elif type(action) == dict and 'store' in action.keys():
+         #{"store":'<key used to store item>'}
+         self.display_response(action['store'])
+         #self.run_query(input)
+         return
+      elif type(action) == dict and 'question' in action.keys():
+         #{"ask":'<question>'}
+         question = action['question'] # add something to indicate internal activity?
+         self.display_response(question)
+         return
+      else:
+         self.display_response(str(action))
+         return
          
       # response = self.run_query(new_text)
       # no need to display, query does in while streaming.
@@ -520,7 +502,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       PREV_POS="1.0"
       PREV_LEN=0
    
-   def create_AWM(self): # create a new working memory item and put it in active memory
+   def create_awm(self): # create a new working memory item and put it in active memory
       global PREV_LEN, op#, vmem, vmem_clock
       selectedText = ''
       cursor = self.input_area.textCursor()
@@ -533,7 +515,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       print(f'cursor has selected, len {len(selectedText)}')
       self.owlCoT.create_awm(selectedText)
          
-   def recall_WM(self): # create a new working memory item and put it in active memory
+   def recall_wm(self): # create a new working memory item and put it in active memory
       selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
@@ -543,16 +525,16 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = selectedText.strip()
       self.owlCoT.recall_wm(selectedText)
          
-   def edit_AWM(self): # edit an active working memory item
+   def edit_awm(self): # edit an active working memory item
       self.owlCoT.edit_awm()
          
-   def eval_AWM(self): # edit an active working memory item
-      self.planner.interpreter.eval_AWM()
+   def eval_awm(self): # edit an active working memory item
+      self.planner.interpreter.eval_awm()
          
-   def gc_AWM(self): # release a working memory item from active memory
+   def gc_awm(self): # release a working memory item from active memory
       self.owlCoT.gc_awm()
          
-   def save_AWM(self): # save active working memory items
+   def save_awm(self): # save active working memory items
       self.owlCoT.save_awm()
 
 
@@ -564,6 +546,26 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          
    def step_plan(self): # release a working memory item from active memory
       self.planner.step_plan()
+
+   def arxiv(self): # release a working memory item from active memory
+      selectedText = ''
+      cursor = self.input_area.textCursor()
+      if cursor.hasSelection():
+         selectedText = cursor.selectedText()
+      elif PREV_LEN < len(self.input_area.toPlainText())+2:
+         selectedText = self.input_area.toPlainText()[PREV_LEN:]
+         selectedText = selectedText.strip()
+      self.arxiv.search(selected_text, web=False)
+
+   def arxiv_bg(self): # release a working memory item from active memory
+      selectedText = ''
+      cursor = self.input_area.textCursor()
+      if cursor.hasSelection():
+         selectedText = cursor.selectedText()
+      elif PREV_LEN < len(self.input_area.toPlainText())+2:
+         selectedText = self.input_area.toPlainText()[PREV_LEN:]
+         selectedText = selectedText.strip()
+      self.arxiv.search(selected_text, web=True)
 
          
    def workingMem(self): # lauching working memory editor
