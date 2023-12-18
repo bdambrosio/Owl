@@ -30,30 +30,36 @@ models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' 
 print(models)
 
 templates = {"CodeLlama-34B-instruct-exl2":"chatml",
-             "una-xaberius-34b-v1beta":"",
+             "dolphin-2.5-mixtral-8x7b-6.0bpw-h6-exl2-2": "chatml",
              "platypus2-70b-instruct-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
-             "ShiningValiant-4bpw-h6-exl2":"llama-2(?)",
+             "ShiningValiant-4bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
+             "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"",
+             "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
+             "Synthia-MoE-v3-Mixtral-8x7B-6.0bpw-h6-exl2-2":"synthia"
              }
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:
     print(f'Available models:')
     for i in range(len(models)):
+        try:
+            with open(models_dir+models[i]+'/config.json', 'r') as j:
+                json_config = json.load(j)
+                #print(f'config {json_config}')
+                context_size = json_config["max_position_embeddings"]
+        except Exception as e:
+            print(f'failure to load json.config {str(e)}\n setting context to 4096')
+            context_size = 4096
         template = ''
         if models[i] in templates:
             template = templates[models[i]]
-            try:
-                with open(models_dir+models[i]+'/config.json', 'r') as j:
-                    json_config = json.load(j)
-                    #print(f'config {json_config}')
-                    context_size = json_config["max_position_embeddings"]
-            except Exception as e:
-                print(f'failure to load json.config {str(e)}\n setting context to 4096')
             print(f'{i}. {models[i]}, context: {context_size}, template: {template}')
+        else:
+            print(f'{i}. {models[i]}, context: {context_size}')
     
     number = input('input model # to load: ')
     try:
@@ -65,13 +71,13 @@ while model_number < 0 or model_number > len(models) -1:
 #if 'dolphin' in models[model_number]:
 #    cache = ExLlamaV2Cache(model, max_seq_len=8192)
 config = ExLlamaV2Config()
-config.scale_alpha_value=1.5
+config.scale_alpha_value=1.0
 config.model_dir = models_dir+models[model_number]
 config.prepare()
 
 model = ExLlamaV2(config)
 print("Loading model: " + models[model_number])
-model.load([20, 23])
+model.load([16, 20])
 
 tokenizer = ExLlamaV2Tokenizer(config)
 
@@ -165,6 +171,7 @@ async def get_stream(request: Request):
         max_tokens = message_j['max_tokens']
     stop_conditions = ['###','<|endoftext|>', "Reference(s):"]
     if 'eos' in message_j.keys():
+        print(f'\n received eos {message_j["eos"]}')
         stop_conditions = message_j['eos']
 
     stop_on_json = False

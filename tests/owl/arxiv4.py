@@ -86,12 +86,16 @@ papers_dir = os.path.join(os.curdir, "arxiv", "papers")
 paper_library_filepath = "./arxiv/paper_library.parquet"
 plans_filepath = "./arxiv/arxiv_plans.json"
 plans = {}
-faiss_index_filepath = "./arxiv/faiss_index_w_idmap.faiss"
-faiss_indexIDMap = None
+
+section_index_filepath = "./arxiv/section_index_w_idmap.faiss"
+section_indexIDMap = None
+
+paper_index_filepath = "./arxiv/paper_index_w_idmap.faiss"
+paper_indexIDMap = None
 
 # section library links section embedding faiss ids to section synopsis text and paper library (this latter through paper url)
-synopsis_library_filepath = "./arxiv/synopsis_library.parquet"
-synopsis_library = None
+section_library_filepath = "./arxiv/section_library.parquet"
+section_library = None
 
 
 # Check for and create as needed main arxiv directory and papers directory
@@ -126,35 +130,13 @@ def get_semantic_scholar_meta(arxiv_id):
         return 0,0,''
 
 def paper_library_df_fixup():
-    #
-    ### a routine for one-time code to repair paper_library
-    #
-    if 'publisher' not in paper_library_df:
-        paper_library_df['publisher'] = ''
-    if 'citationVelocity' not in paper_library_df:
-        paper_library_df['citationVelocity'] = 0
-    if 'inflCitations' not in paper_library_df:
-        paper_library_df['inflCitations'] = 0
-    if 'evaluation' not in paper_library_df:
-        paper_library_df['evaluation'] = ''
-    for index, row in paper_library_df.iterrows():
-        pattern = r'\d{4}\.\d{0,5}'
-        matches = re.findall(pattern, row['pdf_url'])
-        if len(matches) != 1:
-            print(f'no arxiv id match {row["pdf_url"]}')
-            continue
-        citationVelocity, influentialCitations, publisher = get_semantic_scholar_meta(matches[0])
-        print(citationVelocity, influentialCitations, publisher)
-        paper_library_df.loc[index, 'publisher'] = publisher
-        paper_library_df.loc[index, 'inflCitations'] =influentialCitations
-        paper_library_df.loc[index, 'citationVelocity'] =citationVelocity
-        paper_library_df.loc[index, 'evaluation'] = ""
-    paper_library_df.to_parquet(paper_library_filepath)
     return
+
+paper_library_columns = ["faiss_id", "title", "authors", "publisher", "summary", "inflCitations", "citationVelocity", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
 
 if not os.path.exists(paper_library_filepath):
     # Generate a blank dataframe where we can store downloaded files
-    paper_library_df = pd.DataFrame(columns=["title","authors", "publisher", "summary", "inflCitations", "evaluation", "article_url", "pdf_url","pdf_filepath"])
+    paper_library_df = pd.DataFrame(columns=paper_library_columns)
     paper_library_df.to_parquet(paper_library_filepath)
     print('paper_library_df.to_parquet initialization complete')
 else:
@@ -173,45 +155,54 @@ else:
     with open(plans_filepath, 'w') as f:
         plans = json.dump(plans, f)
 
-if not os.path.exists(faiss_index_filepath):
-    faiss_indexIDMap = faiss.IndexIDMap(faiss.IndexFlatL2(768))
-    faiss.write_index(faiss_indexIDMap, faiss_index_filepath)
-    print(f"created '{faiss_index_filepath}'")
+if not os.path.exists(paper_index_filepath):
+    paper_indexIDMap = faiss.IndexIDMap(faiss.IndexFlatL2(768))
+    faiss.write_index(paper_indexIDMap, paper_index_filepath)
+    print(f"created '{paper_index_filepath}'")
 else:
-    faiss_indexIDMap = faiss.read_index(faiss_index_filepath)
-    print(f"loaded '{faiss_index_filepath}'")
+    paper_indexIDMap = faiss.read_index(paper_index_filepath)
+    print(f"loaded '{paper_index_filepath}'")
     
-if not os.path.exists(synopsis_library_filepath):
-    # Generate a blank dataframe where we can store downloaded files
-    synopsis_library_df =\
-        pd.DataFrame(columns=["faiss_id", "title", "article_url", "pdf_filepath", "synopsis_text", "embedding"])
-    synopsis_library_df.to_parquet(synopsis_library_filepath)
-    print(f"created '{synopsis_library_filepath}'")
+if not os.path.exists(section_index_filepath):
+    section_indexIDMap = faiss.IndexIDMap(faiss.IndexFlatL2(768))
+    faiss.write_index(section_indexIDMap, section_index_filepath)
+    print(f"created '{section_index_filepath}'")
 else:
-    synopsis_library_df = pd.read_parquet(synopsis_library_filepath)
-    print(f"loaded '{synopsis_library_filepath}'\n  keys: {synopsis_library_df.keys()}")
+    section_indexIDMap = faiss.read_index(section_index_filepath)
+    print(f"loaded '{section_index_filepath}'")
+    
+if not os.path.exists(section_library_filepath):
+    # Generate a blank dataframe where we can store downloaded files
+    section_library_df =\
+        pd.DataFrame(columns=["faiss_id", "paper_id", "synopsis"])
+    section_library_df.to_parquet(section_library_filepath)
+    print(f"created '{section_library_filepath}'")
+else:
+    section_library_df = pd.read_parquet(section_library_filepath)
+    print(f"loaded '{section_library_filepath}'\n  keys: {section_library_df.keys()}")
 
 def save_synopsis_data():
-    faiss.write_index(faiss_indexIDMap, faiss_index_filepath)
-    synopsis_library_df.to_parquet(synopsis_library_filepath)
+    faiss.write_index(paper_indexIDMap, paper_index_filepath)
+    faiss.write_index(section_indexIDMap, section_index_filepath)
+    section_library_df.to_parquet(section_library_filepath)
     
 def search_sections(query, sbar, top_k=20):
-    #print(synopsis_library_df)
+    #print(section_library_df)
     # get embed
     expanded_query = " ".join(query)+sbar_as_text(sbar)
     query_embed = embedding_request(expanded_query)
     # faiss_search
     embeds_np = np.array([query_embed], dtype=np.float32)
-    scores, ids = faiss_indexIDMap.search(embeds_np, top_k)
+    scores, ids = section_indexIDMap.search(embeds_np, top_k)
     print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
-    synopses = []
+    sections = []
     for id in ids[0]:
-        synopsis_library_row = synopsis_library_df[synopsis_library_df['faiss_id'] == id]
+        section_library_row = section_library_df[section_library_df['faiss_id'] == id]
         #print section text
-        if len(synopsis_library_row) > 0:
-            row = synopsis_library_row.iloc[0]
-            text = row['synopsis_text']
+        if len(section_library_row) > 0:
+            row = section_library_row.iloc[0]
+            text = row['synopsis']
             article_title = row['title']
             synopses.append([article_title, text])
             print(f'{article_title} {len(text)}')
@@ -311,21 +302,22 @@ def get_articles(query, library_file=paper_library_filepath, top_k=10):
     print(f'get_articles query: {query}')
     query = cot.confirmation_popup("Search ARXIV using this query?", query )
     if not query:
+        print(f'confirmation: No!')
         return []
 
     try:
         # Set up your search query
         search = arxiv.Search(
-            query=query, 
+            query=f'(ti:{query} OR ab:{query})', 
             max_results=top_k, 
             sort_by=SortCriterion.Relevance,
             sort_order = SortOrder.Descending
         )
     
-        #print(f'get article search complete {search}')
+        print(f'get article search {search}')
         # Use the client to get the results
         results =arxiv.Client().results(search)
-        print(results)
+        print(f'get_article results {results}')
         for result in results:
             print(f'considering {result.title}')
             
@@ -334,27 +326,34 @@ def get_articles(query, library_file=paper_library_filepath, top_k=10):
                 if dup:
                     print(f'   skipping {result.title}')
                     continue
-            result_dict = {"title":'',"authors":'',"summary":'',"article_url":'', "pdf_url":'', "pdf_filepath":''}
+            result_dict = {key: '' for key in paper_library_columns}
+            id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+            result_dict["faiss_id"] = id
             result_dict["title"] = result.title
             result_dict["authors"] = author_names = [", ".join(author.name for author in result.authors)]
+            result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
             result_dict["summary"] = result.summary
+            citationVelocity, influentialCitations, publisher = get_semantic_scholar_meta(result.get_short_id())
+            result_dict["citationVelocity"]= citationVelocity
+            result_dict["inflCitations"] = influentialCitations
+            if result_dict['publisher'] is None or len(result_dict['publisher']) < len(result_dict['publisher']):
+                result_dict['publisher'] = publisher # use pub from semantic scholar
+            result_dict["evaluation"] = ''
             result_dict["article_url"] =  [x.href for x in result.links][0]
             result_dict["pdf_url"] = [x.href for x in result.links][1]
             pdf_filepath= result.download_pdf(dirpath=papers_dir)
             result_dict["pdf_filepath"]= pdf_filepath
-            citationVelocity, influentialCitations, publisher = get_semantic_scholar_meta(result.get_short_id())
-            result_dict["inflCitations"] = influentialCitations
-            result_dict["publisher"] = publisher
-            result_dict["quality"] = ""
-
+            
             print(f"indexing new article: {result.title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
-            # section and index paper
-            paper_synopsis, section_synopses = index_paper(result_dict)
-            result_dict['synopsis'] = paper_synopsis
-            result_dict['section_synopses'] = section_synopses
+            result_dict['synopsis'] = ""
+            result_dict['section_ids'] = [] # to be filled in after we get paper id
             #if status is None:
             #    continue
-            paper_library_df.loc[len(paper_library_df)] = result_dict
+            print(f' new article:\n{json.dumps(result_dict, indent=2)}')
+            paper_index = len(paper_library_df)
+            paper_library_df.loc[paper_index] = result_dict
+            # section and index paper
+            paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
             paper_library_df.to_parquet(library_file)
             result_list.append(result_dict)
             
@@ -369,8 +368,18 @@ def get_articles(query, library_file=paper_library_filepath, top_k=10):
 #print(result_output[0])
 #sys.exit(0)
 
-def index_synopsis(paper_dict, synopsis):
-    faiss_id = generate_faiss_id(lambda value: value in synopsis_library_df.index)
+def index_paper_synopsis(paper_dict, synopsis):
+    global paper_indexIDMap
+    embedding = embedding_request(synopsis)
+    ids_np = np.array([paper_dict['faiss_id']], dtype=np.int64)
+    embeds_np = np.array([embedding], dtype=np.float32)
+    paper_indexIDMap.add_with_ids(embeds_np, ids_np)
+    paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'synopsis'] = synopsis
+
+
+def index_section_synopsis(paper_dict, synopsis):
+    global section_indexIDMap
+    faiss_id = generate_faiss_id(lambda value: value in section_library_df.index)
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
     paper_abstract = paper_dict['summary']
@@ -379,21 +388,20 @@ def index_synopsis(paper_dict, synopsis):
     ids_np = np.array([faiss_id], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
     print(f'section synopsis length {len(synopsis)}')
-    faiss_indexIDMap.add_with_ids(embeds_np, ids_np)
+    section_indexIDMap.add_with_ids(embeds_np, ids_np)
     synopsis_dict = {"faiss_id":faiss_id,
-                     "title": paper_dict['title'],
-                     "article_url": paper_dict['article_url'],
-                     "pdf_filepath": paper_dict['pdf_filepath'],
-                     "synopsis_text": synopsis,
-                     "embedding": embedding
+                     "paper_id": paper_dict["faiss_id"],
+                     "synopsis": synopsis,
                      }
-    synopsis_library_df.loc[len(synopsis_library_df)]=synopsis_dict
+    section_library_df.loc[len(section_library_df)]=synopsis_dict
+    return faiss_id
 
 def index_paper(paper_dict):
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
     paper_abstract = paper_dict['summary']
     pdf_filepath = paper_dict['pdf_filepath']
+    paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     extract = create_chunks_grobid(pdf_filepath)
     if extract is None:
         return None
@@ -446,7 +454,7 @@ End your synopsis response as follows:
 
 </UPDATED_SYNOPSIS>
 """
-    section_synopses = []
+    section_synopses = []; section_ids = []
     paper_synopsis = ''
     with tqdm(total=len(text_chunks)) as pbar:
         for text_chunk in text_chunks:
@@ -469,9 +477,9 @@ End your synopsis response as follows:
                 if '</SYNOPSIS>' in response:
                     response = response[:response.find('</SYNOPSIS>')]
                     print(f'index_paper result len {len(response)}')
-                index_synopsis(paper_dict, response)
+                id = index_section_synopsis(paper_dict, response)
                 section_synopses.append(response)
-
+                section_ids.append(id)
 
                 #
                 ### now update paper synopsis with latest section synopsis
@@ -492,10 +500,13 @@ End your synopsis response as follows:
                 if end_idx < 0:
                     end_idx = len(response)
                     paper_synopsis = response[:end_idx-1]
-    index_synopsis(paper_dict, paper_synopsis)
+    index_paper_synopsis(paper_dict, paper_synopsis)
+    # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
+    #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
+    #paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'section_ids'] = section_ids
     save_synopsis_data()
     print(f'indexed {paper_title}, {len(section_synopses)} sections')
-    return paper_synopsis, section_synopses
+    return paper_synopsis, paper_faiss_id, section_synopses, section_ids
 
 
 def strings_ranked_by_relatedness(
@@ -583,19 +594,25 @@ def search(query, sbar={"needs":'', "background":'', "observations":''}, web=Fal
          - separates the text into sections
          - creates synopses at the section and document level
          - creates an embed vector for each synopsis
-         - adds entries to the faiss IDMap and the synopsis_library
+         - adds entries to the faiss IDMap and the section_library
     - Finds the closest n faiss IDs to the user's query
-    - returns the section synopses and synopsis_library and paper_library entries for the found items"""
+    - returns the section synopses and section_library and paper_library entries for the found items"""
 
     # A prompt to dictate how the recursive summarizations should approach the input paper
     #get_ articles does arxiv library search. This should be restructured
     results = []
     i = 0
-    while search and len(results) == 0 and i < 3:
+    while search and len(results) == 0 and i < 2:
         results = get_articles(random.sample(query, min(3, max(1, len(query)-1))))
         i+=1
-    
-    print(f"length {len(results)}")
+        print(f"arxiv search returned {len(results)} papers")
+        for paper in results:
+            print(f"    title: {paper['title']}")
+    sys.exit(0)
+    for paper in results:
+        index_paper(paper)
+
+    # arxiv search over, now search faiss
     paper_summaries = search_sections(query, sbar, top_k=24)
     print(f'found {len(paper_summaries)} sections')
     print("Summarizing into overall summary")
@@ -665,5 +682,6 @@ Begin!"""
 
 #chat_test_response = summarize_text("PPO reinforcement learning sequence generation")
 if __name__ == '__main__':
-    search("Direct Policy Optimization", web=False)
+    #search(["Direct Policy Optimization"], web=False)
+    plan_search(web=True)
     

@@ -24,7 +24,7 @@ class SeparatorStyle(Enum):
 
 @dataclasses.dataclass
 class Conversation:
-    """A class that manages prompt templates and keeps all conversation history."""
+    """A class that manages prompt templates """
 
     # The name of this template
     name: str
@@ -61,7 +61,7 @@ class Conversation:
         ## maybe change CHSam to return 2 msgs to keep order straight?
         ## ah, blank second, so asst replies '' to init message. that seems ok?
         ## or, below, check msg 1, and if from asst, insert '' user msg instead of using first
-        B_INST, E_INST = "\n[INST]", "[/INST]\n"
+        B_INST, E_INST = "\n<s>[INST]", "[/INST]\n"
         B_SYS, E_SYS = "\n<<SYS>>\n", "\n<</SYS>>\n"
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
         messages = self.messages
@@ -655,8 +655,9 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
         sep="<|im_end|>\n",
         sep2='',
-        stop_token_ids=[50278, 0],
-        response_prime=True,
+        stop_token_ids=[32000],
+        stop_str= "<|im_end|>",
+        response_prime=False,
     )
 )
 # MPT instruct template as per HG MPT 30b instruct model page
@@ -786,7 +787,7 @@ register_conv_template(
         sep_style=SeparatorStyle.RWKV,
         sep="\n",
         sep2="<|endoftext|>",
-        stop_str="\nUser",  # use stop_str to stop generation after stop_token_ids, it will also remove stop_str from the generated text
+        stop_str="\nUser", 
         stop_token_ids=[
             0,
             1,
@@ -813,7 +814,7 @@ register_conv_template(
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
-        stop_str=["User:", "Assistant:"],
+        stop_str="User:",
         stop_token_ids=[11],
         sep="\n",
         sep2="<|endoftext|>",
@@ -829,7 +830,7 @@ register_conv_template(
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,
-        stop_str=["### Human"],
+        stop_str="### Human",
         stop_token_ids=[11],
         sep="\n",
         sep2="<|endoftext|>",
@@ -881,7 +882,7 @@ register_conv_template(Conversation(
         sep_style=SeparatorStyle.ADD_COLON_TWO,
         sep="\n",
         sep2="<|end|>",
-        response_prime=True,
+        response_prime=False,
     )
 )
 register_conv_template(Conversation(
@@ -894,6 +895,19 @@ register_conv_template(Conversation(
         sep="\n",
         sep2="\n",
         response_prime=True,
+    )
+)
+
+register_conv_template(Conversation(
+        name="synthia",
+        system="",
+        roles=("USER", "ASSISTANT", "SYSTEM"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_COLON_SPACE_SINGLE,
+        sep="\n",
+        sep2="\n",
+        response_prime=False,
     )
 )
 

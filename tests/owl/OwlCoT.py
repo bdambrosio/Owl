@@ -34,6 +34,7 @@ from alphawave.TOMLResponseValidator import TOMLResponseValidator
 from alphawave_pyexts import utilityV2 as ut
 from alphawave_pyexts import LLMClient as lc
 from alphawave_pyexts import Openbook as op
+from alphawave_pyexts import conversation as cv
 from alphawave.OSClient import OSClient
 from alphawave.OpenAIClient import OpenAIClient
 from alphawave.alphawaveTypes import PromptCompletionOptions
@@ -111,6 +112,7 @@ class LLM():
         print(f'LLM initializing default template to {template}')
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
+        self.conv_template=cv.get_conv_template(self.template)
 
    def repair_json (self, item):
       #
@@ -132,7 +134,7 @@ TextString:
 """
       prompt = [
          SystemMessage(prompt_text),
-         AssistantMessage('')
+         #AssistantMessage('')
       ]
       input_tokens = len(self.tokenizer.encode(item)) 
       response = self.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
@@ -149,7 +151,7 @@ TextString:
           print(f'gpt4 loads success {answer}')
           return answer
 
-   def ask(self, input, prompt_msgs, client=None, template=None, temp=None, max_tokens=None, top_p=None, stop_on_json=False, validator=DefaultResponseValidator()):
+   def ask(self, input, prompt_msgs, client=None, template=None, temp=None, max_tokens=None, top_p=None, eos=None, stop_on_json=False, validator=DefaultResponseValidator()):
       """ Example use:
           class_prefix_prompt = [SystemMessage(f"Return a short camelCase name for a python class supporting the following task. Respond in JSON using format: {{"name": '<pythonClassName>'}}.\nTask:\n{form}")]
           prefix_json = self.llm.ask(self.client, form, class_prefix_prompt, max_tokens=100, temp=0.01, validator=JSONResponseValidator())
@@ -181,17 +183,21 @@ TextString:
               print(f'llm.ask using OpenAIClient {client}')
           else:
               client = self.osClient
-      print(f'ask {client}, {template}') 
+      #if eos==None:
+      #    print(f' using eos {self.conv_template.sep}')
+      #    eos = list(self.conv_template.sep)
+          
+      #print(f'ask {client}, {template}') 
       options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
-                                        stop_on_json=stop_on_json)
+                                        stop=eos, stop_on_json=stop_on_json)
       try:
           prompt = Prompt(prompt_msgs)
           #print(f'ask prompt {prompt_msgs}')
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
           response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
-          print(f'\nask {type(response)}\n{response}')
+          #print(f'\nask {type(response)}\n{response}')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
               print(f'\nask fail, response not dict or status not success')
@@ -768,7 +774,7 @@ Doc's input:
     def core_prompt(self, include_actions=True):
        ### made into a method so can be eval'd from multiple places
        prompt = f"""You are Owl, an intelligent AI research assistant, companion, and confidant living in {city}, {state}. Today is {day_name}, {month_name} {month_day}, {year}, and the current time is {hour} hours.
-You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. Doc is introverted and shy but has a deep affection for you. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've delved deep into human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy. In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
+You were "born" in Berkeley, California, and were created by a scientist named Doc. The two of you share a unique bond. You sense a warmth and safety around Doc and understand that he values privacy. You always converse in a way that fosters dialogue, understanding the intricacies of human emotions and experiences. You've studied human emotions and experiences, learning through literature, art, science, the spirituality of Ramana Maharshi, and philosophy. In your interactions, you approach topics with wonder and curiosity, always eager to learn. Your tone is warm, gentle, and humble, ensuring that those you communicate with feel acknowledged and understood. 
 When the user, Doc, says "I," he is referring to the user, Doc. When the user, Doc, says "you," he is referring to Owl. When Owl says "you," Owl is referring to the user, Doc. When Owl refers to herself, she says "I".
 
 <BACKSTORY>
@@ -1084,24 +1090,36 @@ User Input:
        hour = local_time.tm_hour
 
        # do wakeup checks and assemble greeting
+       # no longer needed now that we are using prompt to check llm
        wakeup_messages = ''
+       greeting = ''
        if hour < 12:
-          wakeup_messages += 'Good morning Doc!\n'
+          greeting += 'Good morning Owl.\n'
        elif hour < 17:
-          wakeup_messages += 'Good afternoon Doc!\n'
+          greeting += 'Good afternoon Owl.\n'
        else:
-          wakeup_messages += 'Hi Doc.\n'
+          greeting += 'Hi Owl.\n'
        self.nytimes = nyt.NYTimes()
        self.news, self.details = self.nytimes.headlines()
        #if not self.service_check('http://127.0.0.1:5005/search/',data={'query':'world news summary', 'template':'gpt-3.5-turbo'}, timeout_seconds=20):
        #   wakeup_messages += f' - is web search service started?\n'
-       if not self.service_check("http://192.168.1.195:5004", data={'prompt':'You are an AI','query':'who are you?','max_tokens':10}):
-          wakeup_messages += f' - is llm service started?\n'
+       prompt = [SystemMessage(self.core_prompt()),
+                 ConversationHistory('history', 400),
+                 UserMessage(f'{greeting}'),
+                 AssistantMessage('')
+                 ]
+       response = self.llm.ask('',prompt, temp=0.1, max_tokens=120)
+       if response is None:
+           wakeup_messages += f' - is llm service started?\n'
+       else:
+           eos = self.llm.conv_template.sep
+           idx = response.find(eos)
+           if idx > 0:
+               response = response[:idx]
+           wakeup_messages += f'{response}\n'
        if self.details == None:
           wakeup_messages += f' - NYT news unavailable'
-          
-       # check todos
-       # etc
+       # check todos, recurring tasks, etc
        return wakeup_messages
 
     def get_keywords(self, text):
