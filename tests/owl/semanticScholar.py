@@ -132,8 +132,13 @@ def get_semantic_scholar_meta(doi):
 def paper_library_df_fixup():
     return
 
-paper_library_columns = ["faiss_id", "title", "authors", "publisher", "summary", "inflCitations", "citationVelocity", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
+paper_library_columns = ["faiss_id", "title", "authors", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
 
+# s2FieldsOfStudy
+s2FieldsOfStudy=["Computer Science","Medicine","Chemistry","Biology","Materials Science","Physics",
+                 "Geology","Psychology","Art","History","Geography","Sociology","Business","Political Science",
+                 "Economics","Philosophy","Mathematics","Engineering","Environmental Science","Agricultural and Food Sciences",
+                 "Education","Law","Linguistics"]
 if not os.path.exists(paper_library_filepath):
     # Generate a blank dataframe where we can store downloaded files
     paper_library_df = pd.DataFrame(columns=paper_library_columns)
@@ -307,46 +312,61 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
 
     try:
         # Set up your search query
-        search = arxiv.Search(
-            query=f'ti:{query} OR ab:{query}', 
-            max_results=top_k, 
-            sort_by=SortCriterion.Relevance,
-            sort_order = SortOrder.Descending
-        )
-    
-        print(f'get article search {search}')
-        # Use the client to get the results
-        results =arxiv.Client().results(search)
-        print(f'get_article results {results}')
-        for result in results:
-            print(f'considering {result.title}')
-            
+        query='Direct Preference Optimization for large language model fine tuning'
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&fields=url,title,year,abstract,authors,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr"
+        headers = {'x-api-key':ssKey, }
+        
+        response = requests.get(url, headers = headers)
+        if response.status_code != 200:
+            print(f'SemanticsSearch fail code {response.status_code}')
+            return []
+        results = response.json()
+        total_papers = results["total"]
+        current_offset = results["offset"]
+        next_offser = results["next"]
+        papers = results["data"]
+        print(f'get article search returned first {len(papers)} papers of {total_papers}')
+        for paper in papers:
+            title = paper["title"]
+            print(f'considering {title}')
             if len(paper_library_df) > 0:
-                dup = (paper_library_df['title']== result.title).any()
+                dup = (paper_library_df['title'] == title).any()
                 if dup:
-                    print(f'   skipping {result.title}')
+                    print(f'   already indexed {title}')
                     continue
-            citationVelocity=0; influentialCitations=0; publisher = ''
-            if result.doi is not None and len(result.doi) > 0:
-                citationVelocity, influentialCitations, publisher = get_semantic_scholar_meta(result.doi)
-            if citationVelocity == 0 and influentialCitations == 0:
-                print(f'   no citations {result.title}')
-                continue
+            url = paper['url']
+            isOpenAccess = paper['isOpenAccess']
+            influentialCitationCount = paper['influentialCitationCount']
+            if not isOpenAccess:
+                if influentialCitationCount > 0:
+                    print(f'   not open access but influentialCitationCount {influentialCitationCount}')
+                    continue
+            openAccessPdf = paper['openAccessPdf']
+            year = paper['year']
+            abstract = paper['abstract']
+            authors = paper['authors']
+            citationCount = paper['citationCount']
+            openAccessPdf = paper['openAccessPdf']
+            s2FieldsOfStudy = paper['s2FieldsOfStudy']
+            tldr= paper['tldr']
+            if abstract is None or (tldr is not None and len(tldr) > len(abstract)):
+                abstract = tldr
+            if citationCount == 0:
+                if year < 2022:
+                    print(f'   skipping, no citations {result.title}')
+                    continue
             result_dict = {key: '' for key in paper_library_columns}
             id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
             result_dict["faiss_id"] = id
-            result_dict["title"] = result.title
-            result_dict["authors"] = author_names = [", ".join(author.name for author in result.authors)]
+            result_dict["title"] = title
+            result_dict["authors"] = [", ".join(author['name'] for author in authors)]
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
-            result_dict["summary"] = result.summary
-            result_dict["citationVelocity"]= citationVelocity
-            result_dict["inflCitations"] = influentialCitations
-            if result_dict['publisher'] is None or len(result_dict['publisher']) < len(result_dict['publisher']):
-                result_dict['publisher'] = publisher # use pub from semantic scholar
+            result_dict["summary"] = abstract
+            result_dict["citationCount"]= citationCount
+            result_dict["inflCitations"] = influentialCitationCount
             result_dict["evaluation"] = ''
-            result_dict["article_url"] =  [x.href for x in result.links][0]
-            result_dict["pdf_url"] = [x.href for x in result.links][1]
-            pdf_filepath= result.download_pdf(dirpath=papers_dir)
+            result_dict["pdf_url"] = openAccessPdf
+            pdf_filepath= download_pdf(openAccessPdf, dir=papers_dir)
             result_dict["pdf_filepath"]= pdf_filepath
             
             print(f"indexing new article: {result.title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
@@ -608,7 +628,7 @@ def search(query, sbar={"needs":'', "background":'', "observations":''}, web=Fal
     results = []
     i = 0
     while search and len(results) == 0 and i < 2:
-        results = get_articles(random.sample(query, min(3, max(1, len(query)-1))))
+        results = get_articles(random.sample(query, min(8, max(1, len(query)-1))))
         i+=1
         print(f"arxiv search returned {len(results)} papers")
         for paper in results:
