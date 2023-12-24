@@ -280,15 +280,12 @@ def plan_search(web=False):
 
     if plan is None:
         return
-    if 'arxiv_keywords' not in plan:
-        # extract a list of keywords from the title and sbar
-        # Extracting words
-        extracted_words = extract_words_from_json(plan['sbar'])
-        keywords = extract_keywords(extracted_words)
-        plan['arxiv_keywords'] = keywords
-    else:
-        keywords = plan['arxiv_keywords']
-    search(keywords,plan['sbar'],  web=web)
+    # extract a list of keywords from the title and sbar
+    # Extracting words
+    extracted_words = extract_words_from_json(plan['sbar'])
+    keywords = extract_keywords(extracted_words)
+    plan['arxiv_keywords'] = keywords
+    search(keywords, web=web)
 
 def get_articles(query, library_file=paper_library_filepath, top_k=100):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
@@ -589,7 +586,7 @@ def create_chunks_grobid(pdf_filepath):
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
 
-def search(query, sbar={"needs":'', "background":'', "observations":''}, web=False):
+def search(query, web=False):
     
     """Query is a *list* of keywords or phrases
     This function does the following:
@@ -687,6 +684,6 @@ Begin!"""
 
 #chat_test_response = summarize_text("PPO reinforcement learning sequence generation")
 if __name__ == '__main__':
-    #search(["Direct Policy Optimization"], web=False)
+    #search(["Direct Preference Optimization"], web=False)
     plan_search(web=True)
     

@@ -108,13 +108,31 @@ def read_pdf(filepath):
         page_number += 1
         page_text = page.extract_text() + f"\nPage Number: {page_number}"
         pdf_text += page_text
-        print(f"Page Number: {page_number}, tokens: {len(tokenizer.encode(page_text))}")
+        print(f"Page Number: {page_number}, chars: {len(page_text)}")
     return info, pdf_text
-  
+
+def convert_title_to_unix_filename(title):
+    filename = title.replace(' ', '_')
+    # Remove or replace special characters
+    filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
+    filename = filename[:64]
+    return filename+'.pdf'
+
+def wait_for_download(directory):
+    """
+    Wait for the download to complete in the specified directory.
+    Returns the filename of the downloaded file.
+    """
+    while True:
+        for fname in os.listdir(directory):
+            if not fname.endswith('.crdownload'):
+                return fname
+        time.sleep(1)  # Wait a bit before checking again
+
 @app.get("/retrieve/")
-async def retrieve(title: str, url: str, max_chars: int = 4000):
+async def retrieve(title: str, url: str, doc_type='str', max_chars: int = 4000):
   global client, memory, functions, tokenizer
-  response_text = ''
+  response = ''
   try:
     #query_phrase, keywords = ut.get_search_phrase_and_keywords(client, title, model, memory, functions, tokenizer)
     #keyword_weights = gs.compute_keyword_weights(keywords)
@@ -123,7 +141,7 @@ async def retrieve(title: str, url: str, max_chars: int = 4000):
       chrome_options = Options()
       chrome_options.page_load_strategy = 'eager'
       chrome_options.add_argument("--headless")
-      download_dir = "/home/bruce/Downloads/"
+      download_dir = "/home/bruce/Downloads/pdfs/"
       prefs = {"download.default_directory": download_dir,
          "download.prompt_for_download": False,
          "download.directory_upgrade": True,
@@ -132,30 +150,30 @@ async def retrieve(title: str, url: str, max_chars: int = 4000):
 
       result = ''
       with webdriver.Chrome(options=chrome_options) as dr:
-        print(f'*****setting page load timeout {15} {url}')
-        dr.set_page_load_timeout(15)
+        print(f'*****setting page load timeout {20} {url}')
+        dr.set_page_load_timeout(20)
         dr.get(url)
-        #time.sleep(10)
-        response = dr.page_source
-          
-      if url.endswith('pdf'):
-        idx = url.rfind('/')
-        if idx == -1:
-          return {"result":f"url has no filename {url}"}
-        print(f'reading pdf {download_dir+url[idx+1:]}')
-        pdf_info, pdf_text = read_pdf(download_dir+url[idx+1:])
-        return {"result": pdf_text, "info": pdf_info}
+        if url.endswith('pdf') or doc_type=='pdf':
+          downloaded_file = wait_for_download(download_dir)
+          print("Downloaded file:", downloaded_file)
 
+        response = dr.page_source
+        dr.close()
+
+        if url.endswith('pdf') or doc_type=='pdf':
+          print(f'\nchat processing pdf\n')
+          filename = convert_title_to_unix_filename(title)
+          print(f'reading pdf {download_dir+downloaded_file}')
+          pdf_info, pdf_text = read_pdf(download_dir+downloaded_file)
+          return {"result": pdf_text, "info": pdf_info, "filepath":download_dir+downloaded_file}
+
+      print(f'\nchat processing non-pdf\n')
       soup = BeautifulSoup(response, "html.parser")
       all_text = soup.get_text()
       # Remove script and style tags
       all_text = all_text.split('<script>')[0]
       all_text = all_text.split('<style>')[0]
-      
-      # Remove script and style content
-      all_text = all_text.split('</script>')[0]
-      all_text = all_text.split('</style>')[0]
-      
+      # Remove multiple newline chars
       final_text = re.sub(r'(\n){2,}', '\n', all_text)
       print(f'retrieve returning {len(final_text)} chars')
       return {"result":final_text}

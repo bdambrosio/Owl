@@ -612,7 +612,7 @@ register_conv_template(
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.NO_COLON_SINGLE,
-        sep=None,
+        sep='</s>',
     )
 )
 
@@ -655,7 +655,7 @@ register_conv_template(
         sep_style=SeparatorStyle.ADD_NEW_LINE_SINGLE,
         sep="<|im_end|>\n",
         sep2='',
-        stop_token_ids=[32000],
+        stop_token_ids=[2],
         stop_str= "<|im_end|>",
         response_prime=False,
     )

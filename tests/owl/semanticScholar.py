@@ -1,4 +1,4 @@
-import os, sys, logging
+import os, sys, logging, glob
 import pandas as pd
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
@@ -17,6 +17,7 @@ import pdfminer.high_level as miner
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument
 import requests
+import urllib.request
 import numpy as np
 import faiss
 from scipy import spatial
@@ -45,6 +46,7 @@ import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from Planner import Planner
 from transformers import AutoTokenizer, AutoModel
+import webbrowser
 
 # startup AI resources
 
@@ -191,31 +193,107 @@ def save_synopsis_data():
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
     
-def search_sections(query, sbar, top_k=20):
+def search_sections(query, top_k=20):
     #print(section_library_df)
     # get embed
-    expanded_query = " ".join(query)+sbar_as_text(sbar)
-    query_embed = embedding_request(expanded_query)
+    query_embed = embedding_request(query)
     # faiss_search
     embeds_np = np.array([query_embed], dtype=np.float32)
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
     print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
-    sections = []
+    synopses = []
     for id in ids[0]:
         section_library_row = section_library_df[section_library_df['faiss_id'] == id]
         #print section text
         if len(section_library_row) > 0:
-            row = section_library_row.iloc[0]
-            text = row['synopsis']
-            article_title = row['title']
+            section_row = section_library_row.iloc[0]
+            text = section_row['synopsis']
+            paper_row = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']].iloc[0]
+            article_title = paper_row['title']
             synopses.append([article_title, text])
             print(f'{article_title} {len(text)}')
     return synopses
 
+def convert_title_to_unix_filename(title):
+    filename = title.replace(' ', '_')
+    # Remove or replace special characters
+    filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
+    filename = filename[:64]
+    return filename
+
+def download_pdf(url, title):
+    request = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(request) as response:
+            pdf_data = response.read()
+            filename = convert_title_to_unix_filename(title)
+            arxiv_filepath = os.path.join(papers_dir, filename)
+            with open(arxiv_filepath, 'wb') as f:  # Open in write binary mode
+                f.write(pdf_data)
+        return arxiv_filepath
+    except Exception as e:
+        print(f'\n download 1 fail {str(e)}')
+    try:
+        return download_pdf_5005(url, title)
+    except Exception as e:
+        print(f'\n download 5005 fail {str(e)}')
+    try:
+        return download_pdf_wbb(url, title)
+    except Exception as e:
+        print(f'\n download wbb fail {str(e)}')
+    return None
+
+GOOGLE_CACHE_DIR = '/home/bruce/.cache/google-chrome/Default/Cache/Cache_Data/*'
+def latest_google_pdf():
+    files = [f for f in glob.glob(GOOGLE_CACHE_DIR)  if os.path.isfile(f)] # Get all file paths
+    path = max(files, key=os.path.getmtime)  # Find the file with the latest modification time
+    size = os.path.getsize(path)
+    age = int(time.time()-os.path.getmtime(path))
+    print(f"secs old: {age}, size: {size}, name: {path}")
+    return path, age, size
+
+
+def download_pdf_wbb(url, title):
+    global papers_dir
+    # Send GET request to fetch PDF data
+    print(f' fetching url {url}')
+    webbrowser.open(url)
+    conf = cot.confirmation_popup(title, 'Saved?' )
+    if conf:
+        filename = convert_title_to_unix_filename(title)
+        arxiv_filepath = os.path.join(papers_dir, filename)
+        os.rename(os.path.join(papers_dir,'temp.pdf'), arxiv_filepath)
+        return arxiv_filepath
+    else:
+        print(f'paper download attempt failed {response.status_code}')
+    return None
+        
+def download_pdf_5005(url, title):
+    global papers_dir
+    # Send GET request to fetch PDF data
+    print(f' fetching url {url}')
     
-#@retry(wait=wait_random_exponential(min=2, max=40), stop=stop_after_attempt(3))
+    pdf_data = None
+    response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=20)
+    if response.status_code == 200:
+        info = response.json()
+        print(f'\nretrieve response {info};')
+        if type(info) is dict and 'filepath' in info:
+            idx = info['filepath'].rfind('/')
+            arxiv_filepath = os.path.join(papers_dir, info['filepath'][idx+1:])
+            os.rename(info['filepath'], arxiv_filepath)
+            return arxiv_filepath
+    else:
+        print(f'paper download attempt failed {response.status_code}')
+        return download_pdf_wbb(url, title)
+    return None
+        
+    
+#@retry(wait=wait_random_exponential(min=2, max=40), eos=stop_after_attempt(3))
 def embedding_request(text):
+    if type(text) != str:
+        print(f'\nError - type of embedding text is not str {text}')
     text_batch = [text]
     # preprocess the input
     inputs = embedding_tokenizer(text_batch, padding=True, truncation=True,
@@ -248,11 +326,13 @@ def extract_words_from_json(json_data):
     return words
 
 def extract_keywords(text):
+    print(f' extract keywords in {text}')
     keywords = []
     for word in text:
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 3.75 and word not in keywords:
+        if zipf < 34.0 and word not in keywords:
             keywords.append(word)
+    print(f' extract keywords out {keywords}')
     return keywords
 
 def plan_search(web=False):
@@ -285,17 +365,20 @@ def plan_search(web=False):
 
     if plan is None:
         return
-    if 'arxiv_keywords' not in plan:
-        # extract a list of keywords from the title and sbar
-        # Extracting words
-        extracted_words = extract_words_from_json(plan['sbar'])
-        keywords = extract_keywords(extracted_words)
-        plan['arxiv_keywords'] = keywords
-    else:
-        keywords = plan['arxiv_keywords']
-    search(keywords,plan['sbar'],  web=web)
+    #if 'arxiv_keywords' not in plan:
+    # extract a list of keywords from the query, name, and sbar
+    # Extracting words
+    extracted_words = extract_words_from_json(plan['sbar'])
+    extracted_words.extend([word for word in plan['name'].split(' ') if word not in extracted_words])
+    extracted_words.extend([word for word in plan['dscp'].split(' ') if word not in extracted_words])
+    keywords = extract_keywords(extracted_words)
+    plan['arxiv_keywords'] = keywords
+    print(f' extracted keywords {keywords}')
+    #else:
+    #    keywords = plan['arxiv_keywords']
+    search(" ".join(keywords),  web=web)
 
-def get_articles(query, library_file=paper_library_filepath, top_k=100):
+def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=100):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
     """
@@ -303,27 +386,28 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
     # Initialize a client
     result_list = []
     #library_df = pd.read_parquet(library_file).reset_index()
-    query = ' and '.join(query)
-    print(f'get_articles query: {query}')
     query = cot.confirmation_popup("Search ARXIV using this query?", query )
     if not query:
         print(f'confirmation: No!')
-        return []
-
+        return [],0,0
+    else: print(f'get_articles query: {query}')
     try:
         # Set up your search query
-        query='Direct Preference Optimization for large language model fine tuning'
-        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&fields=url,title,year,abstract,authors,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr"
+        #query='Direct Preference Optimization for large language model fine tuning'
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&offset={next_offset}&fields=url,title,year,abstract,authors,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr,embedding.specter_v2"
         headers = {'x-api-key':ssKey, }
         
         response = requests.get(url, headers = headers)
         if response.status_code != 200:
             print(f'SemanticsSearch fail code {response.status_code}')
-            return []
+            return [],0,0
         results = response.json()
+        print(f' s2 response keys {results.keys()}')
         total_papers = results["total"]
         current_offset = results["offset"]
-        next_offser = results["next"]
+        if total_papers == 0:
+            return [],0,0
+        next_offset = results["next"]
         papers = results["data"]
         print(f'get article search returned first {len(papers)} papers of {total_papers}')
         for paper in papers:
@@ -337,23 +421,21 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
             url = paper['url']
             isOpenAccess = paper['isOpenAccess']
             influentialCitationCount = paper['influentialCitationCount']
-            if not isOpenAccess:
-                if influentialCitationCount > 0:
-                    print(f'   not open access but influentialCitationCount {influentialCitationCount}')
-                    continue
-            openAccessPdf = paper['openAccessPdf']
+            if isOpenAccess and 'openAccessPdf' in paper and type(paper['openAccessPdf']) is dict :
+                openAccessPdf = paper['openAccessPdf']['url']
+            else: openAccessPdf = None
             year = paper['year']
-            abstract = paper['abstract']
+            abstract = paper['abstract'] if type(paper['abstract']) is str else str(paper['abstract'])
             authors = paper['authors']
             citationCount = paper['citationCount']
-            openAccessPdf = paper['openAccessPdf']
             s2FieldsOfStudy = paper['s2FieldsOfStudy']
             tldr= paper['tldr']
+            embedding = paper['embedding']
             if abstract is None or (tldr is not None and len(tldr) > len(abstract)):
-                abstract = tldr
+                abstract = str(tldr)
             if citationCount == 0:
                 if year < 2022:
-                    print(f'   skipping, no citations {result.title}')
+                    print(f'   skipping, no citations {title}')
                     continue
             result_dict = {key: '' for key in paper_library_columns}
             id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
@@ -361,15 +443,18 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
             result_dict["title"] = title
             result_dict["authors"] = [", ".join(author['name'] for author in authors)]
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
-            result_dict["summary"] = abstract
+            result_dict["summary"] = abstract 
             result_dict["citationCount"]= citationCount
             result_dict["inflCitations"] = influentialCitationCount
             result_dict["evaluation"] = ''
             result_dict["pdf_url"] = openAccessPdf
-            pdf_filepath= download_pdf(openAccessPdf, dir=papers_dir)
+            print(f' url: {openAccessPdf}')
+            pdf_filepath = None
+            if openAccessPdf is not None:
+                pdf_filepath= download_pdf(openAccessPdf, title)
             result_dict["pdf_filepath"]= pdf_filepath
             
-            print(f"indexing new article: {result.title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
+            print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
             result_dict['synopsis'] = ""
             result_dict['section_ids'] = [] # to be filled in after we get paper id
             #if status is None:
@@ -378,6 +463,11 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
             paper_index = len(paper_library_df)
             paper_library_df.loc[paper_index] = result_dict
             # section and index paper
+            if not isOpenAccess:
+                if influentialCitationCount > 0:
+                    index_paper_synopsis(result_dict, abstract)
+                    print(f'   not open access but influentialCitationCount {influentialCitationCount}')
+                    continue
             paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
             paper_library_df.to_parquet(library_file)
             result_list.append(result_dict)
@@ -386,7 +476,7 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
         traceback.print_exc()
     #print(f'get articles returning')
     # get_articles assumes someone downstream parses and indexes the pdfs
-    return result_list
+    return result_list, total_papers, next_offset
 
 # Test that the search is working
 #result_output = get_articles("epigenetics in cancer")
@@ -395,7 +485,10 @@ def get_articles(query, library_file=paper_library_filepath, top_k=100):
 
 def index_paper_synopsis(paper_dict, synopsis):
     global paper_indexIDMap
-    embedding = embedding_request(synopsis)
+    if 'embedding' in paper_dict and paper_dict['embedding'] is not None:
+        embedding = paper_dict['embedding']
+    else:
+        embedding = embedding_request(synopsis)
     ids_np = np.array([paper_dict['faiss_id']], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
     paper_indexIDMap.add_with_ids(embeds_np, ids_np)
@@ -427,9 +520,15 @@ def index_paper(paper_dict):
     paper_abstract = paper_dict['summary']
     pdf_filepath = paper_dict['pdf_filepath']
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
-    extract = create_chunks_grobid(pdf_filepath)
-    if extract is None:
-        return None
+    if pdf_filepath is None:
+        return paper_abstract, paper_faiss_id, [],[]
+    try:
+        extract = create_chunks_grobid(pdf_filepath)
+        if extract is None:
+            return paper_abstract, paper_faiss_id, [],[]
+    except Exception as e:
+        print(f'\ngrobid fail {str(e)}')
+        return paper_abstract, paper_faiss_id, [],[]
     print(f"grobid extract keys {extract.keys()}")
     text_chunks = [paper_abstract]+extract['sections']
     print(f"Summarizing each chunk of text {len(text_chunks)}")
@@ -489,14 +588,15 @@ End your synopsis response as follows:
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
-            #response = llm.ask('', prompt, client=openAIClient, template=OPENAI_MODEL3, temp=0.05)
+            #response = llm.ask('', prompt, client=openAIClient, template=OPENAI_MODEL3, temp=0.05, eos='</SYNOPSIS')
             response = llm.ask({"abstract":paper_abstract,
                                 "paper_synopsis":paper_synopsis,
                                 "text":text_chunk},
                                prompt,
                                template=OS_MODEL,
                                max_tokens=500,
-                               temp=0.05)
+                               temp=0.05,
+                               eos='</SYNOPSIS')
             pbar.update(1)
             if response is not None:
                 if '</SYNOPSIS>' in response:
@@ -520,7 +620,8 @@ End your synopsis response as follows:
                                          paper_messages,
                                          template=OS_MODEL,
                                          max_tokens=1200,
-                                         temp=0.1)
+                                         temp=0.1,
+                                         eos='</UPDATED_SYNOPSIS')
                 end_idx = response.rfind('/UPDATED_SYNOPSIS')
                 if end_idx < 0:
                     end_idx = len(response)
@@ -609,7 +710,7 @@ def create_chunks_grobid(pdf_filepath):
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
 
-def search(query, sbar={"needs":'', "background":'', "observations":''}, web=False):
+def search(query, web=False):
     
     """Query is a *list* of keywords or phrases
     This function does the following:
@@ -627,43 +728,49 @@ def search(query, sbar={"needs":'', "background":'', "observations":''}, web=Fal
     #get_ articles does arxiv library search. This should be restructured
     results = []
     i = 0
-    while search and len(results) == 0 and i < 2:
-        results = get_articles(random.sample(query, min(8, max(1, len(query)-1))))
+    next_offset = 0
+    total = 999
+    query = cot.confirmation_popup("Search ARXIV using this query?", query )
+    while web and next_offset < total:
+        results, total, next_offset = get_articles(query, next_offset)
         i+=1
         print(f"arxiv search returned {len(results)} papers")
         for paper in results:
             print(f"    title: {paper['title']}")
-    sys.exit(0)
+
     for paper in results:
         index_paper(paper)
 
     # arxiv search over, now search faiss
-    paper_summaries = search_sections(query, sbar, top_k=24)
+    paper_summaries = search_sections(query, top_k=24)
     print(f'found {len(paper_summaries)} sections')
-    print("Summarizing into overall summary")
+    query = cot.confirmation_popup(f"Continue? found {len(paper_summaries)} sections", query)
+    if query is None or not query or len(query)==0:
+        return
+    print("Generating overall report")
     messages=[SystemMessage("You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers"),
-              UserMessage(f"""Write a detailed and comprehensive synopsis of these scientific papers with respect to this query description:
+              UserMessage(f"""Write a detailed and comprehensive research survey of these scientific papers with respect to this query description:
 
 <QUERY>
-{sbar_as_text(sbar)}
+{query}
 </QUERY>
 
-The synopsis should be about 1200 words in length. The goal is to present the integrated consensus on the query, capturing the overall argument along with essential statements, methods, observations, inferences, hypotheses, and conclusions. 
+The survey should be about 1800 words in length. The goal is to present the integrated consensus on the query, capturing the overall argument along with essential statements, methods, observations, inferences, hypotheses, and conclusions. 
 Also, create a list of all key points in the papers, including all significant statements, methods, observations, inferences, hypotheses, and conclusions that support the core consensus described. 
 
 Summaries:
 {paper_summaries}
 
 Please ensure the synopsis provides depth while removing redundant or superflous detail, ensuring that no critical aspect of the papers argument, observations, methods, findings, or conclusions is included in the list of key points.
-End your synopsis response as follows:
+End your survey response as follows:
 
-<End Synopsis>
+</SURVEY>
 """),
-              AssistantMessage("Synopsis:\n")
+              AssistantMessage("<SURVEY>")
               ]
-    response = llm.ask('', messages, client = openAIClient, max_tokens=1800, template=OPENAI_MODEL4, temp=0.1)
+    response = llm.ask('', messages, client = openAIClient, max_tokens=1800, template=OPENAI_MODEL4, temp=0.1, eos='</SURVEY>')
     #response = llm.ask('', messages, template=OS_MODEL, max_tokens=1200, temp=0.1)
-    end_idx = response.rfind('End Synopsis')
+    end_idx = response.rfind('</SURVEY>')
     if end_idx < 0:
         end_idx = len(response)
     return(response[:end_idx-1])
@@ -707,6 +814,224 @@ Begin!"""
 
 #chat_test_response = summarize_text("PPO reinforcement learning sequence generation")
 if __name__ == '__main__':
-    #search(["Direct Policy Optimization"], web=False)
-    plan_search(web=True)
+    #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
+    #search("miRNA vs. DNA Methylation assay cancer detection", web=True)
+    #plan_search(web=True)
+    #plan_search(web=False)
     
+
+
+    """
+write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection
+
+
+
+Creating a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early-stage lung cancer detection requires a thorough exploration of various scientific studies and data. Here's an overview of how such a survey might be structured and the key points it would likely cover:
+
+### Introduction
+
+#### Overview of Lung Cancer
+- Prevalence and impact
+- Importance of early detection for improved prognosis
+
+#### Biomarkers in Cancer Detection
+- Definition and role of biomarkers in cancer
+- Traditional biomarkers used in lung cancer
+
+#### Emerging Biomarkers: miRNA and DNA Methylation
+- Explanation of miRNA and DNA methylation
+- Potential advantages over traditional biomarkers
+
+### Circulating miRNA as Biomarkers
+
+#### Biological Role of miRNAs
+- Function and significance in cell regulation
+- How alterations in miRNA can contribute to cancer development
+
+#### miRNAs in Lung Cancer
+- Studies showing miRNA expression profiles in lung cancer patients
+- Specific miRNAs frequently dysregulated in lung cancer
+
+#### Circulating miRNAs
+- Explanation of circulating miRNAs in blood and other bodily fluids
+- Advantages as non-invasive biomarkers
+
+#### Studies on miRNAs in Early Lung Cancer Detection
+- Summary of key research findings
+- Analysis of sensitivity, specificity, and overall effectiveness
+
+### DNA Methylation Patterns as Biomarkers
+
+#### Basics of DNA Methylation
+- Role in gene expression and regulation
+- How aberrant methylation patterns are linked to cancer
+
+#### DNA Methylation in Lung Cancer
+- Commonly observed methylation changes in lung cancer
+- Genes frequently affected by methylation in lung cancer
+
+#### Detection of Methylation Patterns
+- Techniques used to detect DNA methylation
+- Challenges in using methylation patterns for early detection
+
+#### Research on Methylation Patterns in Early Lung Cancer
+- Overview of significant studies
+- Discussion on the feasibility and accuracy
+
+### Comparative Analysis
+
+#### miRNA vs. DNA Methylation Biomarkers
+- Comparison of the two biomarkers in terms of reliability, cost, and accessibility
+- Potential for combining both markers for improved detection
+
+### Challenges and Future Directions
+
+#### Current Limitations
+- Technical and clinical challenges in utilizing these biomarkers
+- Issues with standardization and validation
+
+#### Future Research
+- Areas needing further investigation
+- Potential advancements in technology and methodology
+
+### Conclusion
+
+#### Summary of Current Understanding
+- Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection
+
+#### Future Outlook
+- The future role of these biomarkers in clinical practice
+- Final thoughts on the impact of early detection on lung cancer outcomes
+
+### References
+- A comprehensive list of all studies, articles, and reviews referenced in the survey.
+
+---
+
+This outline provides a roadmap for a detailed research survey. To create the actual content, extensive research and analysis of current scientific literature, including peer-reviewed studies, clinical trials, and meta-analyses, would be required. Each section should synthesize existing research findings, highlight key data, and discuss the implications and limitations of the current knowledge. The survey should maintain an objective tone, critically analyze all information, and cite all sources appropriately.
+"""
+    
+    outline = {"task":
+ """write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.""",
+ "sections":[
+     {"title":"Introduction",
+      "sections":[
+          {"title":"Overview of Lung Cancer",
+           "sections":[
+               {"title":"Prevalence and impact"},
+               {"title":"Importance of early detection for improved prognosis"},
+           ]
+           },
+          {"title":"Biomarkers in Cancer Detection",
+           "sections":[
+               {"title":"Definition and role of biomarkers in cancer"},
+               {"title":"Traditional biomarkers used in lung cancer"},
+           ],
+           },
+          {"title":"Emerging Biomarkers: miRNA and DNA Methylation",
+           "sections":[
+               {"title":"Explanation of miRNA and DNA methylation"},
+               {"title":"Potential advantages over traditional biomarkers"},
+           ],
+           }
+          ]
+      },
+          
+     {"title":"Circulating miRNA as Biomarkers",
+      "sections":[
+          {"title":"Biological Role of miRNAs",
+           "sections":[
+               {"title":"Importance of early detection for improved prognosis"},
+               {"title":"Importance of early detection for improved prognosis"},
+           ],
+           },
+          {"title":"miRNAs in Lung Cancer",
+           "sections":[
+               {"title":"Studies showing miRNA expression profiles in lung cancer patients"},
+               {"title":"Specific miRNAs frequently dysregulated in lung cancer"},
+           ],
+           },
+          {"title":"Circulating miRNAs",
+           "sections":[
+               {"title":"Explanation of circulating miRNAs in blood and other bodily fluids"},
+               {"title":"Advantages as non-invasive biomarkers"},
+           ],
+           },
+          {"title":"Studies on miRNAs in Early Lung Cancer Detection",
+           "sections":[
+               {"title":"Summary of key research findings"},
+               {"title":"Analysis of sensitivity, specificity, and overall effectiveness"},
+           ],
+           },
+          ]
+      },
+
+     {"title":"DNA Methylation Patterns as Biomarkers",
+      "sections":[
+          {"title":"Basics of DNA Methylation",
+           "sections":[
+               {"title":"Role in gene expression and regulation"},
+               {"title":"How aberrant methylation patterns are linked to cancer"},
+           ],
+           },
+          {"title":"DNA Methylation in Lung Cancer",
+           "sections":[
+               {"title":"Commonly observed methylation changes in lung cancer"},
+               {"title":"Genes frequently affected by methylation in lung cancer"},
+           ],
+           },
+          {"title":"Detection of Methylation Patterns",
+           "sections":[
+               {"title":"Techniques used to detect DNA methylation"},
+               {"title":"Challenges in using methylation patterns for early detection"},
+           ],
+           },
+          {"title":"Research on Methylation Patterns in Early Lung Cancer",
+           "sections":[
+               {"title":"Overview of significant studies"},
+               {"title":"Discussion on the feasibility and accuracy"},
+           ],
+           }
+          ]
+      },
+
+     {"title":"Comparative Analysis",
+      "dscp":"miRNA and DNA Methylation Biomarkers",
+      "sections":[
+               {"title":"Comparison in terms of reliability, cost, and accessibility"},
+               {"title":"miRNA vs. DNA Methylation Biomarkers - Potential for combining both markers for improved detection"},
+           ],
+           },
+
+     {"title":"Challenges and Future directions",
+      "sections":[
+          {"title":"Challenges",
+           "dscp":"Technical and clinical challenges in utilizing these biomarkers for cell-free serum assay for early cancer detection",
+           "sections":[
+               {"title":"Challenges in utilizing these biomarkers"},
+               {"title":"Standardization and validation"},
+           ]
+           },
+          {"title":"Future Research",
+           "dscp": "areas needing further development for using circulating miRNA and DNA methylation assay in early stage cancer detection",
+           "sections":[
+               {"title":"Areas needed further investigation"},
+               {"title":"Potential advances in technology and methodology"}
+               ]
+           },
+          ]
+      },
+               
+     {"title":"Conclusion",
+      "sections":[
+          {"title":"Summary of Current Understanding",
+           "dscp":"Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection",
+           },
+          {"title":"Future Outlook",
+           "dscp": "The future role of these biomarkers in clinical practice and Final thoughts on the impact of early detection on lung cancer outcomes"},
+          ]
+      }
+     ]
+ }
+               
+print(json.dumps(outline, indent=2))

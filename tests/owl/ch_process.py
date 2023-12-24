@@ -50,8 +50,8 @@ import signal
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
 import pdfminer
-from SamCoT import SamInnerVoice as Owl
-from SamCoT import LLM as llm
+from OwlCoT import OwlInnerVoice as Owl
+from OwlCoT import LLM as llm
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -119,7 +119,7 @@ class Interactions:
         self.jsonValidator = JSONResponseValidator()
         self.max_tokens = 8000
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
-        self.topic_names = self.owl.topic_names # keep this only in one place, we need to load SamCoT anyway.
+        self.topic_names = self.owl.topic_names # keep this only in one place, we need to load OwlCoT anyway.
         
 
     def read_interaction_history(self, file_path):
@@ -169,7 +169,7 @@ class Interactions:
                       AssistantMessage('')
                       ]
 
-            update = self.llm.ask('', prompt, temp=0.1, max_tokens=125, validator = JSONResponseValidator())
+            update = self.llm.ask('', prompt, temp=0.1, max_tokens=150, validator = JSONResponseValidator())
             if update is not None:
                 if type(update) is dict and 'topic' in update:
                     topic_name = 'Topic: '+update['topic']
@@ -296,10 +296,10 @@ Recent interaction summary:
     def summarize(self, query, response, profile):
       prompt = [
          SystemMessage(profile),
-         UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
+         UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
          AssistantMessage('')
       ]
-      response = self.llm.ask(response, prompt, template = self.template, temp=.1, max_tokens=400)
+      response = self.llm.ask(response, prompt, template = self.template, temp=.1, max_tokens=500)
       if response is not None:
          return '\nWiki Summary:\n'+response+'\n'
       else: return 'wiki lookup and summary failure'

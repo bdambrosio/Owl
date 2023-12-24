@@ -490,7 +490,7 @@ class OwlInnerVoice():
         text = "Topics:\n"
         for key in self.topic_names:
             text += key+': '+self.topic_names[key]+'\n'
-        print(f'format_topics {text}')
+        #print(f'format_topics {text}')
         return text
     
     def confirmation_popup(self, action, argument):
@@ -540,7 +540,7 @@ Doc's input:
              UserMessage(analysis_prompt_text),
              AssistantMessage(' ')
           ]
-          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=150, temp=0.2)
+          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=250, temp=0.2)
           if analysis is not None:
               self.docEs = analysis.strip().split('\n')[0:2] # just use the first 2 pp
           return self.docEs
@@ -559,7 +559,7 @@ Doc's input:
            AssistantMessage(' ')
        ]
        try:
-          analysis = self.llm.ask(lines, prompt, max_tokens=150)
+          analysis = self.llm.ask(lines, prompt, max_tokens=250)
           response = analysis
           self.docEs = response # remember analysis so we only do it at start of session
           return response

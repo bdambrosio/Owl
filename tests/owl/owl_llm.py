@@ -29,16 +29,18 @@ print(subdirs)
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'xaberius' in d.lower())]
 print(models)
 
-templates = {"CodeLlama-34B-instruct-exl2":"chatml",
-             "dolphin-2.5-mixtral-8x7b-6.0bpw-h6-exl2-2": "chatml",
+templates = {"OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
+             "CodeLlama-34B-instruct-exl2":"chatml",
+             "dolphin-2.5-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
              "platypus2-70b-instruct-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "ShiningValiant-4bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
-             "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"",
+             "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
+             "Mixtral-8x7b-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
              "Synthia-MoE-v3-Mixtral-8x7B-6.0bpw-h6-exl2-2":"synthia"
              }
 
@@ -67,18 +69,26 @@ while model_number < 0 or model_number > len(models) -1:
     except:
         print(f'Enter a number between 0 and {len(models)-1}')
 
+model_name=models[model_number]
 
 #if 'dolphin' in models[model_number]:
 #    cache = ExLlamaV2Cache(model, max_seq_len=8192)
 config = ExLlamaV2Config()
 config.scale_alpha_value=1.0
-config.model_dir = models_dir+models[model_number]
+config.model_dir = models_dir+model_name
 config.prepare()
 
 model = ExLlamaV2(config)
-print("Loading model: " + models[model_number])
-model.load([16, 20])
 
+print(f"Loading model: {model_name}")
+if 'tulu' in model_name:
+    model.load([19, 22])
+elif 'ixtral' in model_name:
+    print(f' mixtral load')
+    model.load([18, 23])
+else:
+    model.load([22, 22])
+    
 tokenizer = ExLlamaV2Tokenizer(config)
 
 json_config = None

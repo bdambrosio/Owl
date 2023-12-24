@@ -69,19 +69,19 @@ def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port
     if choice_set:
         server_message['choice_set']=choice_set
     if stop:
-        server_message['eos']=stop
+        stop=[stop]
     else:
         stop = []
-        if conv.stop_token_ids:
-            stop = conv.stop_token_ids
-        if conv.stop_str:
-            stop = stop+[conv.stop_str]
-        if len(stop) > 0:
-            server_message['eos'] = stop
+    if conv.stop_token_ids:
+        stop = stop+conv.stop_token_ids
+    if conv.stop_str:
+        stop = stop+[conv.stop_str]
+    if len(stop) > 0:
+        server_message['eos'] = stop
     if stop_on_json:
         server_message['stop_on_json']=stop_on_json
 
-    response = requests.post('http://127.0.0.1:5004/', json=server_message, stream=True, timeout=20)
+    response = requests.post('http://127.0.0.1:5004/', json=server_message, stream=True, timeout=60)
     if response.status_code == 200:
         # Read and print the streaming content
         response_text = ''
