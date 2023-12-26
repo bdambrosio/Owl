@@ -81,7 +81,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
 memory = VolatileMemory()
 llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 directory = './arxiv/'
 # Set a directory to store downloaded papers
 papers_dir = os.path.join(os.curdir, "arxiv", "papers")
@@ -200,7 +200,7 @@ def search_sections(query, top_k=20):
     # faiss_search
     embeds_np = np.array([query_embed], dtype=np.float32)
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
-    print(f'ss ids {ids}, scores {scores}')
+    #print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
     synopses = []
     for id in ids[0]:
@@ -212,7 +212,7 @@ def search_sections(query, top_k=20):
             paper_row = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']].iloc[0]
             article_title = paper_row['title']
             synopses.append([article_title, text])
-            print(f'{article_title} {len(text)}')
+            #print(f'{article_title} {len(text)}')
     return synopses
 
 def convert_title_to_unix_filename(title):
@@ -301,7 +301,7 @@ def embedding_request(text):
     output = embedding_model(**inputs)
     # take the first token in the batch as the embedding
     embedding = output.last_hidden_state[0, 0, :]
-    print(f'embedding_request response shape{embedding.shape}')
+    #print(f'embedding_request response shape{embedding.shape}')
     return embedding.detach().numpy()
 
 # Function to recursively extract string values from nested JSON
@@ -326,13 +326,13 @@ def extract_words_from_json(json_data):
     return words
 
 def extract_keywords(text):
-    print(f' extract keywords in {text}')
+    #print(f' extract keywords in {text}')
     keywords = []
     for word in text:
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
         if zipf < 34.0 and word not in keywords:
             keywords.append(word)
-    print(f' extract keywords out {keywords}')
+    #print(f' extract keywords out {keywords}')
     return keywords
 
 def plan_search(web=False):
@@ -730,7 +730,7 @@ def search(query, web=False):
     i = 0
     next_offset = 0
     total = 999
-    query = cot.confirmation_popup("Search ARXIV using this query?", query )
+    #query = cot.confirmation_popup("Search ARXIV using this query?", query )
     while web and next_offset < total:
         results, total, next_offset = get_articles(query, next_offset)
         i+=1
@@ -742,77 +742,12 @@ def search(query, web=False):
         index_paper(paper)
 
     # arxiv search over, now search faiss
-    paper_summaries = search_sections(query, top_k=24)
-    print(f'found {len(paper_summaries)} sections')
-    query = cot.confirmation_popup(f"Continue? found {len(paper_summaries)} sections", query)
-    if query is None or not query or len(query)==0:
-        return
-    print("Generating overall report")
-    messages=[SystemMessage("You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers"),
-              UserMessage(f"""Write a detailed and comprehensive research survey of these scientific papers with respect to this query description:
-
-<QUERY>
-{query}
-</QUERY>
-
-The survey should be about 1800 words in length. The goal is to present the integrated consensus on the query, capturing the overall argument along with essential statements, methods, observations, inferences, hypotheses, and conclusions. 
-Also, create a list of all key points in the papers, including all significant statements, methods, observations, inferences, hypotheses, and conclusions that support the core consensus described. 
-
-Summaries:
-{paper_summaries}
-
-Please ensure the synopsis provides depth while removing redundant or superflous detail, ensuring that no critical aspect of the papers argument, observations, methods, findings, or conclusions is included in the list of key points.
-End your survey response as follows:
-
-</SURVEY>
-"""),
-              AssistantMessage("<SURVEY>")
-              ]
-    response = llm.ask('', messages, client = openAIClient, max_tokens=1800, template=OPENAI_MODEL4, temp=0.1, eos='</SURVEY>')
-    #response = llm.ask('', messages, template=OS_MODEL, max_tokens=1200, temp=0.1)
-    end_idx = response.rfind('</SURVEY>')
-    if end_idx < 0:
-        end_idx = len(response)
-    return(response[:end_idx-1])
-
-class Conversation:
-    def __init__(self):
-        self.conversation_history = []
-
-    def add_message(self, role, content):
-        message = {"role": role, "content": content}
-        self.conversation_history.append(message)
-
-    def display_conversation(self, detailed=False):
-        role_to_color = {
-            "system": "red",
-            "user": "green",
-            "assistant": "blue",
-            "function": "magenta",
-        }
-        for message in self.conversation_history:
-            print(
-                colored(
-                    f"{message['role']}: {message['content']}\n\n",
-                    role_to_color[message["role"]],
-                )
-            )
-
-
-# Start with a system message
-paper_system_message = """You are arXivGPT, a helpful assistant pulls academic papers to answer user questions.
-You summarize the papers clearly so the customer can decide which to read to answer their question.
-You always provide the article_url and title so the user can understand the name of the paper and click through to access it.
-Begin!"""
-#paper_conversation = Conversation()
-#paper_conversation.add_message("system", paper_system_message)
-
-# Test that the search is working
-#result_output = get_articles("ppo reinforcement learning")
-#print(result_output[0])
-
-
-#chat_test_response = summarize_text("PPO reinforcement learning sequence generation")
+    paper_summaries = search_sections(query, top_k=20)
+    #print(f'found {len(paper_summaries)} sections')
+    #query = cot.confirmation_popup(f"Continue? found {len(paper_summaries)} sections", query)
+    #if query is None or not query or len(query)==0:
+    #    return paper_summaries
+    return paper_summaries
 if __name__ == '__main__':
     #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
     #search("miRNA vs. DNA Methylation assay cancer detection", web=True)
@@ -823,7 +758,6 @@ if __name__ == '__main__':
 
     """
 write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection
-
 
 
 Creating a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early-stage lung cancer detection requires a thorough exploration of various scientific studies and data. Here's an overview of how such a survey might be structured and the key points it would likely cover:
@@ -1034,4 +968,24 @@ This outline provides a roadmap for a detailed research survey. To create the ac
      ]
  }
                
-print(json.dumps(outline, indent=2))
+    extract_prompt="""
+You will generate increasingly concise, entity-dense summaries of the above. Repeat the following 2 steps 3 times. 
+Step 1. Identify 1-3 informative Entities (";" delimited) from the Article which are missing from the previously generated summary. 
+Step 2. Write a new, denser summary of identical length which covers every entity and detail from the previous summary plus the Missing Entities. 
+A Missing Entity is: 
+ - Relevant to the main story; 
+ - Descriptive yet concise (5 words or fewer);
+ - not in the previous summary; 
+ - present in the Article; 
+ - located anywhere in the Article. 
+
+Guidelines: 
+ - The first summary should be long (4-5 sentences, ~80 words) yet highly non-specific, containing little information beyond the entities marked as missing. Use overly verbose language and fillers (e.g., "the  article discusses") to reach ~80 words;
+ - Make every word count : re-write the previous summary to improve flow and make space for additional entities.
+ - Make space with fusion, compression, and removal of uninformative phrases like "the article discusses".
+ - The summaries should become highly dense and concise yet self-contained, e.g., easily understood without the Article.
+ - Missing entities can appear anywhere in the new summary.
+ - Never drop entities fr om the previous summary. If space cannot be made, add fewer new entities. Remember, use the exact same number of words f or each summar y. 
+ - Answer in JSON. The JSON should be a list (length 5) of dictionaries whose keys are "Missing_Entities" and " Denser_Summary"
+"""
+

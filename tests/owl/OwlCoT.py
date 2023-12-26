@@ -1113,7 +1113,9 @@ User Input:
            wakeup_messages += f' - is llm service started?\n'
        else:
            eos = self.llm.conv_template.sep
-           idx = response.find(eos)
+           if type(eos) is str:
+               idx = response.find(eos)
+           else: idx = -1
            if idx > 0:
                response = response[:idx]
            wakeup_messages += f'{response}\n'

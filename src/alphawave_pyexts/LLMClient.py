@@ -81,7 +81,7 @@ def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port
     if stop_on_json:
         server_message['stop_on_json']=stop_on_json
 
-    response = requests.post('http://127.0.0.1:5004/', json=server_message, stream=True, timeout=60)
+    response = requests.post('http://127.0.0.1:5004/', json=server_message, stream=True)
     if response.status_code == 200:
         # Read and print the streaming content
         response_text = ''
