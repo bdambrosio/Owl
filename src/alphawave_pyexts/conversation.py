@@ -135,9 +135,13 @@ class Conversation:
             ret = ''
             if len(self.system) > 0 and include_system:
                 ret = self.system + self.sep
-            for role, message in self.messages:
+            for n, (role, message) in enumerate(self.messages):
                 if message:
-                    ret += role + "\n" + message + self.sep
+                    # should add check to make sure role is asst!
+                    if n < len(self.messages)-1: # text in last message is prompt, not complete message!
+                        ret += role + "\n" + message + self.sep
+                    else:
+                        ret += role + "\n" + message
                 else:
                     ret += role + "\n"
             return ret

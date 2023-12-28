@@ -202,7 +202,7 @@ def search_sections(query, top_k=20):
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
     #print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
-    synopses = []
+    item_ids=[]; synopses = []
     for id in ids[0]:
         section_library_row = section_library_df[section_library_df['faiss_id'] == id]
         #print section text
@@ -211,9 +211,10 @@ def search_sections(query, top_k=20):
             text = section_row['synopsis']
             paper_row = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']].iloc[0]
             article_title = paper_row['title']
+            item_ids.append(id)
             synopses.append([article_title, text])
             #print(f'{article_title} {len(text)}')
-    return synopses
+    return item_ids, synopses
 
 def convert_title_to_unix_filename(title):
     filename = title.replace(' ', '_')
@@ -742,12 +743,12 @@ def search(query, web=False):
         index_paper(paper)
 
     # arxiv search over, now search faiss
-    paper_summaries = search_sections(query, top_k=20)
+    ids, paper_summaries = search_sections(query, top_k=20)
     #print(f'found {len(paper_summaries)} sections')
     #query = cot.confirmation_popup(f"Continue? found {len(paper_summaries)} sections", query)
     #if query is None or not query or len(query)==0:
     #    return paper_summaries
-    return paper_summaries
+    return ids, paper_summaries
 if __name__ == '__main__':
     #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
     #search("miRNA vs. DNA Methylation assay cancer detection", web=True)

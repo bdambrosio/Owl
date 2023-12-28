@@ -190,7 +190,7 @@ TextString:
       #print(f'ask {client}, {template}') 
       options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
-                                        stop=eos, stop_on_json=stop_on_json)
+                                        stop=eos, stop_on_json=stop_on_json, max_input_tokens=24000)
       try:
           prompt = Prompt(prompt_msgs)
           #print(f'ask prompt {prompt_msgs}')
@@ -200,7 +200,7 @@ TextString:
           #print(f'\nask {type(response)}\n{response}')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
-              print(f'\nask fail, response not dict or status not success')
+              print(f'\nask fail, response not dict or status not success {template} {max_tokens}\n {response}')
               return None
           # check if expecting json or any other special form
           validation = None

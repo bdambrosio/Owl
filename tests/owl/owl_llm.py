@@ -31,7 +31,7 @@ print(models)
 
 templates = {"OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "CodeLlama-34B-instruct-exl2":"chatml",
-             "dolphin-2.5-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
+             "dolphin-2.6-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
              "platypus2-70b-instruct-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
