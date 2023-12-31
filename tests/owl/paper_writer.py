@@ -38,15 +38,21 @@ from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave_pyexts import utilityV2 as ut
 from alphawave_pyexts import LLMClient as lc
-from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtGui import QFont, QKeySequence
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec, QRect
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox
+from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
+from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
+import signal
 from OwlCoT import LLM, ListDialog, generate_faiss_id
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
-from Planner import Planner
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
+from Planner import Planner
 
 # startup AI resources
 
@@ -74,7 +80,83 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
 memory = VolatileMemory()
 llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
-    
+
+pl = Planner(s2.ui, s2.cot)
+
+class PWUI(QWidget):
+    def __init__(self, rows, config_json):
+        super().__init__()
+        self.config = {}
+        self.parent_config = config_json # Dictionary in calling_app space to store combo box references
+        self.initUI(rows, config_json)
+
+    def initUI(self, rows, result_json):
+        layout = QVBoxLayout()
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QtGui.QColor("#202020"))  # Use any hex color code
+        self.setPalette(palette)
+        self.codec = QTextCodec.codecForName("UTF-8")
+        self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
+
+        for row in rows:
+            row_layout = QHBoxLayout()
+
+            # Label for the row
+            label = QLabel(row)
+            row_layout.addWidget(label)
+
+            # Yes/No ComboBox
+            yes_no_combo_box = QComboBox()
+            yes_no_combo_box.addItems(["Yes", "No"])
+            row_layout.addWidget(yes_no_combo_box)
+
+            # Model ComboBox
+            model_combo_box = QComboBox()
+            model_combo_box.addItems(["llm", "gpt3", "gpt4"])
+            row_layout.addWidget(model_combo_box)
+
+            # Store combo boxes in the dictionary with the row label as the key
+            self.config[row] = (yes_no_combo_box, model_combo_box)
+
+            layout.addLayout(row_layout)
+        # Close Button
+        close_button = QPushButton('Close', self)
+        close_button.clicked.connect(self.on_close_clicked)
+        layout.addWidget(close_button)
+        self.setLayout(layout)
+
+        self.setWindowTitle('Research Configuration')
+        self.setGeometry(300, 300, 400, 250)
+        self.show()
+
+    def on_close_clicked(self):
+        """
+        Handles the close button click event. Retrieves values from the combo boxes
+        and then closes the application.
+        """
+        for row_label, (yes_no_combo, model_combo) in self.config.items():
+            yes_no_value = yes_no_combo.currentText()
+            model_value = model_combo.currentText()
+            self.parent_config[row_label] = {'exec':yes_no_value, 'model':model_value}
+        self.close()
+
+    def get_row_values(self, row_label):
+        """
+        Retrieve the values of the combo boxes for a given row label.
+        Parameters:
+        row_label (str): The label of the row.
+        Returns:
+        tuple: A tuple containing the selected values of the Yes/No and Model combo boxes.
+        """
+        if row_label in self.config:
+            yes_no_value = self.config[row_label][0].currentText()
+            model_value = self.config[row_label][1].currentText()
+            return yes_no_value, model_value
+        else:
+            return None
+
+
 import re
 
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
@@ -126,7 +208,7 @@ else:
     except Exception as e:
         print(f'failure to load entity cache, repair or delete\n  {str(e)}')
         sys.exit(-1)
-    print(f"loaded '{entity_cache_filepath}'")
+    print(f"loaded {entity_cache_filepath}")
 
 def entities(paper_title, paper_outline, paper_summaries, ids):
     global entity_cache
@@ -134,16 +216,15 @@ def entities(paper_title, paper_outline, paper_summaries, ids):
     total=len(ids); cached=0
     for id, excerpt in zip(ids, paper_summaries):
         # an 'excerpt' is [title, text]
-        int_id = int(id)
+        int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
         if int_id in entity_cache:
             cached += 1
             items.extend(entity_cache[int_id])
         else:
-            #print(f' excerpt {excerpt}')
             excerpt_items = extract_entities(paper_title, paper_outline, excerpt[0]+'\n'+excerpt[1])
             entity_cache[int_id]=excerpt_items
             items.extend(entity_cache[int_id])
-    print(f'entities total {total}, cached: {cached}')
+    print(f'entities total {total}, in cache: {cached}')
     with open(entity_cache_filepath, 'w') as pf:
         json.dump(entity_cache, pf)
     print(f"wrote {entity_cache_filepath}")
@@ -191,42 +272,33 @@ def entities_to_str(item_list):
     return '\n'.join(item_list)
     
 def rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft):
-    rewrite_prompt=f"""Your current task is to rewrite the draft for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
-The current draft is:
+    missing_entities_prompt=f"""Your current task is to identify important missing entities in the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
+The current DRAFT is:
 <DRAFT>
 {draft}
 </DRAFT>
 
-This draft is located in the:
+This DRAFT is the:
 {section_outline["title"]}
 within: {parent_section_title} 
 {"within: "+heading_1 if heading_1 != parent_section_title else ''}
-section of the paper. 
+The draft should cover the specific topic: {subsection_topic}
 
-The rewrite should cover the specific topic: <SECTION_TOPIC> {subsection_topic} </SECTION_TOPIC>
-Reason step by step to determine the role of this section within the paper, and use that information in writing the new draft. 
-Generate an entity-dense rewrite by following these steps:
-Step 1. Identify 3-5 Missing Entities from the excerpts which are missing from the previously generated text. 
-Step 2. Write a new, denser draft of the same length which covers every Entity and detail from the previous draft plus the Missing Entities.
+A MISSING ENTITY is an ENTITY that is: 
+ - In the ENTITIES list provided earlier;
+ - Highly relevant and specific to the paper title: {paper_title}
+ - Highly relevant to the current draft topic: {subsection_topic}; and role the content is to fill;
+ - missing in the previous draft; 
 
-A Missing Entity is: 
- - In the ENTITIES provided above;
- - present in the Excerpts;
- - Highly relevant to the topic and role the content is to fill;
- - not in the previous draft; 
+Following these steps:
+Step 1. Reason step by step to determine the role of this section within the paper. Do not include your reasoning in your response.
+Step 2. Identify 3-5 MISSING ENTITIES to be added in the rewrite.
+Step 3. Respond with the list of identified MISSING ENTITIES from step 2. List ONLY the selected missing entities, without any explanation or commentary. Your response should end with:
 
-Further Instructions: 
- - Coherence: re-write the previous draft to improve flow and make space for additional entities;
- - Missing entities should appear where best for the flow and coherence in the new draft;
- - Never drop entities from the previous content. If space cannot be made, add fewer new entities. 
- - use the same number of words for each rewrite;
- - ensure the rewrite provides the depth and information from the previous draft. 
- - Your response should list the entities added in the rewrite, followed by the rewrite itself.
-
-end the rewrite as follows:
-</REWRITE>
+</MISSING_ENTITIES>
 """
-    messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 You are writing a paper titled:
 {paper_title}
 The outline for the full paper is:
@@ -250,12 +322,87 @@ The {heading_1} section content up to this point is:
 {heading_1_draft}
 </PRIOR_SECTION_CONTENT>
 
-"""),
+"""
+)
+    short_sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+You are writing a paper titled:
+{paper_title}
+The outline for the full paper is:
+{format_outline(paper_outline)}
+
+The following have been identified as key Entities (key phrases, acronyms, or named-entities) for the paper.  These items may not have been included in the current draft:
+
+<ENTITIES>
+{entities_to_str(keywds)}
+</ENTITIES>
+
+The {heading_1} section content up to this point is:
+
+<PRIOR_SECTION_CONTENT>
+{heading_1_draft}
+</PRIOR_SECTION_CONTENT>
+
+"""
+)
+
+    entity_select_msgs = [short_sysMessage,
+                          UserMessage(missing_entities_prompt),
+                          AssistantMessage("<MISSING_ENTITIES>")
+                          ]
+
+    #response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    #response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.osClient, max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    if response is None or len(response) == 0:
+        return draft
+    me = response
+    end_idx = me.rfind('</MISSING_ENTITIES>')
+    if end_idx < 0:
+        end_idx = len(me)
+        rewrite = me[:end_idx-1]
+    print(f'\nMissing Entities:\n{me}\n')
+    missing_entities = me
+
+    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
+The current DRAFT is:
+
+<DRAFT>
+{draft}
+</DRAFT>
+
+This DRAFT is the:
+{section_outline["title"]}
+within: {parent_section_title} 
+{"within: "+heading_1 if heading_1 != parent_section_title else ''}
+
+Entities (key phrases, acronyms, or names-entities) that are missing in the above draft include:
+
+<MISSING_ENTITIES>
+{missing_entities}
+</MISSING_ENTITIES>
+
+The rewrite should cover the specific topic: {subsection_topic}
+Following these steps:
+Step 1. Reason step by step to determine the role of this section within the paper.
+Step 2. Write a new, denser draft of the same length which covers every Entity and detail from the previous draft as well as the MISSING_ENTITIES listed above.
+
+Further Instructions: 
+ - Coherence: re-write the previous draft to improve flow and make space for additional entities;
+ - Missing entities should appear where best for the flow and coherence in the new draft;
+ - Never drop entities from the previous content. If space cannot be made, add fewer new entities. 
+ - Your goal is information density: use the same number of words as the previous draft, or as few more as needed. Remove or rewrite low-content phrases or sentences to improve conciseness.
+ - Ensure the rewrite provides all the depth and information from the previous draft. 
+ - Your response include ONLY the rewritten draft, without any explanation or commentary.
+
+end the rewrite as follows:
+</REWRITE>
+"""
+    messages=[sysMessage,
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=1.5*subsection_token_length, temp=0.1, eos='</DRAFT>')
-    response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=1.5*subsection_token_length, temp=0.1, eos='</DRAFT>')
+    #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
+    response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -266,7 +413,117 @@ The {heading_1} section content up to this point is:
     print(f'\nRewrite:\n{rewrite}\n')
     return rewrite
 
-def write_paper(paper_outline, section_outline, length=5000, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1=None, heading_1_draft = '', num_rewrites=0):
+plans_filepath = "./arxiv/arxiv_plans.json"
+plans = {}
+
+if os.path.exists(plans_filepath):
+    with open(plans_filepath, 'r') as f:
+        plans = json.load(f)
+        print(f'loaded plans.json')
+else:
+    print(f'initializing plans.json')
+    plans = {}
+    with open(plans_filepath, 'w') as f:
+        plans = json.dump(plans, f)
+
+def plan_search():
+    global plans
+    plan = None
+    if len(plans)> 0:
+        plan_names = list(plans.keys())
+        picker = ListDialog(plan_names)
+        result = picker.exec()
+        if result == QDialog.Accepted:
+            selected_index = picker.selected_index()
+            print(f'Selected Item Index: {selected_index}') 
+            if selected_index != -1:  # -1 means no selection
+                plan_name = plan_names[selected_index]
+                plan = plans[plan_name]
+                print(json.dumps(plan, indent=4))
+                plans[plan['name']] = plan
+                pl.active_plan = plan
+
+    if plan is None:
+        # new plan, didn't select any existing
+        plan = pl.init_plan()
+        plan = pl.analyze(plan)
+        # store new plan in list of search plans
+        plans[plan['name']] = plan
+        with open(plans_filepath, 'w') as f:
+            json.dump(plans,f)
+        print(json.dumps(plan, indent=4))
+        #   {"name":'plannnn_aaa', "dscp":'bbb', "sbar":{"needs":'q\na', "background":'q\na',"observations":'q\na'}
+
+    if plan is None:
+        return
+    return plan
+
+def make_queries_aux(outline, prefix):
+    section_title = plan['outline']['title']
+    report_queries = []
+    if 'sections'  in outline:
+        for section in section:
+            queries = make_queries_aux(section, prefix + '. '+section_title)
+            report_queries.extend(queries)
+    else: # leaf section
+        return [prefix + '.' + section_title]    
+    return report_queries
+        
+def make_search_queries(outline):
+    report_title = outline['title']
+    report_queries = []
+    if 'sections' in outline:
+        for section in outline['sections']:
+            queries = make_queries_aux(section, report_title)
+            report_queries.extend(queries)
+    print(f'\n report queries {report_queries}')
+    return report_queries
+
+def write_report(config, paper_outline=None, section_outline=None, length=400): 
+    #rows = ["Query", "SBAR", "Outline", "WebSearch", "Write", "ReWrite"]
+    query_config = config['Query']
+    query = ""
+    if query_config['exec'] == 'Yes':
+        query = s2.cot.confirmation_popup('Question to report on?', '')
+        if not query:
+            return None
+
+    sbar_config = config['SBAR']
+    if sbar_config['exec'] == 'Yes':
+        plan = plan_search()
+    else:
+        plan = plan_search()
+        
+    outline_config = config['Outline']
+    if outline_config['exec'] == 'Yes':
+        # make outline
+        pl.outline(config, plan)
+        outline = plan['outline']
+        s2.cot.save_workingMemory() # save updated plan
+
+    else:
+        outline = default_outline
+
+    search_config = config['Search']
+    if search_config['exec'] == 'Yes':
+        # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
+        # also need to configure prompt, depth (depth in terms of # articles total or new per section?)
+        queries = make_search_queries(outline)
+        get_articles(queries)
+
+    write_config = config['Write']
+    if write_config['exec'] == 'Yes':
+        if section_outline is None:
+            section_outline = paper_outline
+        # write report! pbly should add length field, # rewrites
+        write_report_aux(config, paper_outline=paper_outline, section_outline=section_outline, length=400)
+    rewrite_config = config['ReWrite'] # not sure, is this just for rewrite of existing?
+    if rewrite_config['exec'] == True:
+        # rewrite draft, section by section, with prior critique input on what's wrong.
+        pass
+
+
+def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1=None, heading_1_draft = '', num_rewrites=0):
     if len(paper_title) == 0 and depth == 0 and 'title' in paper_outline:
         paper_title=paper_outline['title']
     if 'length' in section_outline:
@@ -295,7 +552,8 @@ def write_paper(paper_outline, section_outline, length=5000, inst='', topic='', 
                 heading_1 = subsection['title']
                 heading_1_draft = ''
             print(f"subsection title {subsection['title']}")
-            subsection_text = '\n'+ "  "*depth+parent_section_title+'.'+write_paper(paper_outline=paper_outline,
+            subsection_text = '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
+                                                                                    paper_outline=paper_outline,
                                                                                     section_outline=subsection,
                                                                                     length=subsection_token_length,
                                                                                     inst=subsection_inst,
@@ -321,7 +579,7 @@ def write_paper(paper_outline, section_outline, length=5000, inst='', topic='', 
         # actuall llm call to write this terminal section
         section = section_outline['title']
         query = heading_1+', '+parent_section_title+' '+subsection_topic
-        ids, excerpts = s2.search(query)
+        ids, excerpts = s2.search(query, web=False) # this assumes web searching has been done
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
         subsection_token_length = max(320,length) # no less than a paragraph
         
@@ -361,7 +619,7 @@ First reason step by step to determine the role of the part you are generating w
 then generate the appropriate text, subject to the following guidelines:
 
  - Output ONLY the text, do NOT output your reasoning.
- - Write a concise, detailed text using known fact and the above research excepts, of about {length} tokens in length.
+ - Write a concise, detailed text using known fact and the above research excepts, of about {length} words in length.
  - This section should cover the specific topic: {parent_section_title} - {subsection_topic}
  - You may refer to, but not repeat, prior section content in any text you produce.
  - The section should be about {subsection_token_length} words long. The goal is to present an integrated view of the assigned topic, highlighting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
@@ -373,9 +631,8 @@ End the section as follows:
 """),
               AssistantMessage("<DRAFT>\n")
               ]
-        response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=2*subsection_token_length, temp=0.1, eos='</DRAFT>')
-        #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=3*subsection_token_length, temp=0.1, eos='</DRAFT>')
-        #response = llm.ask('', messages, template=OS_MODEL, max_tokens=1200, temp=0.1)
+        response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
+        #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
         end_idx = response.rfind('</DRAFT>')
         if end_idx < 0:
             end_idx = len(response)
@@ -393,12 +650,12 @@ End the section as follows:
         keywds = entities(paper_title, paper_outline, excerpts, ids)
 
         for i in range(num_rewrites):
-            draft = rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft)
+            draft = rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1, heading_1_draft)
     return draft
 
 
 if __name__ == '__main__':
-    outline = {
+    default_outline = {
         "task":
         """write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.""",
         "title":"Circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.",
@@ -406,27 +663,15 @@ if __name__ == '__main__':
             {"title":"Introduction", "length": 600, "rewrites":1,
              "sections":[
                  {"title":"Overview of Lung Cancer",
-                  "sections":[
-                      {"title":"Prevalence and impact", "rewrites":1},
-                      {"title":"Importance of early detection for improved prognosis"},
-                  ]
-                  },
+                  "dscp":"Prevalence and impact and importance of early detection for improved prognosis"},
                  {"title":"Biomarkers in Cancer Detection", "rewrites": 2,
-                  "sections":[
-                      {"title":"Definition and role of biomarkers in cancer"},
-                      {"title":"Traditional biomarkers used in lung cancer", "length":400},
-                  ],
-                  },
+                  "dscp":"Definition and role of biomarkers in cancer. Traditional biomarkers used in lung cancer"},
                  {"title":"Emerging Biomarkers: miRNA and DNA Methylation", "rewrites":2,
-                  "sections":[
-                      {"title":"Explanation of miRNA and DNA methylation"},
-                      {"title":"Potential advantages over traditional biomarkers"},
-                  ],
-                  }
+                  "dscp":"Explanation of miRNA and DNA methylation. Potential advantages over traditional biomarkers"},
              ]
              },
-            
-            {"title":"Circulating miRNA as Biomarkers", "length":2000,"rewrites":2,
+                 
+            {"title":"Circulating miRNA as Biomarkers", "length":1000,"rewrites":2,
              "sections":[
                  {"title":"Biological Role of miRNAs",
                   "sections":[
@@ -437,25 +682,17 @@ if __name__ == '__main__':
                  {"title":"miRNAs in Lung Cancer",
                   "sections":[
                       {"title":"Studies showing miRNA expression profiles in lung cancer patients"},
-                      {"title":"Specific miRNAs frequently dysregulated in lung cancer", "length":300, "rewrites":2},
+                      {"title":"Specific miRNAs frequently dysregulated in lung cancer", "length":300},
                   ],
                   },
                  {"title":"Circulating miRNAs",
-                  "sections":[
-                      {"title":"Explanation of circulating miRNAs in blood and other bodily fluids"},
-                      {"title":"Advantages as non-invasive biomarkers"},
-                  ],
-                  },
+                  "dscp":"Circulating miRNAs in blood and other bodily fluids. Advantages as non-invasive biomarkers"},
                  {"title":"Studies on miRNAs in Early Lung Cancer Detection",
-                  "sections":[
-                      {"title":"Summary of key research findings", "length":300, "rewrites":2},
-                      {"title":"Analysis of sensitivity, specificity, and overall effectiveness"},
-                  ],
-                  },
+                  "dscp":"Summary of key research findings. Analysis of sensitivity, specificity, and overall effectiveness"}
              ]
              },
             
-            {"title":"DNA Methylation Patterns as Biomarkers", "length":500,"rewrites":2,
+            {"title":"DNA Methylation Patterns as Biomarkers", "length":1000,"rewrites":2,
              "sections":[
                  {"title":"Basics of DNA Methylation",
                   "sections":[
@@ -469,18 +706,18 @@ if __name__ == '__main__':
                       {"title":"Genes frequently affected by methylation in lung cancer"},
                   ],
                   },
+                 {"title":"Research on DNA Methylation Patterns in Early Lung Cancer",
+                  "sections":[
+                      {"title":"Overview of significant studies"},
+                      {"title":"Discussion on the feasibility and accuracy"},
+                  ],
+                  },
                  {"title":"Detection of Methylation Patterns",
                   "sections":[
                       {"title":"Techniques used to detect DNA methylation"},
                       {"title":"Challenges in using methylation patterns for early detection"},
                   ],
                   },
-                 {"title":"Research on Methylation Patterns in Early Lung Cancer",
-                  "sections":[
-                      {"title":"Overview of significant studies"},
-                      {"title":"Discussion on the feasibility and accuracy"},
-                  ],
-                  }
              ]
              },
             
@@ -493,8 +730,11 @@ if __name__ == '__main__':
              ],
              },
             
-            {"title":"Challenges, Opportunities,  and Future directions", "length":1000, "rewrites":2,
+            {"title":"Near-term Opportunities, Challenges and Future directions", "length":1200, "rewrites":2,
              "sections":[
+                 {"title":"Near-term Opportunites for combined miRNA / DNA methylation as biomarkers", "length":800,
+                  "dscp":"near-term opportunities in utilizing these biomarkers for blood (cell free, tumor-cell, and vesicle) assay of early lung cancer",
+                  },
                  {"title":"Challenges",
                   "dscp":"Technical and clinical challenges in utilizing these biomarkers for cell-free serum assay for early cancer detection",
                   "sections":[
@@ -517,17 +757,32 @@ if __name__ == '__main__':
                  {"title":"Summary of Current Understanding",
                   "dscp":"Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection",
                   },
-                 {"title":"Future Outlook",
-                  "dscp": "The future role of these biomarkers in clinical practice and Final thoughts on the impact of early detection on lung cancer outcomes"},
+                 {"title":"Prediction",
+                  "dscp": "Prediction for when assay of circulating miRNA and DNA methylation will appear in clinical practise"},
              ]
              }
         ]
     }
     
     #print(format_outline(outline))
-    paper = write_paper(outline, section_outline=outline)
-    print(f'\n\n\n\n{paper}')
-    with open('paper.txt', 'w') as pf:
-        pf.write(paper)
+    config = {}
+    app = QApplication(sys.argv)
+    rows = ["Query", "SBAR", "Outline", "Search", "Write", "ReWrite"]
+    ex = PWUI(rows, config)
+
+    # Example usage to get combo box values for "Row 2"
+
+    app.exec_()
+    print(config)
+    try:
+        s2.cot.ui.display_response('calling paper_writer')
+        paper = write_report(config, paper_outline=default_outline, section_outline=default_outline)
+    except Exception as e:
+        traceback.print_exc()
+        print(str(e))
+        sys.exit(-1)
+    #print(f'\n\n\n\n{paper}')
+    #with open('paper.txt', 'w') as pf:
+    #    pf.write(paper)
     #print(json.dumps(outline, indent=2))
     

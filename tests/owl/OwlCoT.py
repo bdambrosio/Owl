@@ -139,16 +139,16 @@ TextString:
       input_tokens = len(self.tokenizer.encode(item)) 
       response = self.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
       if type(response) is dict:
-          print(f'gpt4 repair returned dict {answer}')
+          print(f'gpt repair returned dict {answer}')
           return responses
       else:
           answer = {}
           try:
               answer = json.loads(response.strip())
           except:
-              print(f'gpt4 repair loads fail {response}')
+              print(f'gpt repair loads fail {response}')
               return None
-          print(f'gpt4 loads success {answer}')
+          print(f'gpt loads success {answer}')
           return answer
 
    def ask(self, input, prompt_msgs, client=None, template=None, temp=None, max_tokens=None, top_p=None, eos=None, stop_on_json=False, validator=DefaultResponseValidator()):
@@ -427,6 +427,7 @@ class OwlInnerVoice():
           with open('OwlDocHash.pkl', 'rb') as f:
              data = pickle.load(f)
              self.docHash = data['docHash']
+             print(f'loaded {len(self.docHash.keys())} items from OwlDockHash.pkl')
              docHash_loaded = True
        except Exception as e:
           # no docHash or load failed, reinitialize

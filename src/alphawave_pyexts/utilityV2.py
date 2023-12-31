@@ -103,8 +103,6 @@ def run_wave (client, input, prompt, prompt_options, memory, functions, tokenize
     fork = MemoryFork(memory)
     for key, value in input.items():
       fork.set(key, value)
-    if prompt_options.stop_on_json:
-        print('util stop_on_json')
     wave = AlphaWave(client=client,
                      prompt=prompt,
                      prompt_options=prompt_options,

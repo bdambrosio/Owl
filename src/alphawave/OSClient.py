@@ -81,8 +81,6 @@ class OSClient(PromptCompletionClient):
                                               stop_on_json = argoptions['stop_on_json'],
                                               choice_set = argoptions['choice_set']
                                               )
-        if options.stop_on_json:
-            print('OSClient stop_on_json')
         startTime = time.time()
         max_input_tokens = 1500
         if hasattr(options, 'max_input_tokens') and getattr(options, 'max_input_tokens') is not None:

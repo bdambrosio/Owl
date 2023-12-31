@@ -1,8 +1,6 @@
-import os
+import os, json, math, time, requests
 import traceback
-import time
 import requests
-import json
 import nyt
 import ipinfo
 import random
@@ -666,8 +664,8 @@ TextString:
        url = self.resolve_arg(arg0)
        print(f' requesting url from server {url}')
        try:
-          print(f"http://127.0.0.1:5005/retrieve?title={self.planner.active_plan['dscp']}&url={arg0}")
-          response = requests.get(f"http://127.0.0.1:5005/retrieve/?title={self.planner.active_plan['dscp']}&url={arg0}")
+          print(f"http://127.0.0.1:5005/retrieve?title={self.planner.active_plan['task']}&url={arg0}")
+          response = requests.get(f"http://127.0.0.1:5005/retrieve/?title={self.planner.active_plan['task']}&url={arg0}")
           data = response.json()
        except Exception as e:
           print(f'request failed {str(e)}')
@@ -842,7 +840,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
    def make_plan(self, name, task_dscp):
       plan = {}
       plan['name'] = name
-      plan['dscp'] = task_dscp
+      plan['task'] = task_dscp
       plan['sbar'] = {}
       plan['steps'] = {}
       return plan
@@ -863,7 +861,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
    def validate_plan(self, plan):
       if plan is None or type(plan) != dict:
          return False
-      if 'name' not in plan or 'dscp' not in plan:
+      if 'name' not in plan or 'task' not in plan:
          return False
       return True
    
@@ -912,13 +910,13 @@ Your conversation style is warm, gentle, humble, and engaging. """
           result = self.select_plan()
           if not result: return None
           else:
-             next = self.owlCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['dscp'])
+             next = self.owlCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['task'])
              if not next: return
        if 'sbar' not in self.active_plan or self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
-          result = self.analyze()
+          result = self.analyze(self.active_plan,)
           if result is None: return None
           self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.owlCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['dscp'])
+          next = self.owlCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['task'])
           if not next: return
        if 'steps' not in self.active_plan or self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
           print(f'calling planner')
@@ -929,7 +927,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
              print(f"planner didn't add 'steps' to plan!")
              return
           self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.owlCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['dscp'])
+          next = self.owlCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['task'])
           if not next: return
        print(f"run plan steps: {len(self.active_plan['steps'])}")
        for step in self.active_plan['steps']:
@@ -940,12 +938,15 @@ Your conversation style is warm, gentle, humble, and engaging. """
           print(f'run_plan step confirmed {next}')
           self.interpreter.do_item(step)
           
-   def analyze(self):
-      prefix = self.active_plan['name']
-      task_dscp = self.active_plan['dscp']
-      if 'sbar' not in self.active_plan:
-         self.active_plan['sbar'] = {}
-      sbar = self.active_plan['sbar']
+   def analyze(self, plan, model=None):
+      #not in args above because may not be available at def time
+      if model is None:
+         model = self.llm.template
+      prefix = plan['name']
+      task_dscp = plan['task']
+      if 'sbar' not in plan:
+         plan['sbar'] = {}
+      sbar = plan['sbar']
       # Loop for obtaining user responses
       # Generate interview questions for the remaining steps using GPT-4
       interview_instructions = [
@@ -958,21 +959,21 @@ Your conversation style is warm, gentle, humble, and engaging. """
       for step, instruction in interview_instructions:
          messages.append(UserMessage(instruction))
          if step != 'observations':
-            user_prompt = self.llm.ask('', messages, temp = 0.05, max_tokens=100)
+            user_prompt = self.llm.ask('', messages, template=model, temp = 0.05, max_tokens=100)
             if user_prompt is not None:
                user_prompt = user_prompt.split('\n')[0]
             print(f"\nAI : {step}, {user_prompt}")
             past = ''
-            if sbar is not None and sbar == dict and step in self.active_plan['sbar']:
-               past = self.active_plan_state.sbar[step] # prime user response with last time
+            if sbar is not None and sbar == dict and step in plan['sbar']:
+               past = plan_state.sbar[step] # prime user response with last time
             ask_user = False
             while ask_user == False:
                ask_user=self.owlCoT.confirmation_popup(user_prompt, past)
-            sbar[step] = user_prompt+'\n'+ask_user
+            sbar[step] = {'q':user_prompt, 'a':ask_user}
             messages.append(AssistantMessage(user_prompt))
             messages.append(UserMessage(ask_user))
          else: # closing AI thoughts and user feedback. No need to add to messages because no more iterations
-            observations = self.llm.ask('', messages, max_tokens=150,temp = 0.05)
+            observations = self.llm.ask('', messages, template=model, max_tokens=150,temp = 0.05)
             if observations is not None:
                observations = observations.split('\n')[0]
             sbar['observations']=observations
@@ -980,7 +981,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
             user_response = False
             while user_response == False:
                user_response = self.owlCoT.confirmation_popup(observations, '')
-            sbar['observations']=observations+'\n'+user_response
+            sbar['observations']={'q':observations,'a':user_response}
             # don't need to add a message since we're done with this conversation thread!
             print(f"Requirements \n{sbar}")
          try:
@@ -988,15 +989,82 @@ Your conversation style is warm, gentle, humble, and engaging. """
                json.dump(sbar, pf)
          except:
             traceback.print_exc()
-         self.active_plan['sbar'] = sbar
-      return self.active_plan
+         plan['sbar'] = sbar
+      return plan
 
-   def sbar_as_text(self):
-       return f"\nTASK:\n{self.sbar['needs']}\nBackground:\n{self.sbar['background']}\nReview:\n{self.sbar['observations']}\nEND TASK\n"
+   def outline(self, config, plan):
+      # an 'outline' is a plan for a writing task!
+      # 'config' is a paper_writer configuration for this writing task
+      if 'length' in config:
+         length = config['length']
+      else:
+         length = 1200
 
+      number_top_sections = max(1, int(length/2000 + 0.5))
+      depth = max(1, int(math.log(length/2)-6))
+      
+      outline_syntax =\
+"""Respond ONLY with the outline, in JSON format:
 
+{"title": '<report title>', "sections":[ {"title":"<title of section 1>", "dscp":'<description of content of section 1>', "sections":[{"title":'<title of subsection 1 of section 1>', "dscp":'<description of content of subsection 1>'}, {"title":'<title of subsection 2 section 1>', "dscp":'<description of content of subsection 2>' } ] }, {"title":"<title of section 2>",... }
+"""
+
+      outline_prompt =\
+f"""
+Write an outline for a research report on: {plan['task']}.
+Details on the requested report include:
+
+<DETAILS>
+{json.dumps(plan['sbar'], indent=2)}
+</DETAILS>
+
+The outline should have about {number_top_sections} and a depth of {depth}.
+Respond ONLY with the outline, in JSON format:
+
+{outline_syntax}
+"""
+      revision_prompt=\
+f"""
+<PRIOR_OUTLINE>
+{{{{$outline}}}}
+</PRIOR_OUTLINE>
+
+<CRITIQUE>
+{{{{$critique}}}}
+</CRITIQUE>
+
+Reason step by step to analyze and improve the above outline with respect to the above Critique. 
+
+{outline_syntax}
+"""
+      user_satisfied = False
+      user_critique = ''
+      first_time = True
+      prior_outline = ''
+      while not user_satisfied:
+         messages = [SystemMessage(outline_prompt),
+                     AssistantMessage('')
+                     ]
+         if not first_time:
+            messages.append(UserMessage(revision_prompt))
+         #print(f'******* task state prompt:\n {gpt_message}')
+         prior_outline = self.llm.ask({'outline':prior_outline, 'critique':user_critique}, messages, template='gpt-4',max_tokens=500, temp=0.1, validator=JSONResponseValidator())
+         self.ui.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+         user_critique = self.owlCoT.confirmation_popup('Critique', '')
+         print(f'user_critique {user_critique}')
+         if user_critique != False and len(user_critique) <4:
+            user_satisfied = True
+            print("*******user satisfied with outline")
+            plan['outline'] = prior_outline
+            break
+         else:
+            print('***** user not satisfield, retrying')
+         
+         first_time = False
+
+      return plan
+      
    def plan(self):
-       
        if 'steps' not in self.active_plan:
           self.active_plan['steps'] = {}
        plan_prompt=\

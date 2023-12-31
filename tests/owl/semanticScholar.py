@@ -1,4 +1,4 @@
-import os, sys, logging, glob
+import os, sys, logging, glob, time
 import pandas as pd
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
@@ -28,6 +28,7 @@ from termcolor import colored
 from promptrix.VolatileMemory import VolatileMemory
 from promptrix.FunctionRegistry import FunctionRegistry
 from promptrix.Prompt import Prompt
+from promptrix.GPT3Tokenizer import GPT3Tokenizer
 from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
@@ -44,9 +45,10 @@ from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QLis
 from OwlCoT import LLM, ListDialog, generate_faiss_id
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
-from Planner import Planner
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
+
+tokenizer = GPT3Tokenizer()
 
 # startup AI resources
 
@@ -67,11 +69,10 @@ import Owl as owl
 ui = owl.window
 ui.reflect=False # don't execute reflection loop, we're just using the UI
 cot = ui.owlCoT
-pl = Planner(ui, cot)
  
 
-OPENAI_MODEL3 = "gpt-3.5-turbo-16k"
-OPENAI_MODEL4 = "gpt-4-1106-preview"
+GPT3 = "gpt-3.5-turbo-16k"
+GPT4 = "gpt-4-1106-preview"
 #OPENAI_MODEL = "gpt-4-32k"
 #EMBEDDING_MODEL = "text-embedding-ada-002"
 ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
@@ -86,8 +87,6 @@ directory = './arxiv/'
 # Set a directory to store downloaded papers
 papers_dir = os.path.join(os.curdir, "arxiv", "papers")
 paper_library_filepath = "./arxiv/paper_library.parquet"
-plans_filepath = "./arxiv/arxiv_plans.json"
-plans = {}
 
 section_index_filepath = "./arxiv/section_index_w_idmap.faiss"
 section_indexIDMap = None
@@ -151,17 +150,6 @@ else:
     #paper_library_df_fixup()
     print('loaded paper_library_df')
     
-plans = {}
-if os.path.exists(plans_filepath):
-    with open(plans_filepath, 'r') as f:
-        plans = json.load(f)
-        print(f'loaded plans.json')
-else:
-    print(f'initializing plans.json')
-    plans = {}
-    with open(plans_filepath, 'w') as f:
-        plans = json.dump(plans, f)
-
 if not os.path.exists(paper_index_filepath):
     paper_indexIDMap = faiss.IndexIDMap(faiss.IndexFlatL2(768))
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
@@ -254,20 +242,41 @@ def latest_google_pdf():
     print(f"secs old: {age}, size: {size}, name: {path}")
     return path, age, size
 
-
+def wait_for_chrome(url, temp_filepath):
+    found = False; time_left = 20
+    while time_left >0:
+        path, age, size = latest_google_pdf()
+        print(f'age {age}, size {size}, path {path}')
+        if age < 2 and size > 1000:
+            # now wait for completion - .5 sec with no change in size,we're done!
+            prev_size = 0
+            print(f'\nwaiting for size to stablize\n')
+            while prev_size < size:
+                time.sleep(.5)
+                prev_size = size
+                path, age, size = latest_google_pdf()
+            os.rename(path, temp_filepath)
+            print(f'\nGot it!\n')
+            return True
+        time.sleep(.5)
+        time_left = time_left-0.5
+    return False
+        
 def download_pdf_wbb(url, title):
     global papers_dir
     # Send GET request to fetch PDF data
     print(f' fetching url {url}')
     webbrowser.open(url)
-    conf = cot.confirmation_popup(title, 'Saved?' )
+    temp_filepath = os.path.join(papers_dir,'temp.pdf')
+    conf = wait_for_chrome(url, temp_filepath)
+    #cot.confirmation_popup(title, 'Saved?' )
     if conf:
         filename = convert_title_to_unix_filename(title)
         arxiv_filepath = os.path.join(papers_dir, filename)
-        os.rename(os.path.join(papers_dir,'temp.pdf'), arxiv_filepath)
+        os.rename(temp_filepath, arxiv_filepath)
         return arxiv_filepath
     else:
-        print(f'paper download attempt failed {response.status_code}')
+        print(f'paper download attempt failed ')
     return None
         
 def download_pdf_5005(url, title):
@@ -276,7 +285,7 @@ def download_pdf_5005(url, title):
     print(f' fetching url {url}')
     
     pdf_data = None
-    response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=20)
+    response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=10)
     if response.status_code == 200:
         info = response.json()
         print(f'\nretrieve response {info};')
@@ -319,6 +328,55 @@ def extract_string_values(data):
         string_values.append(data)
     return string_values
 
+import re
+
+def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
+    """
+    Extracts acronyms from the given text using the specified regular expression pattern.
+    Parameters:
+    text (str): The text from which to extract acronyms.
+    pattern (str): The regular expression pattern to use for extraction.
+    Returns:
+    list: A list of extracted acronyms.
+    """
+    return re.findall(pattern, text)
+
+def extract_entities(paper_title, summary):
+    kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details.
+You are reading a paper titled:
+{paper_title}
+"""),
+                  UserMessage(f"""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {paper_title} from the following research excerpt.
+
+Respond using the following format:
+{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...] }}
+
+<RESEARCH EXCERPT>
+{summary}
+</RESEARCH EXCERPT>
+
+Remember, respond in JSON using the following format:
+{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...]}}
+"""),
+                  AssistantMessage("")
+              ]
+    
+    #response_json = llm.ask('', kwd_messages, client=llm.openAIClient, template='gpt-4-1106-preview', max_tokens=400, temp=0.1, validator=JSONResponseValidator())
+    response_json = llm.ask('', kwd_messages, client=llm.osClient, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    # remove all more common things
+    keywords = []
+    if 'found' in response_json:
+        for word in response_json['found']:
+            zipf = wf.zipf_frequency(word, 'en', wordlist='large')
+            if zipf < 2.8 and word not in keywords:
+                keywords.append(word)
+    for word in extract_acronyms(summary):
+        zipf = wf.zipf_frequency(word, 'en', wordlist='large')
+        if zipf < 2.8 and word not in keywords:
+            keywords.append(word)
+    #print(f'\nKeywords: {keywords}\n')
+    return '\n'.join(keywords)
+    
 # Function to extract words from JSON
 def extract_words_from_json(json_data):
     string_values = extract_string_values(json_data)
@@ -331,54 +389,42 @@ def extract_keywords(text):
     keywords = []
     for word in text:
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 34.0 and word not in keywords:
+        if zipf < 3.4 and word not in keywords:
             keywords.append(word)
     #print(f' extract keywords out {keywords}')
     return keywords
 
-def plan_search(web=False):
-    global plans
-    plan = None
-    if len(plans)> 0:
-        plan_names = list(plans.keys())
-        picker = ListDialog(plan_names)
-        result = picker.exec()
-        if result == QDialog.Accepted:
-            selected_index = picker.selected_index()
-            print(f'Selected Item Index: {selected_index}') 
-            if selected_index != -1:  # -1 means no selection
-                plan_name = plan_names[selected_index]
-                plan = plans[plan_name]
-                print(json.dumps(plan, indent=4))
-                plans[plan['name']] = plan
-                pl.active_plan = plan
-
-    if plan is None:
-        # new plan, didn't select any existing
-        plan = pl.init_plan()
-        plan = pl.analyze()
-        # store new plan in list of search plans
-        plans[plan['name']] = plan
-        with open(plans_filepath, 'w') as f:
-            json.dump(plans,f)
-        print(json.dumps(plan, indent=4))
-        #   {"name":'plannnn_aaa', "dscp":'bbb', "sbar":{"needs":'q\na', "background":'q\na',"observations":'q\na'}
-
-    if plan is None:
-        return
-    #if 'arxiv_keywords' not in plan:
-    # extract a list of keywords from the query, name, and sbar
-    # Extracting words
-    extracted_words = extract_words_from_json(plan['sbar'])
-    extracted_words.extend([word for word in plan['name'].split(' ') if word not in extracted_words])
-    extracted_words.extend([word for word in plan['dscp'].split(' ') if word not in extracted_words])
-    keywords = extract_keywords(extracted_words)
-    plan['arxiv_keywords'] = keywords
-    print(f' extracted keywords {keywords}')
-    #else:
-    #    keywords = plan['arxiv_keywords']
-    search(" ".join(keywords),  web=web)
-
+def index_url(page_url, title='', authors='', publisher='', abstract='', citationCount=0, influentialCitationCount=0,
+              pdf_url = None):
+    result_dict = {key: '' for key in paper_library_columns}
+    id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+    result_dict["faiss_id"] = id
+    result_dict["title"] = title
+    result_dict["authors"] = authors
+    result_dict["publisher"] = ''
+    result_dict["summary"] = abstract 
+    result_dict["citationCount"]= citationCount
+    result_dict["inflCitations"] = influentialCitationCount
+    result_dict["evaluation"] = ''
+    result_dict["pdf_url"] = pdf_url
+    pdf_filepath= download_pdf(page_url, title)
+    result_dict["pdf_filepath"]= pdf_filepath
+    
+    print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
+    result_dict['synopsis'] = ""
+    result_dict['section_ids'] = [] # to be filled in after we get paper id
+    #if status is None:
+    #    continue
+    print(f' new article:\n{json.dumps(result_dict, indent=2)}')
+    paper_index = len(paper_library_df)
+    paper_library_df.loc[paper_index] = result_dict
+    # section and index paper
+    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
+    save_synopsis_data()
+    faiss.write_index(paper_indexIDMap, paper_index_filepath)
+    faiss.write_index(section_indexIDMap, section_index_filepath)
+    section_library_df.to_parquet(section_library_filepath)
+    
 def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=100):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
@@ -484,6 +530,87 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
 #print(result_output[0])
 #sys.exit(0)
 
+def check_entities_against_draft(entities, draft):
+    entities_in_text = []
+    entities_not_in_text = []
+    long_text=draft.lower()
+    for entity in entities:
+        if entity.lower() in long_text:
+            entities_in_text.append(entity)
+        else:
+            entities_not_in_text.append(entity)
+    return entities_in_text, entities_not_in_text
+
+    
+def rewrite(paper_title, abstract, entities, section_text, draft):
+    entities_in_draft, entities_not_in_draft = check_entities_against_draft(entities, draft)
+    print(f'\nEntities in draft {entities_in_draft}')
+    print(f'Entities not in draft {entities_not_in_draft}')
+   
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+You are writing SYNOPSIS of a section of a research paper titled: {paper_title}. 
+For context, the paper abstract follows:
+
+<PAPER_ABSTRACT>
+{abstract}
+</PAPER_ABSTRACT>
+
+The original paper section for which you are writing the SYNOPSIS is: 
+
+<PAPER_SECTION>
+{section_text}
+</PAPER_SECTION>
+
+Your previous draft is:
+<PRIOR_DRAFT>
+{draft}
+</PRIOR_DRAFT>
+
+The following have been identified as key items mentioned in the paper_section that are not mentioned in the prior draft:
+
+<MISSING_ENTITIES>
+{entities_not_in_draft}
+</MISSING_ENTITIES>
+"""
+)
+
+    rewrite_prompt=f"""Your current task is to rewrite the PRIOR_DRAFT to increase the information density.
+
+Following these steps:
+Step 1. Determine the role of this section given the title and  abstract.
+Step 2. Identify a few of the most important MISSING_ENTITIES in the prior draft
+Step 3. Write a new, denser draft of the same length which covers all significant content and detail from the prior draft as well as the MISSING_ENTITIES identified in Step 2.
+
+Further Instructions: 
+ - Coherence: the rewrite of the previous draft to improve flow and make space for additional entities;
+ - Missing entities should appear where best for the flow and coherence in the new draft;
+ - Never drop entities from the previous content. If space cannot be made, add fewer new entities. 
+ - Your goal is information density: use the same number of words as the previous draft, or as few more as needed. Remove or rewrite low-content phrases or sentences to improve conciseness.
+ - Ensure the rewrite provides all the depth and information from the previous draft. 
+ - Your response include ONLY the rewritten draft, without any explanation or commentary.
+
+end the rewrite as follows:
+</REWRITE>
+"""
+    messages=[sysMessage,
+              UserMessage(rewrite_prompt),
+              AssistantMessage("<REWRITE>\n")
+              ]
+    #print(f'Tokens: {tokenizer.encode(draft).shape}')
+    max_tokens=int(1.5*len(tokenizer.encode(draft)))
+    
+    #response = llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
+    response = llm.ask('', messages, client=cot.llm.osClient, max_tokens=max_tokens, temp=0.1, eos='</REWRITE>')
+    if response is None or len(response) == 0:
+        return draft
+    rewrite = response
+    end_idx = rewrite.rfind('</REWRITE>')
+    if end_idx < 0:
+        end_idx = len(rewrite)
+        rewrite = rewrite[:end_idx-1]
+    print(f'\nRewrite:\n{rewrite}\n')
+    return rewrite
+
 def index_paper_synopsis(paper_dict, synopsis):
     global paper_indexIDMap
     if 'embedding' in paper_dict and paper_dict['embedding'] is not None:
@@ -533,19 +660,26 @@ def index_paper(paper_dict):
     print(f"grobid extract keys {extract.keys()}")
     text_chunks = [paper_abstract]+extract['sections']
     print(f"Summarizing each chunk of text {len(text_chunks)}")
+
     section_prompt = """Given this abstract of a paper:
     
 <ABSTRACT>
 {{$abstract}}
 </ABSTRACT>
 
-and this overall paper synopsis generated from the previous sections:
+this overall paper synopsis generated from the previous sections:
 
 <PAPER_SYNOPSIS>
 {{$paper_synopsis}}
 </PAPER_SYNOPSIS>
 
-Generate a synposis of this next section of text from the paper. The section synopsis should include the central argument of the section as it relates to the abstract and previous sections, together with all key points supporting that central argument. A key point might be any observation, statement, fact, inference, question, hypothesis, conclusion, or decision relevant to the central argument of the text.
+and this list of important entities (key phrases, acronyms, and named-entities) mentioned in this section:
+
+<ENTITIES>
+{{$entities}}
+</ENTITIES>
+
+Generate a synposis of this section of text from the paper. The section synopsis should include the central argument of the section as it relates to the abstract and previous sections, together with all key points supporting that central argument. A key point might be any observation, statement, fact, inference, question, hypothesis, conclusion, or decision relevant to the central argument of the text. The section synopsis should be 'entity-dense', that is, it should include all relevant ENTITIES to the central argument of the text and the paper abstract.
 
 <TEXT>
 {{$text}}
@@ -586,47 +720,63 @@ End your synopsis response as follows:
             if len(text_chunk) < 16:
                 continue
             print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
+            entities = extract_entities(paper_title, text_chunk)
+            print(f'entities: {entities}')
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
-            #response = llm.ask('', prompt, client=openAIClient, template=OPENAI_MODEL3, temp=0.05, eos='</SYNOPSIS')
             response = llm.ask({"abstract":paper_abstract,
                                 "paper_synopsis":paper_synopsis,
+                                "entities":entities,
                                 "text":text_chunk},
                                prompt,
-                               template=OS_MODEL,
+                               #template=GPT3,
                                max_tokens=500,
                                temp=0.05,
                                eos='</SYNOPSIS')
-            pbar.update(1)
-            if response is not None:
-                if '</SYNOPSIS>' in response:
-                    response = response[:response.find('</SYNOPSIS>')]
-                    print(f'index_paper result len {len(response)}')
-                id = index_section_synopsis(paper_dict, response)
-                section_synopses.append(response)
-                section_ids.append(id)
 
-                #
-                ### now update paper synopsis with latest section synopsis
-                ###   why not with entire section?
-                #response = llm.ask('', messages, client = openAIClient, max_tokens=1000, template=OPENAI_MODEL3, temp=0.1)
-                paper_messages = [SystemMessage(paper_prompt),
-                                  AssistantMessage('<UPDATED_SYNOPSIS>')
-                                  ]
-                paper_response = llm.ask({"title":paper_title,
-                                          "abstract":paper_abstract,
-                                          "paper_synopsis":paper_synopsis,
-                                          "section":section_synopses[-1]},
-                                         paper_messages,
-                                         template=OS_MODEL,
-                                         max_tokens=1200,
-                                         temp=0.1,
-                                         eos='</UPDATED_SYNOPSIS')
-                end_idx = response.rfind('/UPDATED_SYNOPSIS')
-                if end_idx < 0:
-                    end_idx = len(response)
-                    paper_synopsis = response[:end_idx-1]
+            #response = llm.ask({"abstract":paper_abstract,
+            #                    "paper_synopsis":paper_synopsis,
+            #                    "entities":entities,
+            #                    "text":text_chunk},
+            #                   prompt,
+            #                   template=OS_MODEL,
+            #                   max_tokens=500,
+            #                   temp=0.05,
+            #                   eos='</SYNOPSIS')
+            pbar.update(1)
+            if response is None:
+                print(f'\n\nFAILURE CREATING EXCERPT!\n\n')
+                continue
+            if '</SYNOPSIS>' in response:
+                response = response[:response.find('</SYNOPSIS>')]
+            print(f'index_paper result len {len(response)}, rewriting')
+            # 'entities' is a single, newline delimited string for ease in llm processing
+            draft2 = rewrite(paper_title, paper_abstract, entities.split('\n'), text_chunk, response)
+            id = index_section_synopsis(paper_dict, response)
+            section_synopses.append(response)
+            section_ids.append(id)
+            
+            #
+            ### now update paper synopsis with latest section synopsis
+            ###   why not with entire section?
+            
+            paper_messages = [SystemMessage(paper_prompt),
+                              AssistantMessage('<UPDATED_SYNOPSIS>')
+                              ]
+            paper_response = llm.ask({"title":paper_title,
+                                      "abstract":paper_abstract,
+                                      "paper_synopsis":paper_synopsis,
+                                      "section":section_synopses[-1]},
+                                     paper_messages,
+                                     #template=GPT3,
+                                     max_tokens=1200,
+                                     temp=0.1,
+                                     eos='</UPDATED_SYNOPSIS')
+            end_idx = response.rfind('/UPDATED_SYNOPSIS')
+            if end_idx < 0:
+                end_idx = len(response)
+                paper_synopsis = response[:end_idx-1]
     index_paper_synopsis(paper_dict, paper_synopsis)
     # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
     #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
@@ -751,242 +901,5 @@ def search(query, web=False):
     return ids, paper_summaries
 if __name__ == '__main__':
     #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
-    #search("miRNA vs. DNA Methylation assay cancer detection", web=True)
-    #plan_search(web=True)
-    #plan_search(web=False)
-    
-
-
-    """
-write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection
-
-
-Creating a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early-stage lung cancer detection requires a thorough exploration of various scientific studies and data. Here's an overview of how such a survey might be structured and the key points it would likely cover:
-
-### Introduction
-
-#### Overview of Lung Cancer
-- Prevalence and impact
-- Importance of early detection for improved prognosis
-
-#### Biomarkers in Cancer Detection
-- Definition and role of biomarkers in cancer
-- Traditional biomarkers used in lung cancer
-
-#### Emerging Biomarkers: miRNA and DNA Methylation
-- Explanation of miRNA and DNA methylation
-- Potential advantages over traditional biomarkers
-
-### Circulating miRNA as Biomarkers
-
-#### Biological Role of miRNAs
-- Function and significance in cell regulation
-- How alterations in miRNA can contribute to cancer development
-
-#### miRNAs in Lung Cancer
-- Studies showing miRNA expression profiles in lung cancer patients
-- Specific miRNAs frequently dysregulated in lung cancer
-
-#### Circulating miRNAs
-- Explanation of circulating miRNAs in blood and other bodily fluids
-- Advantages as non-invasive biomarkers
-
-#### Studies on miRNAs in Early Lung Cancer Detection
-- Summary of key research findings
-- Analysis of sensitivity, specificity, and overall effectiveness
-
-### DNA Methylation Patterns as Biomarkers
-
-#### Basics of DNA Methylation
-- Role in gene expression and regulation
-- How aberrant methylation patterns are linked to cancer
-
-#### DNA Methylation in Lung Cancer
-- Commonly observed methylation changes in lung cancer
-- Genes frequently affected by methylation in lung cancer
-
-#### Detection of Methylation Patterns
-- Techniques used to detect DNA methylation
-- Challenges in using methylation patterns for early detection
-
-#### Research on Methylation Patterns in Early Lung Cancer
-- Overview of significant studies
-- Discussion on the feasibility and accuracy
-
-### Comparative Analysis
-
-#### miRNA vs. DNA Methylation Biomarkers
-- Comparison of the two biomarkers in terms of reliability, cost, and accessibility
-- Potential for combining both markers for improved detection
-
-### Challenges and Future Directions
-
-#### Current Limitations
-- Technical and clinical challenges in utilizing these biomarkers
-- Issues with standardization and validation
-
-#### Future Research
-- Areas needing further investigation
-- Potential advancements in technology and methodology
-
-### Conclusion
-
-#### Summary of Current Understanding
-- Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection
-
-#### Future Outlook
-- The future role of these biomarkers in clinical practice
-- Final thoughts on the impact of early detection on lung cancer outcomes
-
-### References
-- A comprehensive list of all studies, articles, and reviews referenced in the survey.
-
----
-
-This outline provides a roadmap for a detailed research survey. To create the actual content, extensive research and analysis of current scientific literature, including peer-reviewed studies, clinical trials, and meta-analyses, would be required. Each section should synthesize existing research findings, highlight key data, and discuss the implications and limitations of the current knowledge. The survey should maintain an objective tone, critically analyze all information, and cite all sources appropriately.
-"""
-    
-    outline = {"task":
- """write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.""",
- "sections":[
-     {"title":"Introduction",
-      "sections":[
-          {"title":"Overview of Lung Cancer",
-           "sections":[
-               {"title":"Prevalence and impact"},
-               {"title":"Importance of early detection for improved prognosis"},
-           ]
-           },
-          {"title":"Biomarkers in Cancer Detection",
-           "sections":[
-               {"title":"Definition and role of biomarkers in cancer"},
-               {"title":"Traditional biomarkers used in lung cancer"},
-           ],
-           },
-          {"title":"Emerging Biomarkers: miRNA and DNA Methylation",
-           "sections":[
-               {"title":"Explanation of miRNA and DNA methylation"},
-               {"title":"Potential advantages over traditional biomarkers"},
-           ],
-           }
-          ]
-      },
-          
-     {"title":"Circulating miRNA as Biomarkers",
-      "sections":[
-          {"title":"Biological Role of miRNAs",
-           "sections":[
-               {"title":"Importance of early detection for improved prognosis"},
-               {"title":"Importance of early detection for improved prognosis"},
-           ],
-           },
-          {"title":"miRNAs in Lung Cancer",
-           "sections":[
-               {"title":"Studies showing miRNA expression profiles in lung cancer patients"},
-               {"title":"Specific miRNAs frequently dysregulated in lung cancer"},
-           ],
-           },
-          {"title":"Circulating miRNAs",
-           "sections":[
-               {"title":"Explanation of circulating miRNAs in blood and other bodily fluids"},
-               {"title":"Advantages as non-invasive biomarkers"},
-           ],
-           },
-          {"title":"Studies on miRNAs in Early Lung Cancer Detection",
-           "sections":[
-               {"title":"Summary of key research findings"},
-               {"title":"Analysis of sensitivity, specificity, and overall effectiveness"},
-           ],
-           },
-          ]
-      },
-
-     {"title":"DNA Methylation Patterns as Biomarkers",
-      "sections":[
-          {"title":"Basics of DNA Methylation",
-           "sections":[
-               {"title":"Role in gene expression and regulation"},
-               {"title":"How aberrant methylation patterns are linked to cancer"},
-           ],
-           },
-          {"title":"DNA Methylation in Lung Cancer",
-           "sections":[
-               {"title":"Commonly observed methylation changes in lung cancer"},
-               {"title":"Genes frequently affected by methylation in lung cancer"},
-           ],
-           },
-          {"title":"Detection of Methylation Patterns",
-           "sections":[
-               {"title":"Techniques used to detect DNA methylation"},
-               {"title":"Challenges in using methylation patterns for early detection"},
-           ],
-           },
-          {"title":"Research on Methylation Patterns in Early Lung Cancer",
-           "sections":[
-               {"title":"Overview of significant studies"},
-               {"title":"Discussion on the feasibility and accuracy"},
-           ],
-           }
-          ]
-      },
-
-     {"title":"Comparative Analysis",
-      "dscp":"miRNA and DNA Methylation Biomarkers",
-      "sections":[
-               {"title":"Comparison in terms of reliability, cost, and accessibility"},
-               {"title":"miRNA vs. DNA Methylation Biomarkers - Potential for combining both markers for improved detection"},
-           ],
-           },
-
-     {"title":"Challenges and Future directions",
-      "sections":[
-          {"title":"Challenges",
-           "dscp":"Technical and clinical challenges in utilizing these biomarkers for cell-free serum assay for early cancer detection",
-           "sections":[
-               {"title":"Challenges in utilizing these biomarkers"},
-               {"title":"Standardization and validation"},
-           ]
-           },
-          {"title":"Future Research",
-           "dscp": "areas needing further development for using circulating miRNA and DNA methylation assay in early stage cancer detection",
-           "sections":[
-               {"title":"Areas needed further investigation"},
-               {"title":"Potential advances in technology and methodology"}
-               ]
-           },
-          ]
-      },
-               
-     {"title":"Conclusion",
-      "sections":[
-          {"title":"Summary of Current Understanding",
-           "dscp":"Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection",
-           },
-          {"title":"Future Outlook",
-           "dscp": "The future role of these biomarkers in clinical practice and Final thoughts on the impact of early detection on lung cancer outcomes"},
-          ]
-      }
-     ]
- }
-               
-    extract_prompt="""
-You will generate increasingly concise, entity-dense summaries of the above. Repeat the following 2 steps 3 times. 
-Step 1. Identify 1-3 informative Entities (";" delimited) from the Article which are missing from the previously generated summary. 
-Step 2. Write a new, denser summary of identical length which covers every entity and detail from the previous summary plus the Missing Entities. 
-A Missing Entity is: 
- - Relevant to the main story; 
- - Descriptive yet concise (5 words or fewer);
- - not in the previous summary; 
- - present in the Article; 
- - located anywhere in the Article. 
-
-Guidelines: 
- - The first summary should be long (4-5 sentences, ~80 words) yet highly non-specific, containing little information beyond the entities marked as missing. Use overly verbose language and fillers (e.g., "the  article discusses") to reach ~80 words;
- - Make every word count : re-write the previous summary to improve flow and make space for additional entities.
- - Make space with fusion, compression, and removal of uninformative phrases like "the article discusses".
- - The summaries should become highly dense and concise yet self-contained, e.g., easily understood without the Article.
- - Missing entities can appear anywhere in the new summary.
- - Never drop entities fr om the previous summary. If space cannot be made, add fewer new entities. Remember, use the exact same number of words f or each summar y. 
- - Answer in JSON. The JSON should be a list (length 5) of dictionaries whose keys are "Missing_Entities" and " Denser_Summary"
-"""
-
+    #search("miRNA and DNA Methylation assay cancer detection", web=True)
+    index_url("https://arxiv.org/pdf/2306.08302.pdf")

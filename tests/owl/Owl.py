@@ -448,7 +448,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       action = self.owlCoT.action_selection(new_text, self) # this last for async display
       # see if Owl needs to do something before responding to input
       if type(action) == dict and 'tell' in action.keys():
-         response = action['tell']+'\n'
+         response = str(action['tell'])+'\n'
          self.display_response(response) 
          return
       if type(action) == dict and 'article' in action.keys():

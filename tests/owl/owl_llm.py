@@ -26,23 +26,25 @@ models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 print(subdirs)
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'zephyr' in d.lower() or 'xaberius' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'sakura' in d.lower())]
 print(models)
 
-templates = {"OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
-             "CodeLlama-34B-instruct-exl2":"chatml",
+templates = {"CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.6-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
-             "platypus2-70b-instruct-exl2":"alpaca",
-             "zephyr-7b-beta":"zephyr",
-             "openchat-3.5-8bpw-h8-exl2":"openchat",
-             "ShiningValiant-4bpw-h6-exl2":"llama-2",
-             "orca-2-13b-16bit":"chatml",
-             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
              "Mixtral-8x7b-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
-             "Synthia-MoE-v3-Mixtral-8x7B-6.0bpw-h6-exl2-2":"synthia"
-             }
+             "openchat-3.5-8bpw-h8-exl2":"openchat",
+             "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
+             "orca-2-13b-16bit":"chatml",
+             "platypus2-70b-instruct-exl2":"alpaca",
+             "Sakura-SOLAR-Instruct-DPO-v2":"freewilly",
+             "ShiningValiant-4bpw-h6-exl2":"llama-2",
+             "Synthia-MoE-v3-Mixtral-8x7B-6.0bpw-h6-exl2-2":"synthia",
+             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
+             "xDAN-L1-Chat-RL-v1-8.0bpw-h8-exl2":"alpaca",
+             "zephyr-7b-beta":"zephyr"
+}
 
 model_number = -1
 while model_number < 0 or model_number > len(models) -1:
