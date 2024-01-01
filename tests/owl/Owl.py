@@ -9,7 +9,6 @@ import signal
 #from PyQt5 import QApplication
 from collections import defaultdict 
 import pickle
-import argparse
 import random
 import json
 import socket
@@ -35,6 +34,7 @@ import ipinfo
 import nyt
 from OwlCoT import OwlInnerVoice
 from Planner import Planner, PlanInterpreter
+
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
 
@@ -88,22 +88,8 @@ def get_profile(profile, theme):
       print(f'{profile} not found {profile_contexts.keys()}')
 
 CURRENT_PROFILE_PROMPT_TEXT = ''
-
-
 FORMAT=True
 PREV_LEN=0
-#print(f' template: {llm.get_available_models()}')
-parser = argparse.ArgumentParser()
-#parser.add_argument('model', type=str, default='wizardLM', choices=['guanaco', 'wizardLM', 'zero_shot', 'vicuna_v1.1', 'dolly', 'oasst_pythia', 'stablelm', 'baize', 'rwkv', 'openbuddy', 'phoenix', 'claude', 'mpt', 'bard', 'billa', 'h2ogpt', 'snoozy', 'manticore', 'falcon_instruct', 'gpt_35', 'gpt_4'],help='select prompting based on modelto load')
-
-template = 'bad'
-models = llm.get_available_models()
-while template not in models:
-   if template.startswith('gpt'):
-      break
-   template = input('template name? ').strip()
-      
-#server = OSClient.OSClient(apiKey=None)
 
 def setFormat():
    global FORMAT
@@ -154,10 +140,8 @@ class ImageDisplay(QtWidgets.QWidget):
 class ChatApp(QtWidgets.QWidget):
    def __init__(self):
       super().__init__()
-      global model, template
       self.tts = False
-      self.template = template
-      self.owlCoT = OwlInnerVoice(self, template = template)
+      self.owlCoT = OwlInnerVoice(self)
       self.memory_display = None
       self.planner = Planner(self, self.owlCoT)
       #self.interpreter = self.planner.interpreter
@@ -171,6 +155,8 @@ class ChatApp(QtWidgets.QWidget):
       self.codec = QTextCodec.codecForName("UTF-8")
       self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
       self.reflect = True
+      self.index_in_process = None # an S2 indexing job object, or None if nothing running. Status is only checked on reflect and launch
+
       #self.setStyleSheet("background-color: #101820; color")
       # Main Layout
       main_layout = QHBoxLayout()
@@ -321,17 +307,17 @@ class ChatApp(QtWidgets.QWidget):
       spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
       control_layout2.addItem(spacer)  # Add spacer to the layout
 
-      self.arxiv_button = QPushButton("ARXIV Search")
+      self.arxiv_button = QPushButton("Search")
       self.arxiv_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.arxiv_button.setFont(self.widgetFont)
-      self.arxiv_button.clicked.connect(self.arxiv)
+      self.arxiv_button.clicked.connect(self.search_s2)
       control_layout2.addWidget(self.arxiv_button)
       
-      self.arxiv_bg_button = QPushButton("ARXIV Search BG")
-      self.arxiv_bg_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.arxiv_bg_button.setFont(self.widgetFont)
-      self.arxiv_bg_button.clicked.connect(self.arxiv_bg)
-      control_layout2.addWidget(self.arxiv_bg_button)
+      self.index_button = QPushButton("Index")
+      self.index_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.index_button.setFont(self.widgetFont)
+      self.index_button.clicked.connect(self.index_url)
+      control_layout2.addWidget(self.index_button)
       
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
@@ -501,6 +487,10 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       PREV_POS="1.0"
       PREV_LEN=0
    
+   #
+   ## Working memory interface
+   #
+   
    def create_awm(self): # create a new working memory item and put it in active memory
       global PREV_LEN, op#, vmem, vmem_clock
       selectedText = ''
@@ -536,6 +526,9 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
    def save_awm(self): # save active working memory items
       self.owlCoT.save_awm()
 
+      #
+      ## Planner interface
+      #
 
    def plan(self): # select or create a plan
       self.planner.select_plan()
@@ -546,7 +539,11 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
    def step_plan(self): # release a working memory item from active memory
       self.planner.step_plan()
 
-   def arxiv(self): # release a working memory item from active memory
+   #
+   ## Semantic memory interface
+   #
+
+   def search_s2(self): # release a working memory item from active memory
       selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
@@ -554,18 +551,29 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      self.arxiv.search(selected_text, web=False)
-
-   def arxiv_bg(self): # release a working memory item from active memory
+      response = self.owlCoT.s2_search(selectedText)
+      self.display_response('\n'+response+'\n')
+      
+   def index_url(self): # index a url in S2 faiss
+      global PREV_LEN, op#, vmem, vmem_clock
+      if self.index_in_process is not None:
+         status = self.index_in_process.poll()
+         if status is None:
+            self.display_response("Index job in process, can't start another, sorry.")
+            return
+         else:
+            self.index_in_process = None
       selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
          selectedText = cursor.selectedText()
+         print(f'cursor has selected, len {len(selectedText)}')
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      self.arxiv.search(selected_text, web=True)
-
+      print(f'cursor has selected {len(selectedText)} chars')
+      self.index_in_process = subprocess.Popen(['python3', 'semanticScholar2.py','-index_url', selectedText, '-template', self.owlCoT.template])
+      self.display_response("Index job started.")
          
    def workingMem(self): # lauching working memory editor
       self.owlCoT.save_workingMemory() # save current working memory so we can edit it
@@ -591,6 +599,12 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
 
    def on_timer_timeout(self):
       global profile, profile_text
+      if self.index_in_process is not None:
+         status = self.index_in_process.poll()
+         if status is not None:
+            #job done, clear pid
+            self.index_in_process = None
+            self.display_response('s2 index job finished')
       if not self.reflect:
          return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.
@@ -611,6 +625,10 @@ window = ChatApp()
 window.show()
 
 if __name__== '__main__':
+   import semanticScholar2 as s2
+   window.s2=s2
+   s2.ui=window
+   s2.cot=window.owlCoT
    app.exec_()
 
 

@@ -68,7 +68,6 @@ from adapters import AutoAdapterModel
 embedding_model = AutoAdapterModel.from_pretrained("allenai/specter2_aug2023refresh_base")
 embedding_adapter_name = embedding_model.load_adapter("allenai/specter2_aug2023refresh", source="hf", set_active=True)
 
-import semanticScholar as s2
 OPENAI_MODEL3 = "gpt-3.5-turbo-16k"
 OPENAI_MODEL4 = "gpt-4-1106-preview"
 #OPENAI_MODEL = "gpt-4-32k"
@@ -79,9 +78,12 @@ OS_MODEL='zephyr'
 openai_api_key = os.getenv("OPENAI_API_KEY")
 openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
 memory = VolatileMemory()
-llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
-
-pl = Planner(s2.ui, s2.cot)
+#llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
+import OwlCoT as cot
+cot = cot.OwlInnerVoice(None)
+pl = Planner(None, cot)
+import semanticScholar2 as s2
+s2.cot = cot
 
 class PWUI(QWidget):
     def __init__(self, rows, config_json):
@@ -252,8 +254,8 @@ Remember, respond in JSON using the following format:
                   AssistantMessage("")
               ]
     
-    #response_json = s2.cot.llm.ask('', kwd_messages, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=400, temp=0.1, validator=JSONResponseValidator())
-    response_json = s2.cot.llm.ask('', kwd_messages, client=s2.cot.llm.osClient, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    #response_json = cot.llm.ask('', kwd_messages, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=400, temp=0.1, validator=JSONResponseValidator())
+    response_json = cot.llm.ask('', kwd_messages, client=cot.llm.osClient, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
     # remove all more common things
     keywords = []
     if 'found' in response_json:
@@ -350,9 +352,9 @@ The {heading_1} section content up to this point is:
                           AssistantMessage("<MISSING_ENTITIES>")
                           ]
 
-    #response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
-    #response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
-    response = s2.cot.llm.ask('', entity_select_msgs, client=s2.cot.llm.osClient, max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    #response = cot.llm.ask('', entity_select_msgs, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    #response = cot.llm.ask('', entity_select_msgs, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
+    response = cot.llm.ask('', entity_select_msgs, client=cot.llm.osClient, max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
     if response is None or len(response) == 0:
         return draft
     me = response
@@ -401,8 +403,8 @@ end the rewrite as follows:
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
-    response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
+    #response = cot.llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
+    response = cot.llm.ask('', messages, client=cot.llm.osClient, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -458,33 +460,34 @@ def plan_search():
         return
     return plan
 
-def make_queries_aux(outline, prefix):
-    section_title = plan['outline']['title']
-    report_queries = []
-    if 'sections'  in outline:
-        for section in section:
-            queries = make_queries_aux(section, prefix + '. '+section_title)
-            report_queries.extend(queries)
-    else: # leaf section
-        return [prefix + '.' + section_title]    
-    return report_queries
-        
-def make_search_queries(outline):
-    report_title = outline['title']
-    report_queries = []
+def s2_search (config, outline, title_prefix='', dscp_prefix=''):
+    #
+    ## call get_articles in semanticScholar2 to query semanticScholar for each section or subsection in article
+    ## we can get 0 results if too specific, so probabilistically relax query as needed
+    #
+    if 'title' in outline:
+        title_prefix += '. '+outline['title']
+    if 'dscp' in outline:
+        dscp_prefix += '. '+outline['dscp']
     if 'sections' in outline:
-        for section in outline['sections']:
-            queries = make_queries_aux(section, report_title)
-            report_queries.extend(queries)
-    print(f'\n report queries {report_queries}')
-    return report_queries
+        for subsection in outline['sections']:
+            s2_search(config, subsection, title_prefix, dscp_prefix)
+    else:
+        entities = extract_entities('', '', title_prefix+'\n'+dscp_prefix)
+        # search entity list as query
+        result_list = []
+        query_list = entities.copy() # in case we expand later to try multiple descent paths
+        while len(result_list) == 0 and len(query_list) > 0:
+            result_list, total_papers, next_offset = s2.get_articles(' '.join(query_list), confirm=True)
+            # if nothing, randomly remove one entity
+            query_list.remove(random.choice(query_list))
 
 def write_report(config, paper_outline=None, section_outline=None, length=400): 
     #rows = ["Query", "SBAR", "Outline", "WebSearch", "Write", "ReWrite"]
     query_config = config['Query']
     query = ""
     if query_config['exec'] == 'Yes':
-        query = s2.cot.confirmation_popup('Question to report on?', '')
+        query = cot.confirmation_popup('Question to report on?', '')
         if not query:
             return None
 
@@ -499,24 +502,28 @@ def write_report(config, paper_outline=None, section_outline=None, length=400):
         # make outline
         pl.outline(config, plan)
         outline = plan['outline']
-        s2.cot.save_workingMemory() # save updated plan
-
+        cot.save_workingMemory() # save updated plan
     else:
-        outline = default_outline
+        outline = default_outline # a canned research outline at bottom of this file.
 
     search_config = config['Search']
+    # Note this is web search. Local faiss or other resource search will be done in Write below
     if search_config['exec'] == 'Yes':
         # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
         # also need to configure prompt, depth (depth in terms of # articles total or new per section?)
-        queries = make_search_queries(outline)
-        get_articles(queries)
+        s2_search(config, outline)
 
     write_config = config['Write']
     if write_config['exec'] == 'Yes':
         if section_outline is None:
             section_outline = paper_outline
+        if 'length' in config:
+            length = int(config['length'])
+        else:
+            length = 1200
         # write report! pbly should add length field, # rewrites
-        write_report_aux(config, paper_outline=paper_outline, section_outline=section_outline, length=400)
+        write_report_aux(config, paper_outline=paper_outline, section_outline=section_outline, length=length)
+        
     rewrite_config = config['ReWrite'] # not sure, is this just for rewrite of existing?
     if rewrite_config['exec'] == True:
         # rewrite draft, section by section, with prior critique input on what's wrong.
@@ -579,7 +586,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
         # actuall llm call to write this terminal section
         section = section_outline['title']
         query = heading_1+', '+parent_section_title+' '+subsection_topic
-        ids, excerpts = s2.search(query, web=False) # this assumes web searching has been done
+        ids, excerpts = s2.search(query) # this assumes web searching has been donenote we aren't using dscp for search
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
         subsection_token_length = max(320,length) # no less than a paragraph
         
@@ -631,8 +638,8 @@ End the section as follows:
 """),
               AssistantMessage("<DRAFT>\n")
               ]
-        response = s2.cot.llm.ask('', messages, client=s2.cot.llm.osClient, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
-        #response = s2.cot.llm.ask('', messages, client=s2.cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
+        response = cot.llm.ask('', messages, client=cot.llm.osClient, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
+        #response = cot.llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
         end_idx = response.rfind('</DRAFT>')
         if end_idx < 0:
             end_idx = len(response)
@@ -775,7 +782,7 @@ if __name__ == '__main__':
     app.exec_()
     print(config)
     try:
-        s2.cot.ui.display_response('calling paper_writer')
+        cot.display_response('calling paper_writer')
         paper = write_report(config, paper_outline=default_outline, section_outline=default_outline)
     except Exception as e:
         traceback.print_exc()

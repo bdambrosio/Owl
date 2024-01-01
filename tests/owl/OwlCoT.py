@@ -32,7 +32,7 @@ from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave.ChoiceResponseValidator import ChoiceResponseValidator
 from alphawave.TOMLResponseValidator import TOMLResponseValidator
 from alphawave_pyexts import utilityV2 as ut
-from alphawave_pyexts import LLMClient as lc
+from alphawave_pyexts import LLMClient
 from alphawave_pyexts import Openbook as op
 from alphawave_pyexts import conversation as cv
 from alphawave.OSClient import OSClient
@@ -58,6 +58,8 @@ NYT_API_KEY = os.getenv("NYT_API_KEY")
 sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL3 = "gpt-3.5-turbo-16k"
+OPENAI_MODEL4 = "gpt-4-1106-preview"
 
 ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
 
@@ -95,6 +97,17 @@ port = 5004
 GPT4='gpt-4-1106-preview'
 GPT3='gpt-3.5-turbo-1106'
 
+
+#parser.add_argument('model', type=str, default='wizardLM', choices=['guanaco', 'wizardLM', 'zero_shot', 'vicuna_v1.1', 'dolly', 'oasst_pythia', 'stablelm', 'baize', 'rwkv', 'openbuddy', 'phoenix', 'claude', 'mpt', 'bard', 'billa', 'h2ogpt', 'snoozy', 'manticore', 'falcon_instruct', 'gpt_35', 'gpt_4'],help='select prompting based on modelto load')
+
+def get_model_template():
+    template = 'bad'
+    models = LLMClient.get_available_models()
+    while template not in models:
+        if template.startswith('gpt'):
+            break
+        template = input('template name? ').strip()
+    return template
 
 def generate_faiss_id(allocated_p):
     faiss_id = random.randint(1, 333333333)
@@ -278,9 +291,12 @@ class ListDialog(QDialog):
         return self.list_widget.currentRow()
 
 class OwlInnerVoice():
-    def __init__(self, ui, template):
+    def __init__(self, ui=None, template=None):
         self.ui = ui
-        self.template = template
+        if template is not None:
+            self.template = template
+        else:
+            self.template = get_model_template()
         self.osClient = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
         self.functions = FunctionRegistry()
@@ -329,6 +345,13 @@ class OwlInnerVoice():
     #    self.active_wm[name]['type'] = str(type(value))
 
             
+    def display_response(self, response):
+        if self.ui is not None:
+            self.ui.display_response(response)
+        else:
+            print(response)
+
+
     def save_conv_history(self):
       global memory, profile
       data = defaultdict(dict)
@@ -1237,7 +1260,7 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
          UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
          AssistantMessage('')
       ]
-      response = self.llm.ask(response, prompt, template = self.template, temp=.1, max_tokens=400)
+      response = self.llm.ask(response, prompt, template = self.template, temp=.1)
       if response is not None:
          return '\nWiki Summary:\n'+response+'\n'
       else: return 'wiki lookup and summary failure'
@@ -1254,6 +1277,16 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
           wiki_lookup_response = self.op.search(query)
           wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
           return wiki_lookup_summary
+
+    def s2_search(self, query):
+       short_profile = self.short_prompt()
+       query = query.strip()
+       #
+       #TODO rewrite query as answer (HyDE)
+       #
+       s2_result = self.ui.s2.search(query)
+       summary=self.summarize(query, s2_result, short_profile)
+       return summary
 
     def gpt4(self, query, profile):
        short_profile = self.short_prompt()
@@ -1327,5 +1360,5 @@ class WebSearch(QThread):
        return data
 
 if __name__ == '__main__':
-    owl = OwlInnerVoice(None, template='zephyr')
+    owl = OwlInnerVoice()
     print(owl.short_prompt())

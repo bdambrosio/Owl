@@ -1,16 +1,17 @@
 import os, sys, logging, glob, time
+import argparse
 import pandas as pd
+import json
+import re
+import random
+import openai
+import traceback
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
 import ast
 import concurrent
 from csv import writer
 #from IPython.display import display, Markdown, Latex
-import json
-import re
-import random
-import openai
-import traceback
 from lxml import etree
 from PyPDF2 import PdfReader
 import pdfminer.high_level as miner
@@ -49,6 +50,8 @@ from transformers import AutoTokenizer, AutoModel
 import webbrowser
 
 tokenizer = GPT3Tokenizer()
+ui = None
+cot = None
 
 # startup AI resources
 
@@ -64,12 +67,6 @@ from adapters import AutoAdapterModel
 embedding_model = AutoAdapterModel.from_pretrained("allenai/specter2_aug2023refresh_base")
 embedding_adapter_name = embedding_model.load_adapter("allenai/specter2_aug2023refresh", source="hf", set_active=True)
 
-
-import Owl as owl
-ui = owl.window
-ui.reflect=False # don't execute reflection loop, we're just using the UI
-cot = ui.owlCoT
- 
 
 GPT3 = "gpt-3.5-turbo-16k"
 GPT4 = "gpt-4-1106-preview"
@@ -190,6 +187,9 @@ def search_sections(query, top_k=20):
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
     #print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
+    if len(ids) < 1:
+        print(f'No items found')
+        return [],[]
     item_ids=[]; synopses = []
     for id in ids[0]:
         section_library_row = section_library_df[section_library_df['faiss_id'] == id]
@@ -197,8 +197,12 @@ def search_sections(query, top_k=20):
         if len(section_library_row) > 0:
             section_row = section_library_row.iloc[0]
             text = section_row['synopsis']
-            paper_row = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']].iloc[0]
-            article_title = paper_row['title']
+            filtered_df = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']]
+            if filtered_df.empty:
+                article_title = 'unknown'
+            else:
+                paper_row = filtered_df.iloc[0]
+                article_title = paper_row['title']
             item_ids.append(id)
             synopses.append([article_title, text])
             #print(f'{article_title} {len(text)}')
@@ -288,7 +292,7 @@ def download_pdf_5005(url, title):
     response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=10)
     if response.status_code == 200:
         info = response.json()
-        print(f'\nretrieve response {info};')
+        #print(f'\nretrieve response {info};')
         if type(info) is dict and 'filepath' in info:
             idx = info['filepath'].rfind('/')
             arxiv_filepath = os.path.join(papers_dir, info['filepath'][idx+1:])
@@ -425,7 +429,7 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
     
-def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=100):
+def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=10, confirm=True):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
     """
@@ -433,7 +437,8 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
     # Initialize a client
     result_list = []
     #library_df = pd.read_parquet(library_file).reset_index()
-    query = cot.confirmation_popup("Search ARXIV using this query?", query )
+    if confirm:
+        query = cot.confirmation_popup("Search ARXIV using this query?", query )
     if not query:
         print(f'confirmation: No!')
         return [],0,0
@@ -895,13 +900,33 @@ def search(query, web=False):
     # arxiv search over, now search faiss
     ids, paper_summaries = search_sections(query, top_k=20)
     #print(f'found {len(paper_summaries)} sections')
-    #query = cot.confirmation_popup(f"Continue? found {len(paper_summaries)} sections", query)
-    #if query is None or not query or len(query)==0:
-    #    return paper_summaries
     return ids, paper_summaries
+
+def parse_arguments():
+    """Parses command-line arguments using the argparse library."""
+
+    parser = argparse.ArgumentParser(description="Process a single command-line argument.")
+    parser.add_argument("-index_url", type=str, help="The URL to process.")
+    parser.add_argument("-template", type=str, help="the LLM template to use")
+    args = parser.parse_args()
+    return args
+
 if __name__ == '__main__':
-    #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
-    #search("miRNA and DNA Methylation assay cancer detection", web=True)
-    #index_url("https://arxiv.org/pdf/2306.08302.pdf")
-    index_url("https://arxiv.org/pdf/2311.07361.pdf")
+    import OwlCoT as cot
+    args = parse_arguments()
+    template = None
+    if args.template is not None:
+        template = args.template
+        print(f' S2 using template {template}')
+    cot = cot.OwlInnerVoice(None, template=template)
+    if args.index_url is not None:
+        url = args.index_url.strip()
+        print(f' S2 indexing url {url}')
+        index_url(url)
+    else:
+        print("No argument provided, running default main code.")
+        #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
+        #search("miRNA and DNA Methylation assay cancer detection", web=True)
+        #index_url("https://arxiv.org/pdf/2306.08302.pdf")
+
 

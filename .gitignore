@@ -275,3 +275,5 @@ tests/owl/topic_interaction_updates.json
 tests/owl/topic_thread_updates.json
 tests/owl/topic_thread_updates.json~
 tests/vlite/
+tests/wandb/
+tests/owl/*.txt

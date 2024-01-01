@@ -324,7 +324,7 @@ TextString:
           except:
              steps = self.repair_json_list(steps)
              if steps is None or steps is not list:
-                self.ui.display_response(f'\nFailed to create valid JSON list from text plan')
+                self.owlCoT.display_response(f'\nFailed to create valid JSON list from text plan')
                 return
             
       final_steps = []
@@ -337,7 +337,7 @@ TextString:
             except:
                step_j = self.repair_json(step)
          if step_j is None:
-            self.ui.display_response(f'\nstep {s} cannot be formatted as JSON')
+            self.owlCoT.display_response(f'\nstep {s} cannot be formatted as JSON')
             return
          else:
             final_steps.append(step_j)
@@ -381,7 +381,7 @@ TextString:
             print(f'gpt4 repair response {response}')
             return responsej
          except:
-            self.ui.display_response(f'is this json?\n{response}')
+            self.owlCoT.display_response(f'is this json?\n{response}')
       return response
 
    #
@@ -408,7 +408,7 @@ TextString:
          if type(awm_entry) is not dict:
             entry = self.repair_json(awm_entry)
             if entry is None:
-               self.ui.display_response(f'unable to repair {awm_entry}')
+               self.owlCoT.display_response(f'unable to repair {awm_entry}')
                continue
          else:
             entry = awm_entry
@@ -424,7 +424,7 @@ TextString:
                   valid_json=True
                   print(f"repair succeeded")
                except:
-                  self.ui.display_response(f'invalid json {str(e)}')
+                  self.owlCoT.display_response(f'invalid json {str(e)}')
                   return "failed to convert to json"
       # finally have clean json
       return self.do_item(entry['item'])
@@ -444,7 +444,7 @@ TextString:
              print(f'do_item repair failed {dict_item}')
              return None
        if 'action' not in dict_item:
-          self.ui.display_response(f'item is not an action {item}')
+          self.owlCoT.display_response(f'item is not an action {item}')
           return 'action not yet implemented'
        elif dict_item['action'] == 'append':
           return self.do_append(dict_item)
@@ -485,20 +485,20 @@ TextString:
        elif dict_item['action'] == 'wiki':
           return self.do_wiki(dict_item)
        else:
-          self.ui.display_response(f"action not yet implemented {item['action']}")
+          self.owlCoT.display_response(f"action not yet implemented {item['action']}")
        return
    
 
    def parse_as_action(self, item):
        if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
-          self.ui.display_response(f'form is not an action/arguments/result {item}')
+          self.owlCoT.display_response(f'form is not an action/arguments/result {item}')
           raise InvalidAction(str(item))
        args = item['arguments']
        if type(args) is not list:
           args = [args]
        result = item['result']
        if type(result) is not str or not result.startswith('$'):
-          self.ui.display_response(f"result must be a variable name: {result}")
+          self.owlCoT.display_response(f"result must be a variable name: {result}")
           raise InvalidAction(str(item))
        else:
           return item['action'], args, result
@@ -547,7 +547,7 @@ TextString:
           arg0 = arguments[0]
           arg1 = arguments[1]
        else:
-          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
        if type(arg0) is not str or type(arg1) is not str:
           raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
        criteron = self.resolve_arg(arg0)
@@ -575,7 +575,7 @@ TextString:
           arg0 = arguments[0]
           arg1 = arguments[1]
        else:
-          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
        if type(arg0) is not str or type(arg1) is not str:
           raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
        criteron = self.resolve_arg(arg0)
@@ -603,7 +603,7 @@ TextString:
          arg0 = arguments[0]
          arg1 = arguments[1]
       else:
-         self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+         self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
       if type(arg0) is not str or type(arg1) is not str:
          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
       criterion = self.resolve_arg(arg0)
@@ -616,11 +616,11 @@ TextString:
       response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
       if response is not None:
          self.owlCoT.create_awm(response, name=result, confirm=False)
-         self.ui.display_response(f'{action}:\n{response}')
+         self.owlCoT.display_response(f'{action}:\n{response}')
          return 
       else: 
          self.owlCoT.create_awm('', name=result, confirm=False)
-         self.ui.display_response(f'{action}:\nNo Text Extracted')
+         self.owlCoT.display_response(f'{action}:\nNo Text Extracted')
          return 'extract lookup and summary failure'
       
    def do_first(self, action):
@@ -651,7 +651,7 @@ TextString:
           prompt_text += str(resolved_arg)+'\n'
        prompt = [SystemMessage(prompt_text)]
        response = self.llm.ask("", prompt)
-       self.ui.display_response(response)
+       self.owlCoT.display_response(response)
        self.owlCoT.create_awm(response, name=result, confirm=False)
 
    def do_request(self, action):
@@ -671,7 +671,7 @@ TextString:
           print(f'request failed {str(e)}')
           return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
        if response is not None:
-          self.ui.display_response(data['text'][:1000])
+          self.owlCoT.display_response(data['text'][:1000])
           self.owlCoT.create_awm(data['text'][:1000], name=result, confirm=False)
 
    def do_tell(self, action):
@@ -681,7 +681,7 @@ TextString:
        if type(arguments) is not list or type(arguments[0]) is not str:
           raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
        value = self.resolve_arg(arguments[0])
-       self.ui.display_response(value)
+       self.owlCoT.display_response(value)
 
 
    def do_web(self, action):
@@ -698,7 +698,7 @@ TextString:
           print(f'request failed {str(e)}')
           return
        if response is not None:
-          self.ui.display_response(data)
+          self.owlCoT.display_response(data)
           self.owlCoT.create_awm(data, name=result, confirm=False)
 
    def wiki(self, action):
@@ -707,7 +707,7 @@ TextString:
           arg0 = arguments[0]
           arg1 = arguments[1]
        else:
-          self.ui.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
        if type(arg0) is not str or type(arg1) is not str:
           raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
        criteron = self.resolve_arg(arg0)
@@ -878,7 +878,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
              if wm is not None and type(wm) == dict and 'item' in wm:
                 plan = wm['item']
              if plan is None or not self.validate_plan(plan):
-                self.ui.display_response(f'failed to load "{plan_name}", not found or missing name/dscp\n{plan}')
+                self.owlCoT.display_response(f'failed to load "{plan_name}", not found or missing name/dscp\n{plan}')
                 return None
              else:
                 self.active_plan = plan
@@ -1000,9 +1000,21 @@ Your conversation style is warm, gentle, humble, and engaging. """
       else:
          length = 1200
 
-      number_top_sections = max(1, int(length/2000 + 0.5))
+      number_top_sections = max(3, int(length/2000 + 0.5))
       depth = max(1, int(math.log(length/2)-6))
-      
+
+      outline_model = self.llm.template
+      if 'model' in config:
+         outline_model = config['model']
+         if outline_model == 'llm':
+            outline_model = self.llm.template
+         elif outline_model == 'gpt3':
+            outline_model = self.owlCoT.OPENAI_MODEL3
+         elif outline_model == 'gpt4':
+            outline_model = self.owlCoT.OPENAI_MODEL4
+         else:
+            self.owlCoT.display_response('Unrecognized model type in Outline: {outline_model}')
+            
       outline_syntax =\
 """Respond ONLY with the outline, in JSON format:
 
@@ -1018,7 +1030,7 @@ Details on the requested report include:
 {json.dumps(plan['sbar'], indent=2)}
 </DETAILS>
 
-The outline should have about {number_top_sections} and a depth of {depth}.
+The outline should have about {number_top_sections} top-level sections and {'no subsections.' if depth <= 0 else 'a depth of '+str(depth)}.
 Respond ONLY with the outline, in JSON format:
 
 {outline_syntax}
@@ -1048,9 +1060,9 @@ Reason step by step to analyze and improve the above outline with respect to the
          if not first_time:
             messages.append(UserMessage(revision_prompt))
          #print(f'******* task state prompt:\n {gpt_message}')
-         prior_outline = self.llm.ask({'outline':prior_outline, 'critique':user_critique}, messages, template='gpt-4',max_tokens=500, temp=0.1, validator=JSONResponseValidator())
-         self.ui.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
-         user_critique = self.owlCoT.confirmation_popup('Critique', '')
+         prior_outline = self.llm.ask({'outline':prior_outline, 'critique':user_critique}, messages, template=outline_model, max_tokens=500, temp=0.1, validator=JSONResponseValidator())
+         self.owlCoT.display_response(f'***** Outline *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+         user_critique = self.owlCoT.confirmation_popup(json.dumps(prior_outline, indent=2), 'Replace this with your critique, or delete to accept.')
          print(f'user_critique {user_critique}')
          if user_critique != False and len(user_critique) <4:
             user_satisfied = True
@@ -1113,7 +1125,7 @@ The plan may include four agents:
           #print(f'******* task state prompt:\n {gpt_message}')
           plan = self.llm.ask('', messages, template='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
           #plan, plan_steps = ut.get_plan(plan_text)
-          self.ui.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+          self.owlCoT.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
           user_critique = self.owlCoT.confirmation_popup('Critique', '')
           print(f'user_critique {user_critique}')
