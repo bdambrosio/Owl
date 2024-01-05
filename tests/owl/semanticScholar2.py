@@ -224,26 +224,34 @@ def download_pdf(url, title):
             arxiv_filepath = os.path.join(papers_dir, filename)
             with open(arxiv_filepath, 'wb') as f:  # Open in write binary mode
                 f.write(pdf_data)
+        print(f' download got paper, wrote to {arxiv_filepath}')
         return arxiv_filepath
     except Exception as e:
         print(f'\n download 1 fail {str(e)}')
     try:
-        return download_pdf_5005(url, title)
+        filepath=download_pdf_5005(url, title)
+        print(f' download got paper, wrote to {filepath}')
+        return filepath
     except Exception as e:
         print(f'\n download 5005 fail {str(e)}')
     try:
-        return download_pdf_wbb(url, title)
+        filepath = download_pdf_wbb(url, title)
+        print(f' download got paper, wrote to {filepath}')
+        return filepath
     except Exception as e:
         print(f'\n download wbb fail {str(e)}')
     return None
 
 GOOGLE_CACHE_DIR = '/home/bruce/.cache/google-chrome/Default/Cache/Cache_Data/*'
 def latest_google_pdf():
-    files = [f for f in glob.glob(GOOGLE_CACHE_DIR)  if os.path.isfile(f)] # Get all file paths
-    path = max(files, key=os.path.getmtime)  # Find the file with the latest modification time
-    size = os.path.getsize(path)
-    age = int(time.time()-os.path.getmtime(path))
-    print(f"secs old: {age}, size: {size}, name: {path}")
+    try:
+        files = [f for f in glob.glob(GOOGLE_CACHE_DIR)  if os.path.isfile(f)] # Get all file paths
+        path = max(files, key=os.path.getmtime)  # Find the file with the latest modification time
+        size = os.path.getsize(path)
+        age = int(time.time()-os.path.getmtime(path))
+        print(f"secs old: {age}, size: {size}, name: {path}")
+    except Exception:
+        return '', 99999, 0
     return path, age, size
 
 def wait_for_chrome(url, temp_filepath):
@@ -261,20 +269,28 @@ def wait_for_chrome(url, temp_filepath):
                 path, age, size = latest_google_pdf()
             os.rename(path, temp_filepath)
             print(f'\nGot it!\n')
-            return True
+            return temp_filepath
         time.sleep(.5)
         time_left = time_left-0.5
     return False
         
 def download_pdf_wbb(url, title):
     global papers_dir
+    try:
+        for filename in os.listdir(GOOGLE_CACHE_DIR):
+            file_path = os.path.join(GOOGLE_CACHE_DIR, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    except:
+        pass
+
     # Send GET request to fetch PDF data
     print(f' fetching url {url}')
     webbrowser.open(url)
     temp_filepath = os.path.join(papers_dir,'temp.pdf')
-    conf = wait_for_chrome(url, temp_filepath)
+    new_filepath = wait_for_chrome(url, temp_filepath)
     #cot.confirmation_popup(title, 'Saved?' )
-    if conf:
+    if temp_filepath:
         filename = convert_title_to_unix_filename(title)
         arxiv_filepath = os.path.join(papers_dir, filename)
         os.rename(temp_filepath, arxiv_filepath)
@@ -303,6 +319,28 @@ def download_pdf_5005(url, title):
         return download_pdf_wbb(url, title)
     return None
         
+
+def combine_strings(strings, min_length=32, max_length=2048):
+    """
+    Combine sequences of shorter strings in the list, ensuring that no string in the resulting list 
+    is longer than max_length characters, unless it existed in the original list.
+    also discards short strings.
+    """
+    combined_strings = []
+    current_string=''
+    for string in strings:
+        if len(string) < 24:
+            continue
+        if not current_string:
+            current_string = string
+        elif len(current_string) + len(string) > max_length:
+            combined_strings.append(current_string)
+            current_string = string
+        else:
+            current_string += ('\n' if len(current_string)>0 else '') + string
+    if current_string:
+        combined_strings.append(current_string)
+    return combined_strings
     
 #@retry(wait=wait_random_exponential(min=2, max=40), eos=stop_after_attempt(3))
 def embedding_request(text):
@@ -359,7 +397,7 @@ Respond using the following format:
 {summary}
 </RESEARCH EXCERPT>
 
-Remember, respond in JSON using the following format:
+Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
 {{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...]}}
 """),
                   AssistantMessage("")
@@ -378,7 +416,7 @@ Remember, respond in JSON using the following format:
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
         if zipf < 2.8 and word not in keywords:
             keywords.append(word)
-    #print(f'\nKeywords: {keywords}\n')
+    print(f'\nKeywords found: {keywords}\n')
     return '\n'.join(keywords)
     
 # Function to extract words from JSON
@@ -410,8 +448,8 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     result_dict["citationCount"]= citationCount
     result_dict["inflCitations"] = influentialCitationCount
     result_dict["evaluation"] = ''
-    result_dict["pdf_url"] = pdf_url
-    pdf_filepath= download_pdf(page_url, title)
+    result_dict["pdf_url"] = pdf_url if pdf_url is not None else page_url
+    pdf_filepath= download_pdf(page_url, title if len(title)>0  else page_url[page_url.rfind('/')+1:])
     result_dict["pdf_filepath"]= pdf_filepath
     
     print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
@@ -428,6 +466,48 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
+
+
+def get_arxiv_preprint_url(query, top_k=10):
+    """This function gets the top_k articles based on a user's query, sorted by relevance.
+    It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
+    """
+
+    title_embed = embedding_request(query)
+    result_list = []
+    # Set up your search query
+    print(f'arxiv search for {query}')
+    search = arxiv.Search(
+        query=f'ti:{query}', 
+        #query=query,
+        max_results=top_k, 
+        sort_by=SortCriterion.Relevance,
+        sort_order = SortOrder.Descending
+    )
+    # Use the client to get the results
+    results =arxiv.Client().results(search)
+    # get closest embedding to title
+    best_score = 0
+    best_ppr = None
+    for result in results:
+        if len(paper_library_df) > 0:
+            dup = (paper_library_df['title']== result.title).any()
+            if dup:
+                continue
+        candidate_embed = embedding_request(result.title)
+        cosine_similarity = np.dot(title_embed, candidate_embed) / (np.linalg.norm(title_embed) * np.linalg.norm(candidate_embed))
+        print(f' score {cosine_similarity}, title {result.title}')
+        if cosine_similarity > best_score:
+            best_ppr = result
+            best_score = cosine_similarity
+    if best_ppr is None:
+        return None
+    else:
+        print(f'considering {best_ppr.title}')
+        if cot.confirmation_popup("found this, index it?", best_ppr.title):
+            return [x.href for x in best_ppr.links][1]
+        return None
+
     
 def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=10, confirm=True):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
@@ -438,7 +518,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
     result_list = []
     #library_df = pd.read_parquet(library_file).reset_index()
     if confirm:
-        query = cot.confirmation_popup("Search ARXIV using this query?", query )
+        query = cot.confirmation_popup("Search SemanticScholar using this query?", query )
     if not query:
         print(f'confirmation: No!')
         return [],0,0
@@ -459,6 +539,8 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
         current_offset = results["offset"]
         if total_papers == 0:
             return [],0,0
+        if current_offset == total_papers:
+            return [],0,0
         next_offset = results["next"]
         papers = results["data"]
         print(f'get article search returned first {len(papers)} papers of {total_papers}')
@@ -477,6 +559,11 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                 openAccessPdf = paper['openAccessPdf']['url']
             else: openAccessPdf = None
             year = paper['year']
+            if confirm:
+                query = cot.confirmation_popup("Index this article?", title+"\n"+str(year))
+                if not query:
+                    print(f' skipping {title}')
+                    continue
             abstract = paper['abstract'] if type(paper['abstract']) is str else str(paper['abstract'])
             authors = paper['authors']
             citationCount = paper['citationCount']
@@ -486,7 +573,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             if abstract is None or (tldr is not None and len(tldr) > len(abstract)):
                 abstract = str(tldr)
             if citationCount == 0:
-                if year < 2022:
+                if year < 2020:
                     print(f'   skipping, no citations {title}')
                     continue
             result_dict = {key: '' for key in paper_library_columns}
@@ -516,10 +603,16 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             paper_library_df.loc[paper_index] = result_dict
             # section and index paper
             if not isOpenAccess:
-                if influentialCitationCount > 0:
-                    index_paper_synopsis(result_dict, abstract)
-                    print(f'   not open access but influentialCitationCount {influentialCitationCount}')
+                if (not influentialCitationCount > 0 and not confirm and
+                    ((citationCount < 20 and year < 2020) or (citationCount <2 and year < 2021))):
                     continue
+                if not confirm or not cot.confirmation_popup("try retrieving preprint?", query ):
+                    continue
+                preprint_url = get_arxiv_preprint_url(title)
+                if preprint_url is None:
+                    continue
+                result_dict['pdf_url'] = preprint_url
+                result_dict['pdf_filepath'] = download_pdf(preprint_url, title)
             paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
             paper_library_df.to_parquet(library_file)
             result_list.append(result_dict)
@@ -602,10 +695,9 @@ end the rewrite as follows:
               AssistantMessage("<REWRITE>\n")
               ]
     #print(f'Tokens: {tokenizer.encode(draft).shape}')
-    max_tokens=int(1.5*len(tokenizer.encode(draft)))
-    
-    #response = llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
-    response = llm.ask('', messages, client=cot.llm.osClient, max_tokens=max_tokens, temp=0.1, eos='</REWRITE>')
+    max_tokens=int(2*len(tokenizer.encode(draft)))
+    print(f'rewrite max_tokens: {max_tokens}')
+    response = llm.ask('', messages, max_tokens=max_tokens, temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -647,6 +739,7 @@ def index_section_synopsis(paper_dict, synopsis):
     section_library_df.loc[len(section_library_df)]=synopsis_dict
     return faiss_id
 
+
 def index_paper(paper_dict):
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
@@ -654,10 +747,12 @@ def index_paper(paper_dict):
     pdf_filepath = paper_dict['pdf_filepath']
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     if pdf_filepath is None:
+        print(f'pdf filepath is None!')
         return paper_abstract, paper_faiss_id, [],[]
     try:
         extract = create_chunks_grobid(pdf_filepath)
         if extract is None:
+            print('grobid extract is None')
             return paper_abstract, paper_faiss_id, [],[]
     except Exception as e:
         print(f'\ngrobid fail {str(e)}')
@@ -671,12 +766,6 @@ def index_paper(paper_dict):
 <ABSTRACT>
 {{$abstract}}
 </ABSTRACT>
-
-this overall paper synopsis generated from the previous sections:
-
-<PAPER_SYNOPSIS>
-{{$paper_synopsis}}
-</PAPER_SYNOPSIS>
 
 and this list of important entities (key phrases, acronyms, and named-entities) mentioned in this section:
 
@@ -713,17 +802,22 @@ List of all key points in the paper, including all significant statements, metho
 {{$section}}
 </SECTION SYNOPSIS>
 
-Please ensure the synopsis provides depth while removing redundant or superflous detail, ensuring that no important aspect of the paper's argument, observations, methods, findings, or conclusions is included in the list of key points.
+Please ensure the synopsis provides depth while removing redundant or superflous detail, ensuring that all important aspects of the paper's information about important entities, central argument, observations, methods, findings, or conclusions is included in the list of key points.
 End your synopsis response as follows:
 
 </UPDATED_SYNOPSIS>
 """
     section_synopses = []; section_ids = []
     paper_synopsis = ''
+    index_text = ''
+    text_chunks = combine_strings(text_chunks) # combine shorter chunks
     with tqdm(total=len(text_chunks)) as pbar:
-        for text_chunk in text_chunks:
-            if len(text_chunk) < 16:
+        for idx, text_chunk in enumerate(text_chunks):
+            if len(text_chunk) < 32:
                 continue
+            if len(text_chunk) < 384 and len(index_text) < 1440:
+                index_text += '\n'+text_chunk
+
             print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
             entities = extract_entities(paper_title, text_chunk)
             print(f'entities: {entities}')
@@ -735,20 +829,9 @@ End your synopsis response as follows:
                                 "entities":entities,
                                 "text":text_chunk},
                                prompt,
-                               #template=GPT3,
-                               max_tokens=500,
+                               max_tokens=max(384,int(len(text_chunk)/12)), # let len grow for big chunks
                                temp=0.05,
                                eos='</SYNOPSIS')
-
-            #response = llm.ask({"abstract":paper_abstract,
-            #                    "paper_synopsis":paper_synopsis,
-            #                    "entities":entities,
-            #                    "text":text_chunk},
-            #                   prompt,
-            #                   template=OS_MODEL,
-            #                   max_tokens=500,
-            #                   temp=0.05,
-            #                   eos='</SYNOPSIS')
             pbar.update(1)
             if response is None:
                 print(f'\n\nFAILURE CREATING EXCERPT!\n\n')
@@ -762,13 +845,15 @@ End your synopsis response as follows:
             section_synopses.append(response)
             section_ids.append(id)
             
+            """
             #
             ### now update paper synopsis with latest section synopsis
             ###   why not with entire section?
-            
+            ### do we really need to do this EVERY TIME? 
             paper_messages = [SystemMessage(paper_prompt),
                               AssistantMessage('<UPDATED_SYNOPSIS>')
                               ]
+            # note 1200 tokens is too big to embed, isn't it? check this.. maybe index halves and average?
             paper_response = llm.ask({"title":paper_title,
                                       "abstract":paper_abstract,
                                       "paper_synopsis":paper_synopsis,
@@ -782,13 +867,14 @@ End your synopsis response as follows:
             if end_idx < 0:
                 end_idx = len(response)
                 paper_synopsis = response[:end_idx-1]
-    index_paper_synopsis(paper_dict, paper_synopsis)
+            """
+    index_paper_synopsis(paper_dict, paper_abstract)
     # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
     #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
     #paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'section_ids'] = section_ids
     save_synopsis_data()
     print(f'indexed {paper_title}, {len(section_synopses)} sections')
-    return paper_synopsis, paper_faiss_id, section_synopses, section_ids
+    return paper_abstract, paper_faiss_id, section_synopses, section_ids
 
 
 def strings_ranked_by_relatedness(
@@ -927,6 +1013,6 @@ if __name__ == '__main__':
         print("No argument provided, running default main code.")
         #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
         #search("miRNA and DNA Methylation assay cancer detection", web=True)
-        #index_url("https://arxiv.org/pdf/2306.08302.pdf")
-
+        index_url("https://arxiv.org/pdf/2306.08302.pdf")
+        #print(get_arxiv_preprint_url("QLoRA Efficient Finetuning of Quantized LLMs"))
 

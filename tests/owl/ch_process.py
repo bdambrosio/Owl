@@ -149,12 +149,13 @@ class Interactions:
         for i, interaction in enumerate(self.interactions):
             if type(interaction) is not dict or 'role' not in interaction:
                continue
-            if interaction['role'] != 'user': # this will automatically skip assistant roles in building interactions
+            if interaction['role'] != 'user':
+               # we include assistant response via lookahead four lines down 
                continue
             user = self.interactions[i]
             # make sure we aren't at last entry, if not check if next entry is asst response
             if len(self.interactions) > i+1 and 'role' in self.interactions[i+1] and self.interactions[i+1]['role'] == 'assistant':
-               asst = self.interactions[i]
+               asst = self.interactions[i+1]
             else:
                continue
             prompt = [SystemMessage(self.owl.short_prompt()),
@@ -202,13 +203,13 @@ class Interactions:
 The response should be a JSON form, including topic, possible subtopics, key points, summary, inconsistencies, and future directions: 
 {{"topic": '<topic>', 
   "subtopics":['<subtopic1>',], 
-  "key_points":'<a list of the key points to remember in this interaction. key_points might be statements, hypotheses, todo item, questions, decisions, or commitments.>', 
+  "key_points":'<a list of the key points to remember in this interaction. key_points can be statements, hypotheses, todo items, questions, decisions, or commitments related to the topic.>', 
   "summary":'<a text summary of the interaction with respect to the topic, subtopics, and key points>',
   "inconsistencies": '<a list of inconsistencies across the interaction summaries>',
   "future directions": '<a list of future directions indicated by the evolution of thought in the interaction summaries.>',
 }}
                       
-Subtopics, key_points, and summary should each be complete, accurate, yet concise compilations of the corresponding respective sets of interaction fields, without content duplication.
+Subtopics, key_points, and summary should each be complete, accurate, detailed compilations of the corresponding respective sets of interaction fields, without content duplication.
 
 Interaction records:
 

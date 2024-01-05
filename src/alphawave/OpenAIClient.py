@@ -92,7 +92,6 @@ class OpenAIClient(PromptCompletionClient):
             print(Colorize.value('duration', time.time() - startTime, 'ms'))
             print(Colorize.value('usage', result['usage']))
             print(Colorize.value('result message', result['choices'][0]['message']))
-            #print(Colorize.output(response.json()))
         return {'status': 'success', 'message': str(result['choices'][0]['message']['content'])}
 
     def addRequestHeaders(self, headers: Dict[str, str], options: OpenAIClientOptions):

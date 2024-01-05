@@ -47,7 +47,7 @@ from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacer
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 import signal
-from OwlCoT import LLM, ListDialog, generate_faiss_id
+from OwlCoT import LLM, ListDialog, generate_faiss_id,OPENAI_MODEL3,OPENAI_MODEL4
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
@@ -161,6 +161,20 @@ class PWUI(QWidget):
 
 import re
 
+def get_template(row, config):
+    if row in config:
+        if 'model' in config[row]:
+            model = config[row]['model']
+            if model == 'gpt3':
+                return OPENAI_MODEL3
+            if model == 'gpt4':
+                return OPENAI_MODEL4
+            if model == 'llm':
+                return cot.template
+        else:
+            return cot.template
+    print(f'get_template fail {row}\n{json.dumps(config, indent=2)}')
+        
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
     """
     Extracts acronyms from the given text using the specified regular expression pattern.
@@ -212,7 +226,27 @@ else:
         sys.exit(-1)
     print(f"loaded {entity_cache_filepath}")
 
-def entities(paper_title, paper_outline, paper_summaries, ids):
+def literal_missing_entities(entities, draft):
+    # identifies items in the entities_list that DO appear in the summaries but do NOT appear in the current draft.
+    missing_entities = entities.copy()
+    draft_l = draft.lower()
+    for entity in entities:
+        if entity.lower() in draft_l :
+            missing_entities.remove(entity)
+    #print(f'Missing entities from draft: {len(missing_entities)}')
+    return missing_entities
+
+def literal_included_entities(entities, text):
+    # identifies items in the entities_list that DO appear in the current draft.
+    included_entities = []
+    text_l = text.lower()
+    for entity in entities:
+        if entity.lower() in text_l:
+            included_entities.append(entity)
+    #print(f'Missing entities from draft: {missing_entities}')
+    return included_entities
+
+def entities(paper_title, paper_outline, paper_summaries, ids,template):
     global entity_cache
     items = []
     total=len(ids); cached=0
@@ -223,7 +257,7 @@ def entities(paper_title, paper_outline, paper_summaries, ids):
             cached += 1
             items.extend(entity_cache[int_id])
         else:
-            excerpt_items = extract_entities(paper_title, paper_outline, excerpt[0]+'\n'+excerpt[1])
+            excerpt_items = extract_entities(paper_title, paper_outline, excerpt[0]+'\n'+excerpt[1], template)
             entity_cache[int_id]=excerpt_items
             items.extend(entity_cache[int_id])
     print(f'entities total {total}, in cache: {cached}')
@@ -232,7 +266,7 @@ def entities(paper_title, paper_outline, paper_summaries, ids):
     print(f"wrote {entity_cache_filepath}")
     return list(set(items))
 
-def extract_entities(paper_title, paper_outline, summary):
+def extract_entities(paper_title, paper_outline, summary, template):
     kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 You are writing a paper titled:
 {paper_title}
@@ -248,14 +282,13 @@ If distinction between keyword, acronym, or named_entity is unclear, it is accep
 {summary}
 </RESEARCH EXCERPT>
 
-Remember, respond in JSON using the following format:
+Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
 {{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...]}}
 """),
                   AssistantMessage("")
               ]
     
-    #response_json = cot.llm.ask('', kwd_messages, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=400, temp=0.1, validator=JSONResponseValidator())
-    response_json = cot.llm.ask('', kwd_messages, client=cot.llm.osClient, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    response_json = cot.llm.ask('', kwd_messages, template=template, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
     # remove all more common things
     keywords = []
     if 'found' in response_json:
@@ -272,72 +305,59 @@ Remember, respond in JSON using the following format:
 
 def entities_to_str(item_list):
     return '\n'.join(item_list)
+
+def count_keyphrase_occurrences(texts, keyphrases):
+    """
+    Count the number of keyphrase occurrences in each text.
+
+    Parameters:
+    texts (list): A list of texts.
+    keyphrases (list): A list of keyphrases to search for in the texts.
+
+    Returns:
+    list: A list of tuples, each containing a text and its corresponding keyphrase occurrence count.
+    """
+    counts = []
+    for text in texts:
+        count = sum(text.count(keyphrase.strip()) for keyphrase in keyphrases)
+        counts.append((text, count))
     
-def rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft):
-    missing_entities_prompt=f"""Your current task is to identify important missing entities in the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
-The current DRAFT is:
-<DRAFT>
-{draft}
-</DRAFT>
+    return counts
 
-This DRAFT is the:
-{section_outline["title"]}
-within: {parent_section_title} 
-{"within: "+heading_1 if heading_1 != parent_section_title else ''}
-The draft should cover the specific topic: {subsection_topic}
+def select_top_n_texts(texts, keyphrases, n):
+    """
+    Select the top n texts with the maximum occurrences of keyphrases.
 
-A MISSING ENTITY is an ENTITY that is: 
- - In the ENTITIES list provided earlier;
- - Highly relevant and specific to the paper title: {paper_title}
- - Highly relevant to the current draft topic: {subsection_topic}; and role the content is to fill;
- - missing in the previous draft; 
+    Parameters:
+    texts (list): A list of texts.
+    keyphrases (list): A list of keyphrases.
+    n (int): The number of texts to select.
 
-Following these steps:
-Step 1. Reason step by step to determine the role of this section within the paper. Do not include your reasoning in your response.
-Step 2. Identify 3-5 MISSING ENTITIES to be added in the rewrite.
-Step 3. Respond with the list of identified MISSING ENTITIES from step 2. List ONLY the selected missing entities, without any explanation or commentary. Your response should end with:
+    Returns:
+    list: The top n texts with the most keyphrase occurrences.
+    """
+    print(f'select top n texts type {type(texts)}, len {len(texts[0])}, keys {keyphrases}')
+    #print(f'select top n texts {keyphrases}')
+    counts = count_keyphrase_occurrences(texts, keyphrases)
+    # Sort the texts by their counts in descending order and select the top n
+    sorted_texts = sorted(counts, key=lambda x: x[1], reverse=True)
+    return sorted_texts[:n]
 
-</MISSING_ENTITIES>
-"""
 
+def rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, entities, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft, template):
+    missing_entities = literal_missing_entities(entities, draft)
     sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 You are writing a paper titled:
 {paper_title}
 The outline for the full paper is:
 {format_outline(paper_outline)}
 
-The following is a set of published research extracts used in creating the previous draft of this part of the paper"
+The following is a set of published research extracts that may be useful in writing the draft of this part of the paper:
 
 <RESEARCH EXCERPTS>
-{paper_summaries}
+{{{{$paper_summaries}}}}
 </RESEARCH EXCERPTS>
 
-The following have been identified as key items mentioned in the above excerpts. These items may not have been included in the current draft:
-
-<ENTITIES>
-{entities_to_str(keywds)}
-</ENTITIES>
-
-The {heading_1} section content up to this point is:
-
-<PRIOR_SECTION_CONTENT>
-{heading_1_draft}
-</PRIOR_SECTION_CONTENT>
-
-"""
-)
-    short_sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
-You are writing a paper titled:
-{paper_title}
-The outline for the full paper is:
-{format_outline(paper_outline)}
-
-The following have been identified as key Entities (key phrases, acronyms, or named-entities) for the paper.  These items may not have been included in the current draft:
-
-<ENTITIES>
-{entities_to_str(keywds)}
-</ENTITIES>
-
 The {heading_1} section content up to this point is:
 
 <PRIOR_SECTION_CONTENT>
@@ -347,64 +367,97 @@ The {heading_1} section content up to this point is:
 """
 )
 
-    entity_select_msgs = [short_sysMessage,
-                          UserMessage(missing_entities_prompt),
-                          AssistantMessage("<MISSING_ENTITIES>")
-                          ]
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_outline['title']}', to increase the density of relevant information it contains. Your current task is to select the most important missing entities from the current draft. The following entities in the source material above have been identified as missing in the current draft:
 
-    #response = cot.llm.ask('', entity_select_msgs, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
-    #response = cot.llm.ask('', entity_select_msgs, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
-    response = cot.llm.ask('', entity_select_msgs, client=cot.llm.osClient, max_tokens=100, temp=0.1, eos='</MISSING_ENTITIES>')
-    if response is None or len(response) == 0:
-        return draft
-    me = response
-    end_idx = me.rfind('</MISSING_ENTITIES>')
-    if end_idx < 0:
-        end_idx = len(me)
-        rewrite = me[:end_idx-1]
-    print(f'\nMissing Entities:\n{me}\n')
-    missing_entities = me
+<MISSING_ENTITIES>
+{{{{$missing_entities}}}}
+</MISSING_ENTITIES>
 
-    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
 The current DRAFT is:
 
 <DRAFT>
-{draft}
+{{{{$draft}}}}
+</DRAFT>
+
+Respond with up to six of the most important missing entities to add to the draft.
+The order of the missing entities in the list above is NOT representative of their importance!
+Many or all of the listed missing entities may be irrelevant to the role of this subsection.
+Rate missing entity importance by:
+ - relevance to the section title. 
+ - relevance to the existing draft.
+ - the role of this section within the overall outline. 
+Do not respond with more than six entities. 
+Respond as follows:
+
+missing_entity 1
+missing_entity 2
+missing_entity 3
+...
+
+Respond only with the above list. Do not include any commentary or explanatory material.
+End your response with:
+
+</ME>
+"""
+
+    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
+The current version of the DRAFT is:
+
+<DRAFT>
+{{{{$draft}}}}
 </DRAFT>
 
 This DRAFT is the:
 {section_outline["title"]}
 within: {parent_section_title} 
-{"within: "+heading_1 if heading_1 != parent_section_title else ''}
 
-Entities (key phrases, acronyms, or names-entities) that are missing in the above draft include:
+Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
 
 <MISSING_ENTITIES>
-{missing_entities}
+{{{{$missing_entities}}}}
 </MISSING_ENTITIES>
 
-The rewrite should cover the specific topic: {subsection_topic}
-Following these steps:
-Step 1. Reason step by step to determine the role of this section within the paper.
-Step 2. Write a new, denser draft of the same length which covers every Entity and detail from the previous draft as well as the MISSING_ENTITIES listed above.
+The rewrite must cover the specific topic: {subsection_topic}
 
-Further Instructions: 
- - Coherence: re-write the previous draft to improve flow and make space for additional entities;
- - Missing entities should appear where best for the flow and coherence in the new draft;
- - Never drop entities from the previous content. If space cannot be made, add fewer new entities. 
- - Your goal is information density: use the same number of words as the previous draft, or as few more as needed. Remove or rewrite low-content phrases or sentences to improve conciseness.
- - Ensure the rewrite provides all the depth and information from the previous draft. 
- - Your response include ONLY the rewritten draft, without any explanation or commentary.
+<INSTRUCTIONS>
+Follow these steps:
+Step 1. Reason step by step to determine the role of this section within the paper.
+Step 2. Write a new, denser draft of the same length that includes all entities and information and detail from the previous draft and adds content for the MISSING_ENTITIES listed above.
+ 
+Your response include ONLY the rewritten draft, without any explanation or commentary.
 
 end the rewrite as follows:
 </REWRITE>
+
+</INSTRUCTIONS>
 """
+
+    messages=[sysMessage,
+              UserMessage(MESelectMessage),
+              AssistantMessage("<ME>\n")
+              ]
+    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_entities": entities_to_str(missing_entities)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
+    if response is None or len(response) == 0:
+        return draft
+    end_idx = response.rfind('</ME>')
+    if end_idx < 0:
+        end_idx = len(response)
+    response = response[:end_idx-1]
+    add_entities = response.split('\n')[:6]
+    # pick just the actual entities out of responses
+    add_entities = literal_included_entities(missing_entities, '\n'.join(add_entities))
+    # downselect summaries to focus on selected missing content
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+
+    research_excerpts = ''
+    for text in top_n_texts:
+        research_excerpts += text[0]+'\n'
+        
     messages=[sysMessage,
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    #response = cot.llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-3.5-turbo-16k', max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</DRAFT>')
-    response = cot.llm.ask('', messages, client=cot.llm.osClient, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_entities": add_entities}, messages, template=template, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -412,7 +465,260 @@ end the rewrite as follows:
     if end_idx < 0:
         end_idx = len(rewrite)
         rewrite = rewrite[:end_idx-1]
-    print(f'\nRewrite:\n{rewrite}\n')
+    return rewrite
+
+def add_pp_rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, entities, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft, template):
+
+    missing_entities = literal_missing_entities(entities, draft)
+
+    # add a new paragraph on new entities
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+You are writing a paper titled:
+{paper_title}
+The outline for the full paper is:
+{format_outline(paper_outline)}
+
+The following is a set of published research extracts that may be useful in writing the draft of this part of the paper:
+
+<RESEARCH EXCERPTS>
+{{{{$paper_summaries}}}}
+</RESEARCH EXCERPTS>
+
+The {heading_1} section content up to this point is:
+
+<PRIOR_SECTION_CONTENT>
+{heading_1_draft}
+</PRIOR_SECTION_CONTENT>
+
+"""
+)
+
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_outline['title']}', to increase the density of relevant information it contains. Your current task is to select the most important missing entities from the current draft. The following entities in the source material above have been identified as missing in the current draft:
+
+<MISSING_ENTITIES>
+{{{{$missing_entities}}}}
+</MISSING_ENTITIES>
+
+The current DRAFT is:
+
+<DRAFT>
+{{{{$draft}}}}
+</DRAFT>
+
+Respond with up to six of the most important missing entities to add to the draft.
+The order of the missing entities in the list above is NOT representative of their importance!
+Many or all of the listed missing entities may be irrelevant to the role of this subsection.
+Rate missing entity importance by:
+ - relevance to the section title. 
+ - relevance to the existing draft.
+ - the role of this section within the overall outline. 
+Do not respond with more than six entities. 
+Respond as follows:
+
+missing_entity 1
+missing_entity 2
+missing_entity 3
+...
+
+Respond only with the above list. Do not include any commentary or explanatory material.
+End your response with:
+
+</ME>
+"""
+
+    rewrite_prompt=f"""Your current task is to expand the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
+The current version of the DRAFT is:
+
+<DRAFT>
+{{{{$draft}}}}
+</DRAFT>
+
+This DRAFT is the:
+{section_outline["title"]}
+within: {parent_section_title} 
+
+Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
+
+<MISSING_ENTITIES>
+{{{{$missing_entities}}}}
+</MISSING_ENTITIES>
+
+The new paragraph must be pertinent to the specific topic: {subsection_topic}, and fit as an extension of the current draft.
+
+<INSTRUCTIONS>
+Follow these steps:
+Step 1. Reason step by step to determine the role of this section within the paper.
+Step 2. Write a new, dense, concise paragraph that adds content for the MISSING_ENTITIES listed above.
+ 
+Your response include ONLY the new paragraph, without any explanation or commentary.
+
+end the rewrite as follows:
+</REWRITE>
+
+</INSTRUCTIONS>
+"""
+
+    messages=[sysMessage,
+              UserMessage(MESelectMessage),
+              AssistantMessage("<ME>\n")
+              ]
+    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_entities": entities_to_str(missing_entities)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
+    if response is None or len(response) == 0:
+        return draft
+    end_idx = response.rfind('</ME>')
+    if end_idx < 0:
+        end_idx = len(response)
+    response = response[:end_idx-1]
+    add_entities = response.split('\n')[:6]
+    add_entities = literal_included_entities(missing_entities, '\n'.join(add_entities))
+    # downselect summaries to focus on selected missing content
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+
+    research_excerpts = ''
+    for text in top_n_texts:
+        research_excerpts += text[0]+'\n'
+        
+    messages=[sysMessage,
+              UserMessage(rewrite_prompt),
+              AssistantMessage("<REWRITE>\n")
+              ]
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_entities": add_entities}, messages, template=template, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
+    if response is None or len(response) == 0:
+        return draft
+    rewrite = response
+    end_idx = rewrite.rfind('</REWRITE>')
+    if end_idx < 0:
+        end_idx = len(rewrite)
+        rewrite = rewrite[:end_idx-1]
+    return draft + '\n'+rewrite
+
+def depth_rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, entities, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft, template):
+
+    missing_entities = literal_missing_entities(entities, draft)
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+You are writing a paper titled: '{paper_title}'
+The outline for the full paper is:
+{format_outline(paper_outline)}
+
+The following is a set of published research extracts that may be useful in writing the draft of this part of the paper:
+
+<RESEARCH EXCERPTS>
+{{{{$paper_summaries}}}}
+</RESEARCH EXCERPTS>
+
+"""
+)
+
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_outline['title']}', to increase the density of relevant information it contains. Your current task is to select the most important entities in the current draft. The following entities have been identified as present in the current draft:
+
+<ENTITIES>
+{{{{$entities}}}}
+</ENTITIES>
+
+The current DRAFT is:
+
+<DRAFT>
+{{{{$draft}}}}
+</DRAFT>
+
+Respond with up to four of the most important entities in the draft.
+The order of the entities in the list above is NOT representative of their importance!
+Many or all of the listed entities may be irrelevant to the role of this draft.
+Rate entity importance by:
+ - relevance to the section title. 
+ - relevance to the existing draft.
+ - important information about this entity in the research excerpts omitted in the current draft.
+ - the role of this section within the overall outline. 
+Do not respond with more than four entities. 
+Respond as follows:
+
+entity 1
+entity 2
+entity 3
+...
+
+Respond only with the above list. Do not include any commentary or explanatory material.
+End your response with:
+
+</ME>
+"""
+
+    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_outline['title']}', to increase the density of relevant information it contains. 
+The current version of the DRAFT is:
+
+<DRAFT>
+{{{{$draft}}}}
+</DRAFT>
+
+This DRAFT is the:
+{section_outline["title"]}
+within: {parent_section_title} 
+
+Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
+
+<ENTITIES>
+{{{{$entities}}}}
+</ENTITIES>
+
+The rewrite must cover the specific topic: {subsection_topic}
+
+<INSTRUCTIONS>
+Follow these steps:
+Step 1. Reason step by step to determine the role of this section within the paper.
+Step 2. Write a new, denser draft of the same length that includes all entities and information and detail from the previous draft and adds depth for the ENTITIES listed above.
+ 
+Your response include ONLY the rewritten draft, without any explanation or commentary.
+
+end the rewrite as follows:
+</REWRITE>
+
+</INSTRUCTIONS>
+"""
+
+    messages=[sysMessage,
+              UserMessage(MESelectMessage),
+              AssistantMessage("<AE>\n")
+              ]
+    #entities from research summaries mentioned in current draft
+    included_entities = literal_included_entities(entities, draft)
+    #select entities to expand
+    response = cot.llm.ask({"draft":draft,
+                            "paper_summaries":paper_summaries,
+                            "entities": entities_to_str(included_entities)},
+                           messages,
+                           template=template,
+                           max_tokens=200, temp=0.1, eos='</AE>')
+    if response is None or len(response) == 0:
+        return draft
+    end_idx = response.rfind('</AE>')
+    if end_idx < 0:
+        end_idx = len(response)
+    response = response[:end_idx-1]
+    add_entities = response.split('\n')[:4]
+                                             # llm response can include other junk, prune                                             
+    add_entities = literal_included_entities(entities, '\n'.join(add_entities))
+
+    # downselect summaries to focus on selected entities 
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+
+    research_excerpts = ''
+    for text in top_n_texts:
+        research_excerpts += text[0]+'\n'
+        
+
+    # expand content on selected entities
+    messages=[sysMessage,
+              UserMessage(rewrite_prompt),
+              AssistantMessage("<REWRITE>\n")
+              ]
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "entities": add_entities}, messages, template=template, max_tokens=int(1.5*subsection_token_length), temp=0.1, eos='</REWRITE>')
+    if response is None or len(response) == 0:
+        return draft
+    rewrite = response
+    end_idx = rewrite.rfind('</REWRITE>')
+    if end_idx < 0:
+        end_idx = len(rewrite)
+        rewrite = rewrite[:end_idx-1]
     return rewrite
 
 plans_filepath = "./arxiv/arxiv_plans.json"
@@ -428,7 +734,13 @@ else:
     with open(plans_filepath, 'w') as f:
         plans = json.dump(plans, f)
 
+def save_plans():
+    global plans
+    with open(plans_filepath, 'w') as f:
+        json.dump(plans, f)
+    
 def plan_search():
+    # note this uses arxiv/arxiv_plans.json, NOT working memory! why? no idea.
     global plans
     plan = None
     if len(plans)> 0:
@@ -460,69 +772,95 @@ def plan_search():
         return
     return plan
 
-def s2_search (config, outline, title_prefix='', dscp_prefix=''):
+def make_search_queries(outline, section_outline, template):
+    prompt = """
+Following is an outline for a research paper, in JSON format: 
+
+{{$outline}}
+
+From this outline generate 3 SemanticScholar search queries for the section:
+{{$target_section}}
+
+Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
+{"query1":'query 1 text',"query2": 'query 2 text', "query3": query 3 text'}
+
+Respond ONLY with the JSON above, do not include any commentary or explanatory text.
+"""
+    messages = [SystemMessage(prompt),
+                AssistantMessage('')
+                ]
+    queries = cot.llm.ask({"outline":outline, "target_section":section_outline}, messages, stop_on_json=True, template=template, max_tokens=150, validator=JSONResponseValidator())
+    if type(queries) is dict:
+        print(f'\nquery forsection:\n{section_outline}\nqueries:\n{json.dumps(queries, indent=2)}')
+    else:
+        print(f'\nquery forsection:\n{section_outline}\nqueries:\n{queries}')
+    return queries
+    
+def s2_search (config, outline, section_outline):
     #
     ## call get_articles in semanticScholar2 to query semanticScholar for each section or subsection in article
     ## we can get 0 results if too specific, so probabilistically relax query as needed
     #
-    if 'title' in outline:
-        title_prefix += '. '+outline['title']
-    if 'dscp' in outline:
-        dscp_prefix += '. '+outline['dscp']
-    if 'sections' in outline:
-        for subsection in outline['sections']:
-            s2_search(config, subsection, title_prefix, dscp_prefix)
+    print(f'paper_writer entered s2_search with {section_outline}')
+    template = get_template('Search', config)
+    print(f' paper_writer s2_search template: {template}')
+    # llms sometimes add an empty 'sections' key on leaf sections.
+    if 'sections' in section_outline and len(section_outline['sections']) > 0: 
+        for subsection in section_outline['sections']:
+            s2_search(config, outline, subsection)
     else:
-        entities = extract_entities('', '', title_prefix+'\n'+dscp_prefix)
-        # search entity list as query
-        result_list = []
-        query_list = entities.copy() # in case we expand later to try multiple descent paths
-        while len(result_list) == 0 and len(query_list) > 0:
-            result_list, total_papers, next_offset = s2.get_articles(' '.join(query_list), confirm=True)
-            # if nothing, randomly remove one entity
-            query_list.remove(random.choice(query_list))
+        queries = make_search_queries(outline, section_outline, template)
+        bads = ['(',')',"'",' AND', ' OR'] #tulu sometimes tries to make fancy queries, S2 doesn't like them
+        if type(queries) is dict:
+            for i in range(3):
+                if 'query'+str(i) in queries:
+                    query = queries['query'+str(i)]
+                    for bad in bads:
+                        query = query.replace(bad, '')
+                        result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
+                        print(f's2_search found {len(result_list)} new papers')
 
-def write_report(config, paper_outline=None, section_outline=None, length=400): 
+                
+def write_report(config, length=None): 
     #rows = ["Query", "SBAR", "Outline", "WebSearch", "Write", "ReWrite"]
     query_config = config['Query']
     query = ""
+    plan = plan_search()
     if query_config['exec'] == 'Yes':
         query = cot.confirmation_popup('Question to report on?', '')
-        if not query:
-            return None
-
+    else:
+        plan['task']=query
+            
     sbar_config = config['SBAR']
     if sbar_config['exec'] == 'Yes':
-        plan = plan_search()
-    else:
-        plan = plan_search()
+        # pass in query to sbar!
+        plan = pl.analyze(plan)
         
     outline_config = config['Outline']
     if outline_config['exec'] == 'Yes':
         # make outline
-        pl.outline(config, plan)
+        pl.outline(outline_config, plan)
         outline = plan['outline']
-        cot.save_workingMemory() # save updated plan
+        save_plans() # save paper_writer plan memory
     else:
-        outline = default_outline # a canned research outline at bottom of this file.
-
+        outline = plan['outline']
+        
     search_config = config['Search']
     # Note this is web search. Local faiss or other resource search will be done in Write below
     if search_config['exec'] == 'Yes':
         # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
         # also need to configure prompt, depth (depth in terms of # articles total or new per section?)
-        s2_search(config, outline)
+        s2_search(config, outline, outline)
 
     write_config = config['Write']
     if write_config['exec'] == 'Yes':
-        if section_outline is None:
-            section_outline = paper_outline
-        if 'length' in config:
-            length = int(config['length'])
-        else:
-            length = 1200
-        # write report! pbly should add length field, # rewrites
-        write_report_aux(config, paper_outline=paper_outline, section_outline=section_outline, length=length)
+        if length is None:
+            if 'length' in config:
+                length = int(config['length'])
+            else:
+                length = 1200
+        # write report! pbly should add # rewrites
+        write_report_aux(config, paper_outline=outline, section_outline=outline, length=length)
         
     rewrite_config = config['ReWrite'] # not sure, is this just for rewrite of existing?
     if rewrite_config['exec'] == True:
@@ -530,7 +868,8 @@ def write_report(config, paper_outline=None, section_outline=None, length=400):
         pass
 
 
-def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1=None, heading_1_draft = '', num_rewrites=0):
+def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1=None, heading_1_draft = '', num_rewrites=1):
+    template = get_template('Write',config)
     if len(paper_title) == 0 and depth == 0 and 'title' in paper_outline:
         paper_title=paper_outline['title']
     if 'length' in section_outline:
@@ -545,7 +884,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
     subsection_topic = section_outline['dscp'] if 'dscp' in section_outline else section_outline['title']
     subsection_title = section_outline['title']
     #print(f"\nWRITE_PAPER section: {topic}")
-    if 'sections' in section_outline:
+    if 'sections' in section_outline and len(section_outline['sections']) > 0:
         #
         ### write section intro first draft
         #
@@ -602,44 +941,37 @@ The outline for the full paper is:
 {format_outline(paper_outline)}
 
 """),
-                  UserMessage(f"""Your current task is to write the part titled:
-'{section_outline["title"]}'
-within '{parent_section_title}' 
-{"within "+heading_1 if heading_1 != parent_section_title else ''}
-The following is a set of published research extracts for use in creating this section of the paper:
+                  UserMessage(f"""Your current task is to write the part titled: '{section_outline["title"]}'
 
 <RESEARCH EXCERPTS>
 {paper_summaries}
 </RESEARCH EXCERPTS>
 
-Again, your current task is to write the part titled:
-'{section_outline["title"]}'
-within '{parent_section_title}' 
-{"within "+heading_1 if heading_1 != parent_section_title else ''}
+
 The {heading_1} section content up to this point is:
 
-<PRIOR_SECTION_CONTENT>
+<{heading_1}_SECTION_CONTENT>
 {heading_1_draft}
-</PRIOR_SECTION_CONTENT>
+</{heading_1}_SECTION_CONTENT>
 
-First reason step by step to determine the role of the part you are generating within the overall paper, 
-then generate the appropriate text, subject to the following guidelines:
+Again, your current task is to write the next part, titled: '{section_outline["title"]}'
+
+1. First reason step by step to determine the role of the part you are generating within the overall paper, 
+2. Then generate the appropriate text, subject to the following guidelines:
 
  - Output ONLY the text, do NOT output your reasoning.
- - Write a concise, detailed text using known fact and the above research excepts, of about {length} words in length.
+ - Write a dense, detailed text using known fact and the above research excepts, of about {subsection_token_length} words in length.
  - This section should cover the specific topic: {parent_section_title} - {subsection_topic}
  - You may refer to, but not repeat, prior section content in any text you produce.
- - The section should be about {subsection_token_length} words long. The goal is to present an integrated view of the assigned topic, highlighting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
-
- - Please ensure the section provides depth while removing redundant or superflous detail, ensuring that every critical aspect of the source argument, observations, methods, findings, or conclusions is included in the list of key points.
+ - Present an integrated view of the assigned topic, noting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
+ - Ensure the section provides depth while removing redundant or superflous detail, ensuring that every critical aspect of the source argument, observations, methods, findings, or conclusions is included.
 End the section as follows:
 
 </DRAFT>
 """),
               AssistantMessage("<DRAFT>\n")
               ]
-        response = cot.llm.ask('', messages, client=cot.llm.osClient, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
-        #response = cot.llm.ask('', messages, client=cot.llm.openAIClient, template='gpt-4-1106-preview', max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
+        response = cot.llm.ask('', messages, template=template, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
         end_idx = response.rfind('</DRAFT>')
         if end_idx < 0:
             end_idx = len(response)
@@ -654,10 +986,28 @@ End the section as follows:
         #
         ### first collect entities
         #
-        keywds = entities(paper_title, paper_outline, excerpts, ids)
-
+        keywds = entities(paper_title, paper_outline, excerpts, ids, template)
+        missing_entities = literal_missing_entities(keywds, draft)
+        print(f'\n missing entities in initial draft {len(missing_entities)}\n')
         for i in range(num_rewrites):
-            draft = rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1, heading_1_draft)
+            if i < num_rewrites-1:
+                template = template
+            else:
+                template = get_template('ReWrite', config)
+            if i == 0:
+                #add new entities
+                draft = add_pp_rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, subsection_token_length, parent_section_title, heading_1, heading_1_draft, template)
+            else:
+                # add content and refine in subsequent rewrites
+                draft = rewrite(paper_outline, paper_title, section_outline, draft, query, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1, heading_1_draft, template)
+            missing_entities = literal_missing_entities(keywds, draft)
+            print(f'\n missing entities after rewrite {len(missing_entities)} \n')
+
+        # make sure we write out top level sections even if they have no subsections!
+        if depth==0:
+            with open(f'section{n}.txt', 'w') as pf:
+                pf.write(section)
+            n += 1
     return draft
 
 
@@ -775,15 +1125,11 @@ if __name__ == '__main__':
     config = {}
     app = QApplication(sys.argv)
     rows = ["Query", "SBAR", "Outline", "Search", "Write", "ReWrite"]
-    ex = PWUI(rows, config)
-
-    # Example usage to get combo box values for "Row 2"
-
+    ex = PWUI(rows, config) # get config for this report task
     app.exec_()
-    print(config)
     try:
         cot.display_response('calling paper_writer')
-        paper = write_report(config, paper_outline=default_outline, section_outline=default_outline)
+        paper = write_report(config)
     except Exception as e:
         traceback.print_exc()
         print(str(e))

@@ -45,7 +45,7 @@ import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
-from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog
+from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog, OPENAI_MODEL3, OPENAI_MODEL4
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -1009,16 +1009,15 @@ Your conversation style is warm, gentle, humble, and engaging. """
          if outline_model == 'llm':
             outline_model = self.llm.template
          elif outline_model == 'gpt3':
-            outline_model = self.owlCoT.OPENAI_MODEL3
+            outline_model = OPENAI_MODEL3
          elif outline_model == 'gpt4':
-            outline_model = self.owlCoT.OPENAI_MODEL4
+            outline_model = OPENAI_MODEL4
+            print('setting outline model to gpt4')
          else:
             self.owlCoT.display_response('Unrecognized model type in Outline: {outline_model}')
             
       outline_syntax =\
-"""Respond ONLY with the outline, in JSON format:
-
-{"title": '<report title>', "sections":[ {"title":"<title of section 1>", "dscp":'<description of content of section 1>', "sections":[{"title":'<title of subsection 1 of section 1>', "dscp":'<description of content of subsection 1>'}, {"title":'<title of subsection 2 section 1>', "dscp":'<description of content of subsection 2>' } ] }, {"title":"<title of section 2>",... }
+"""{"title": '<report title>', "sections":[ {"title":"<title of section 1>", "dscp":'<description of content of section 1>', "sections":[{"title":'<title of subsection 1 of section 1>', "dscp":'<description of content of subsection 1>'}, {"title":'<title of subsection 2 section 1>', "dscp":'<description of content of subsection 2>' } ] }, {"title":"<title of section 2>",... }
 """
 
       outline_prompt =\
@@ -1053,25 +1052,30 @@ Reason step by step to analyze and improve the above outline with respect to the
       user_critique = ''
       first_time = True
       prior_outline = ''
+      if 'outline' in plan:
+         prior_outline = plan['outline']
+         first_time = False
+         
       while not user_satisfied:
+         if not first_time:
+            user_critique = self.owlCoT.confirmation_popup(json.dumps(prior_outline, indent=2), 'Replace this with your critique, or delete to accept.')
+            print(f'user_critique {user_critique}')
+            if user_critique != False and len(user_critique) <4:
+               user_satisfied = True
+               print("*******user satisfied with outline")
+               plan['outline'] = prior_outline
+               break
+            else:
+               print('***** user not satisfield, retrying')
+         
          messages = [SystemMessage(outline_prompt),
                      AssistantMessage('')
                      ]
          if not first_time:
+            print(f'adding revision prompt')
             messages.append(UserMessage(revision_prompt))
          #print(f'******* task state prompt:\n {gpt_message}')
          prior_outline = self.llm.ask({'outline':prior_outline, 'critique':user_critique}, messages, template=outline_model, max_tokens=500, temp=0.1, validator=JSONResponseValidator())
-         self.owlCoT.display_response(f'***** Outline *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
-         user_critique = self.owlCoT.confirmation_popup(json.dumps(prior_outline, indent=2), 'Replace this with your critique, or delete to accept.')
-         print(f'user_critique {user_critique}')
-         if user_critique != False and len(user_critique) <4:
-            user_satisfied = True
-            print("*******user satisfied with outline")
-            plan['outline'] = prior_outline
-            break
-         else:
-            print('***** user not satisfield, retrying')
-         
          first_time = False
 
       return plan

@@ -36,8 +36,12 @@ from alphawave_pyexts import LLMClient
 from alphawave_pyexts import Openbook as op
 from alphawave_pyexts import conversation as cv
 from alphawave.OSClient import OSClient
+from alphawave.MistralAIClient import MistralAIClient
 from alphawave.OpenAIClient import OpenAIClient
 from alphawave.alphawaveTypes import PromptCompletionOptions
+
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ChatMessage
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtGui import QFont, QKeySequence
@@ -104,7 +108,7 @@ def get_model_template():
     template = 'bad'
     models = LLMClient.get_available_models()
     while template not in models:
-        if template.startswith('gpt'):
+        if template.startswith('gpt') or template.startswith('mistral-'):
             break
         template = input('template name? ').strip()
     return template
@@ -123,9 +127,10 @@ class LLM():
         self.osClient= osClient
         self.template = template # default prompt template.
         print(f'LLM initializing default template to {template}')
+        self.conv_template = cv.get_conv_template(self.template)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-        self.conv_template=cv.get_conv_template(self.template)
+        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
 
    def repair_json (self, item):
       #
@@ -194,11 +199,10 @@ TextString:
           if 'gpt' in template:
               client = self.openAIClient
               print(f'llm.ask using OpenAIClient {client}')
+          elif "mistral-" in template:
+              client=self.mistralAIClient
           else:
               client = self.osClient
-      #if eos==None:
-      #    print(f' using eos {self.conv_template.sep}')
-      #    eos = list(self.conv_template.sep)
           
       #print(f'ask {client}, {template}') 
       options = PromptCompletionOptions(completion_type='chat', model=template,
@@ -847,7 +851,7 @@ To access full articles, use the action 'article'.
 
     def available_actions(self):
        return """
-Respond only in JSON format.
+Respond in a plain JSON format without any Markdown or code block formatting.
 Available actions include:
 
 <ACTIONS>
@@ -867,7 +871,7 @@ If you need more detail or personal information, consider using the 'question' a
 If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
 If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
 The usual default action is to use tell to directly respond using 'tell'.
-Respond only in JSON as shown in the above examples.
+Respond in a plain JSON format without any Markdown or code block formatting as shown in the above examples.
 
 """
 

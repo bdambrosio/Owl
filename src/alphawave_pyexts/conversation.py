@@ -5,6 +5,9 @@ Conversation prompt templates.
 import dataclasses
 from enum import auto, Enum
 from typing import List, Any, Dict
+from transformers import AutoTokenizer
+from typing import List, Dict
+mistral_tok = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
 
 
 class SeparatorStyle(Enum):
@@ -49,8 +52,32 @@ class Conversation:
     # response_prime - should we end with 'Assistant'?
     response_prime:bool = False
 
+    def get_mistral_prompt(messages: List[Dict[str, str]], tokenizer: AutoTokenizer):
+        prompt = ""
+        for i, msg in enumerate(messages):
+            is_user = {"user": True, "assistant": False}[msg["role"]]
+            assert (i % 2 == 0) == is_user
+            content = msg["content"]
+            assert content == content.strip()
+            if is_user:
+                prompt += f"[INST] {content} [/INST]"
+            else:
+                prompt += f" {content}</s>"
+        tokens_ids = tokenizer.encode(prompt)
+        token_str = tokenizer.convert_ids_to_tokens(tokens_ids)
+        return tokens_ids, token_str
 
-    
+    # mistral prompt use example
+    """
+    messages = [
+        {"role": "user", "content": "2+2"},
+        {"role": "assistant", "content": "4!"},
+        {"role": "user", "content": "+2"},
+        {"role": "assistant", "content": "6!"},
+        {"role": "user", "content": "+4"},
+    ]
+    tokens_ids, token_str = build_prompt(messages, tok)
+    """
 
     def get_llama_2_prompt(self):
         #
@@ -611,6 +638,45 @@ register_conv_template(
 register_conv_template(
     Conversation(
         name="llama-2",
+        system="",
+        roles=("user", "assistant", "system"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.NO_COLON_SINGLE,
+        sep='</s>',
+    )
+)
+
+# Llama-2 default template
+register_conv_template(
+    Conversation(
+        name="mistral-tiny",
+        system="",
+        roles=("user", "assistant", "system"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.NO_COLON_SINGLE,
+        sep='</s>',
+    )
+)
+
+# Llama-2 default template
+register_conv_template(
+    Conversation(
+        name="mistral-small",
+        system="",
+        roles=("user", "assistant", "system"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.NO_COLON_SINGLE,
+        sep='</s>',
+    )
+)
+
+# Llama-2 default template
+register_conv_template(
+    Conversation(
+        name="mistral-medium",
         system="",
         roles=("user", "assistant", "system"),
         messages=(),

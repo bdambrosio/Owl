@@ -45,13 +45,7 @@ def ask_LLM(model, gpt_message, max_tokens=100, temp=0.3, top_p=1.0, host = None
     response = ''
     #print(f'***** utility ask_LLL temperature {temp}')
     try:
-      if not model.lower().startswith('gpt'):
-          completion = llm.run_query(model, gpt_message, max_tokens, temp, top_p,
-                                     stop=stop, stop_on_json=stop_on_json, choice_set=choice_set, host=host, port=port, display=display)
-          if completion is not None:
-              response = completion
-
-      else:
+      if model.lower().startswith('gpt'):
         stream= openai.ChatCompletion.create(
             model=model, messages=gpt_message, max_tokens=max_tokens, temperature=temp, top_p=1, stop=stop, stream=True)
         response = ''
@@ -63,6 +57,17 @@ def ask_LLM(model, gpt_message, max_tokens=100, temp=0.3, top_p=1.0, host = None
             if display is not None:
               display(chunk['choices'][0]['delta']['content'])
               response += chunk['choices'][0]['delta']['content']
+
+      elif model.lower().startswith('mistralai'):
+          print(f'How did we get here? {model}')
+          return None
+
+      else:
+          completion = llm.run_query(model, gpt_message, max_tokens, temp, top_p,
+                                     stop=stop, stop_on_json=stop_on_json, choice_set=choice_set, host=host, port=port, display=display)
+          if completion is not None:
+              response = completion
+
     except:
         traceback.print_exc()
     return response

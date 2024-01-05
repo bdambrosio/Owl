@@ -571,7 +571,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      print(f'cursor has selected {len(selectedText)} chars')
+         print(f'cursor has selected {len(selectedText)} chars')
       self.index_in_process = subprocess.Popen(['python3', 'semanticScholar2.py','-index_url', selectedText, '-template', self.owlCoT.template])
       self.display_response("Index job started.")
          

@@ -26,11 +26,12 @@ models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
 print(subdirs)
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'sakura' in d.lower())]
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'xDAN' in d or 'UNA' in d or 'Sakura' in d)]
 print(models)
 
 templates = {"CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.6-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
+             "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
              "Mixtral-8x7b-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
@@ -88,6 +89,9 @@ if 'tulu' in model_name:
 elif 'ixtral' in model_name:
     print(f' mixtral load')
     model.load([18, 23])
+elif 'UNA' in model_name:
+    print(f' UNA load')
+    model.load([16, 23])
 else:
     model.load([22, 22])
     
