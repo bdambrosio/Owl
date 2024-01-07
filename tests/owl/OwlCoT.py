@@ -874,6 +874,8 @@ Available actions include:
 - recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture"}
 - web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023"}
 - wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?"}
+
+Respond in a plain JSON format without any Markdown or code block formatting, as shown in the above examples.
 </ACTIONS>
 
 Given the following user input, determine which action is needed at this time.
@@ -898,7 +900,8 @@ Respond in a plain JSON format without any Markdown or code block formatting as 
             prompt = [SystemMessage(f"""{self.v_short_prompt()}
 Your task is to determine the main topic of the following user input.
 The topic must be one of:\n{self.format_topic_names()}
-The response must be a JSON form including the topic selected from above: 
+Respond in a plain JSON format without any Markdown or code block formatting, and without any comments or explanatory text, using the following format:
+
 {{"topic": '<topic_name>'}}
                       
 Input: {{{{$input}}}}

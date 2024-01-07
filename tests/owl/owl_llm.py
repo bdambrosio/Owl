@@ -47,7 +47,7 @@ templates = {"LoneStriker/bagel-dpo-34b-v0.2-4.0bpw-h6-exl2": "llama-2",
 }
 
 model_number = -1
-model_prompt_template = ''
+template = ''
 while model_number < 0 or model_number > len(models) -1:
     print(f'Available models:')
     for i in range(len(models)):
@@ -59,11 +59,9 @@ while model_number < 0 or model_number > len(models) -1:
         except Exception as e:
             print(f'failure to load json.config {str(e)}\n setting context to 4096')
             context_size = 4096
-        template = ''
         if models[i] in templates:
             template = templates[models[i]]
-            model_prompt_template = template
-            print(f'{i}. {models[i]}, context: {context_size}, template: {model_prompt_template}')
+            print(f'{i}. {models[i]}, context: {context_size}, template: {template}')
         else:
             print(f'{i}. {models[i]}, context: {context_size}')
     
@@ -74,6 +72,9 @@ while model_number < 0 or model_number > len(models) -1:
         print(f'Enter a number between 0 and {len(models)-1}')
 
 model_name=models[model_number]
+model_prompt_template = ''
+if model_name in templates:
+    model_prompt_template = templates[model_name]
 
 #if 'dolphin' in models[model_number]:
 #    cache = ExLlamaV2Cache(model, max_seq_len=8192)
@@ -84,9 +85,9 @@ config.prepare()
 
 model = ExLlamaV2(config)
 
-print(f"Loading model: {model_name}")
+print(f"Loading model: {model_name} prompt_template {model_prompt_template}")
 if 'tulu' in model_name:
-    model.load([19, 22])
+    model.load([20, 23])
 elif 'ixtral' in model_name:
     print(f' mixtral load')
     model.load([18, 23])
@@ -104,11 +105,11 @@ try:
     with open(config.model_dir+'/config.json', 'r') as j:
         json_config = json.load(j)
         context_size = json_config["max_position_embeddings"]
-        print(f'loaded json.config, setting context to {max(32768, context_size)}')
+        print(f'loaded json.config, setting context to {min(32768, context_size)}')
 except Exception as e:
     print(f'failure to load json.config {str(e)}\n setting context to 4096')
     
-cache = ExLlamaV2Cache(model, max_seq_len=max(32768, context_size))
+cache = ExLlamaV2Cache(model, max_seq_len=min(32768, context_size))
 #cache = ExLlamaV2Cache(model, max_seq_len=4096)
 
 # Initialize generator
@@ -167,6 +168,7 @@ app = FastAPI()
 print(f"starting server")
 @app.post("/template")
 async def template(request: Request):
+    global model_prompt_template
     return {"template":model_prompt_template}
     
 @app.post("/")
