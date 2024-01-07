@@ -29,8 +29,8 @@ print(subdirs)
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'xDAN' in d or 'UNA' in d or 'Sakura' in d)]
 print(models)
 
-templates = {"CodeLlama-34B-instruct-exl2":"chatml",
-             "dolphin-2.6-mixtral-8x7b-6.0bpw-h6-exl2-2":"chatml",
+templates = {"LoneStriker/bagel-dpo-34b-v0.2-4.0bpw-h6-exl2": "llama-2",
+             "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
@@ -41,13 +41,13 @@ templates = {"CodeLlama-34B-instruct-exl2":"chatml",
              "platypus2-70b-instruct-exl2":"alpaca",
              "Sakura-SOLAR-Instruct-DPO-v2":"freewilly",
              "ShiningValiant-4bpw-h6-exl2":"llama-2",
-             "Synthia-MoE-v3-Mixtral-8x7B-6.0bpw-h6-exl2-2":"synthia",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
              "xDAN-L1-Chat-RL-v1-8.0bpw-h8-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr"
 }
 
 model_number = -1
+model_prompt_template = ''
 while model_number < 0 or model_number > len(models) -1:
     print(f'Available models:')
     for i in range(len(models)):
@@ -62,7 +62,8 @@ while model_number < 0 or model_number > len(models) -1:
         template = ''
         if models[i] in templates:
             template = templates[models[i]]
-            print(f'{i}. {models[i]}, context: {context_size}, template: {template}')
+            model_prompt_template = template
+            print(f'{i}. {models[i]}, context: {context_size}, template: {model_prompt_template}')
         else:
             print(f'{i}. {models[i]}, context: {context_size}')
     
@@ -103,11 +104,11 @@ try:
     with open(config.model_dir+'/config.json', 'r') as j:
         json_config = json.load(j)
         context_size = json_config["max_position_embeddings"]
-        print(f'loaded json.config, setting context to {context_size}')
+        print(f'loaded json.config, setting context to {max(32768, context_size)}')
 except Exception as e:
     print(f'failure to load json.config {str(e)}\n setting context to 4096')
     
-cache = ExLlamaV2Cache(model, max_seq_len=context_size)
+cache = ExLlamaV2Cache(model, max_seq_len=max(32768, context_size))
 #cache = ExLlamaV2Cache(model, max_seq_len=4096)
 
 # Initialize generator
@@ -164,6 +165,9 @@ port = 5004  # use port above 1024
 
 app = FastAPI()
 print(f"starting server")
+@app.post("/template")
+async def template(request: Request):
+    return {"template":model_prompt_template}
     
 @app.post("/")
 async def get_stream(request: Request):
@@ -172,6 +176,8 @@ async def get_stream(request: Request):
     print(f'request: {query}')
     message_j = query
 
+    if 'template_query' in message_j.keys():
+        return Response(template)
     temp = 0.1
     if 'temp' in message_j.keys():
         temp = message_j['temp']

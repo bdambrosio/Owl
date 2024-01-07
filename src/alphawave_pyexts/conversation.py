@@ -101,14 +101,17 @@ class Conversation:
             messages = [messages[0], ("user", ' ')] + self.messages[1:]
         #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
         prompt = B_INST+B_SYS + messages[0][1] + E_SYS + messages[1][1]+E_INST # note this is ONE message, from USER!
-        for message in messages[2:]:
+        for m, message in enumerate(messages[2:]):
             if message[0] == 'user':
                 prompt += B_INST+message[1]+E_INST
             else:
                 prompt += message[1]
+                if m < len(messages[2:])-1:
+                    # if not last message, assumes last assistant message is a prime for asst response
+                    prompt+'</s>'
         
-        if not prompt.endswith('[/INST]\n'):
-            prompt += E_INST
+        #if not prompt.endswith('</s>'):
+        #    prompt += '</s>'
 
         return prompt
 

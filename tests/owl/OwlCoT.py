@@ -120,17 +120,17 @@ def generate_faiss_id(allocated_p):
     return faiss_id
 
 class LLM():
-   def __init__(self, ui, memory, osClient, openAIClient, template='zephyr'):
+   def __init__(self, ui, memory, osClient, openAIClient, template=None):
         self.ui = ui # needed to get current ui temp, max_tokens
-        self.openAIClient=openAIClient
         self.memory = memory
+        self.openAIClient=openAIClient
         self.osClient= osClient
+        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
         self.template = template # default prompt template.
         print(f'LLM initializing default template to {template}')
         self.conv_template = cv.get_conv_template(self.template)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
 
    def repair_json (self, item):
       #
@@ -139,7 +139,8 @@ class LLM():
 
       prompt_text=\
          """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
-Please repair the text string so that loads can parse it and return a valid dict.
+Please repair the text string so that the python JSON library loads method can parse it and return a valid dict.
+This may include removing any special characters that will cause loads to fail.
 This repair should be performed recursively, including all field values.
 for example, in:
 {"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
@@ -196,15 +197,26 @@ TextString:
          else:
              top_p = float(self.ui.top_p_combo.currentText())
       if client is None:
-          if 'gpt' in template:
+          if 'gpt' in self.template:
               client = self.openAIClient
-              print(f'llm.ask using OpenAIClient {client}')
-          elif "mistral-" in template:
+              print(f'llm.ask using OpenAIClient {template}')
+          elif "mistral-" in self.template:
               client=self.mistralAIClient
+              print(f'llm.ask using MistralAIClient {template}')
           else:
               client = self.osClient
           
-      #print(f'ask {client}, {template}') 
+      if client==self.osClient or  'OSClient' in type(client):
+          try:
+              response = requests.post('http://127.0.0.1:5004/template')
+              if response.status_code == 200:
+                  template = response.json()['template']
+          except Exception as e:
+              print(f' fail to get prompt template from server {str(e)}')
+
+      print(f"ask {str(type(client))[str(type(client)).rfind('.')+1:]}, {template}") 
+      if template=='zephyr':
+          traceback.print_exc()
       options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
                                         stop=eos, stop_on_json=stop_on_json, max_input_tokens=24000)
@@ -962,7 +974,8 @@ Input: {{{{$input}}}}
                    UserMessage('{{$input}}'),
                    AssistantMessage('')
                 ]
-                summary = self.llm.ask(data['result'], article_summary_msgs, template='gpt-3.5-turbo-1106', max_tokens=650)
+                #summary = self.llm.ask(data['result'], article_summary_msgs, template='gpt-3.5-turbo-1106', max_tokens=650)
+                summary = self.llm.ask(data['result'], article_summary_msgs, max_tokens=650)
                 if summary is not None:
                    self.add_exchange(input, summary)
                    return {"article":  summary}

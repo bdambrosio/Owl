@@ -155,7 +155,6 @@ class ChatApp(QtWidgets.QWidget):
       self.codec = QTextCodec.codecForName("UTF-8")
       self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
       self.reflect = True
-      self.index_in_process = None # an S2 indexing job object, or None if nothing running. Status is only checked on reflect and launch
 
       #self.setStyleSheet("background-color: #101820; color")
       # Main Layout
@@ -556,13 +555,6 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       
    def index_url(self): # index a url in S2 faiss
       global PREV_LEN, op#, vmem, vmem_clock
-      if self.index_in_process is not None:
-         status = self.index_in_process.poll()
-         if status is None:
-            self.display_response("Index job in process, can't start another, sorry.")
-            return
-         else:
-            self.index_in_process = None
       selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
@@ -572,8 +564,8 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
          print(f'cursor has selected {len(selectedText)} chars')
-      self.index_in_process = subprocess.Popen(['python3', 'semanticScholar2.py','-index_url', selectedText, '-template', self.owlCoT.template])
-      self.display_response("Index job started.")
+      self.s2.queue_url_for_indexing(selectedText)
+      self.display_response("Indexing request submitted.")
          
    def workingMem(self): # lauching working memory editor
       self.owlCoT.save_workingMemory() # save current working memory so we can edit it
@@ -599,12 +591,6 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
 
    def on_timer_timeout(self):
       global profile, profile_text
-      if self.index_in_process is not None:
-         status = self.index_in_process.poll()
-         if status is not None:
-            #job done, clear pid
-            self.index_in_process = None
-            self.display_response('s2 index job finished')
       if not self.reflect:
          return
       self.on_prompt_combo_changed(profile) # refresh profile to update date, time, backgound, dreams.

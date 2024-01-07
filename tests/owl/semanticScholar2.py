@@ -48,6 +48,7 @@ import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
+import rewrite as rw
 
 tokenizer = GPT3Tokenizer()
 ui = None
@@ -70,15 +71,9 @@ embedding_adapter_name = embedding_model.load_adapter("allenai/specter2_aug2023r
 
 GPT3 = "gpt-3.5-turbo-16k"
 GPT4 = "gpt-4-1106-preview"
-#OPENAI_MODEL = "gpt-4-32k"
 #EMBEDDING_MODEL = "text-embedding-ada-002"
 ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
-OS_MODEL='zephyr'
 
-openai_api_key = os.getenv("OPENAI_API_KEY")
-openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-memory = VolatileMemory()
-llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
 #logging.basicConfig(level=logging.DEBUG)
 directory = './arxiv/'
 # Set a directory to store downloaded papers
@@ -403,8 +398,7 @@ Respond in a plain JSON format without any Markdown or code block formatting,  u
                   AssistantMessage("")
               ]
     
-    #response_json = llm.ask('', kwd_messages, client=llm.openAIClient, template='gpt-4-1106-preview', max_tokens=400, temp=0.1, validator=JSONResponseValidator())
-    response_json = llm.ask('', kwd_messages, client=llm.osClient, max_tokens=600, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    response_json = cot.llm.ask('', kwd_messages, max_tokens=600, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
     # remove all more common things
     keywords = []
     if 'found' in response_json:
@@ -458,6 +452,32 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     #if status is None:
     #    continue
     print(f' new article:\n{json.dumps(result_dict, indent=2)}')
+    paper_index = len(paper_library_df)
+    paper_library_df.loc[paper_index] = result_dict
+    # section and index paper
+    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
+    save_synopsis_data()
+    faiss.write_index(paper_indexIDMap, paper_index_filepath)
+    faiss.write_index(section_indexIDMap, section_index_filepath)
+    section_library_df.to_parquet(section_library_filepath)
+
+
+def index_file(filepath):
+    result_dict = {key: '' for key in paper_library_columns}
+    id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+    result_dict["faiss_id"] = id
+    result_dict["title"] = filepath[filepath.rfind('/')+1:]
+    result_dict["authors"] = ''
+    result_dict["publisher"] = ''
+    result_dict["summary"] = ''
+    result_dict["citationCount"]= ''
+    result_dict["inflCitations"] = ''
+    result_dict["evaluation"] = ''
+    result_dict["pdf_filepath"]= filepath
+    
+    print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
+    result_dict['synopsis'] = ""
+    result_dict['section_ids'] = [] # to be filled in after we get paper id
     paper_index = len(paper_library_df)
     paper_library_df.loc[paper_index] = result_dict
     # section and index paper
@@ -613,14 +633,13 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                     continue
                 result_dict['pdf_url'] = preprint_url
                 result_dict['pdf_filepath'] = download_pdf(preprint_url, title)
-            paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
+            queue_paper_for_indexing(result_dict)
             paper_library_df.to_parquet(library_file)
             result_list.append(result_dict)
             
     except Exception as e:
         traceback.print_exc()
     #print(f'get articles returning')
-    # get_articles assumes someone downstream parses and indexes the pdfs
     return result_list, total_papers, next_offset
 
 # Test that the search is working
@@ -639,74 +658,6 @@ def check_entities_against_draft(entities, draft):
             entities_not_in_text.append(entity)
     return entities_in_text, entities_not_in_text
 
-    
-def rewrite(paper_title, abstract, entities, section_text, draft):
-    entities_in_draft, entities_not_in_draft = check_entities_against_draft(entities, draft)
-    print(f'\nEntities in draft {entities_in_draft}')
-    print(f'Entities not in draft {entities_not_in_draft}')
-   
-    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
-You are writing SYNOPSIS of a section of a research paper titled: {paper_title}. 
-For context, the paper abstract follows:
-
-<PAPER_ABSTRACT>
-{abstract}
-</PAPER_ABSTRACT>
-
-The original paper section for which you are writing the SYNOPSIS is: 
-
-<PAPER_SECTION>
-{section_text}
-</PAPER_SECTION>
-
-Your previous draft is:
-<PRIOR_DRAFT>
-{draft}
-</PRIOR_DRAFT>
-
-The following have been identified as key items mentioned in the paper_section that are not mentioned in the prior draft:
-
-<MISSING_ENTITIES>
-{entities_not_in_draft}
-</MISSING_ENTITIES>
-"""
-)
-
-    rewrite_prompt=f"""Your current task is to rewrite the PRIOR_DRAFT to increase the information density.
-
-Following these steps:
-Step 1. Determine the role of this section given the title and  abstract.
-Step 2. Identify a few of the most important MISSING_ENTITIES in the prior draft
-Step 3. Write a new, denser draft of the same length which covers all significant content and detail from the prior draft as well as the MISSING_ENTITIES identified in Step 2.
-
-Further Instructions: 
- - Coherence: the rewrite of the previous draft to improve flow and make space for additional entities;
- - Missing entities should appear where best for the flow and coherence in the new draft;
- - Never drop entities from the previous content. If space cannot be made, add fewer new entities. 
- - Your goal is information density: use the same number of words as the previous draft, or as few more as needed. Remove or rewrite low-content phrases or sentences to improve conciseness.
- - Ensure the rewrite provides all the depth and information from the previous draft. 
- - Your response include ONLY the rewritten draft, without any explanation or commentary.
-
-end the rewrite as follows:
-</REWRITE>
-"""
-    messages=[sysMessage,
-              UserMessage(rewrite_prompt),
-              AssistantMessage("<REWRITE>\n")
-              ]
-    #print(f'Tokens: {tokenizer.encode(draft).shape}')
-    max_tokens=int(2*len(tokenizer.encode(draft)))
-    print(f'rewrite max_tokens: {max_tokens}')
-    response = llm.ask('', messages, max_tokens=max_tokens, temp=0.1, eos='</REWRITE>')
-    if response is None or len(response) == 0:
-        return draft
-    rewrite = response
-    end_idx = rewrite.rfind('</REWRITE>')
-    if end_idx < 0:
-        end_idx = len(rewrite)
-        rewrite = rewrite[:end_idx-1]
-    print(f'\nRewrite:\n{rewrite}\n')
-    return rewrite
 
 def index_paper_synopsis(paper_dict, synopsis):
     global paper_indexIDMap
@@ -824,12 +775,13 @@ End your synopsis response as follows:
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
-            response = llm.ask({"abstract":paper_abstract,
+            max_tokens=max(384,int(len(text_chunk)/12)) # let len grow for big chunks
+            response = cot.llm.ask({"abstract":paper_abstract,
                                 "paper_synopsis":paper_synopsis,
                                 "entities":entities,
                                 "text":text_chunk},
                                prompt,
-                               max_tokens=max(384,int(len(text_chunk)/12)), # let len grow for big chunks
+                               max_tokens=max_tokens,
                                temp=0.05,
                                eos='</SYNOPSIS')
             pbar.update(1)
@@ -838,11 +790,17 @@ End your synopsis response as follows:
                 continue
             if '</SYNOPSIS>' in response:
                 response = response[:response.find('</SYNOPSIS>')]
-            print(f'index_paper result len {len(response)}, rewriting')
+            print(f'\nInitial Draft len: {len(response)}\n{response}\n')
             # 'entities' is a single, newline delimited string for ease in llm processing
-            draft2 = rewrite(paper_title, paper_abstract, entities.split('\n'), text_chunk, response)
-            id = index_section_synopsis(paper_dict, response)
-            section_synopses.append(response)
+            print(f'max_tokens {max_tokens}')
+            draft2 = rw.depth_rewrite(paper_title, paper_title, response, text_chunk, entities.split('\n'), paper_title, int(1.2*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
+            draft3 = rw.add_pp_rewrite(paper_title, paper_title, draft2, text_chunk, entities.split('\n'), paper_title, int(1.4*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
+            #draft4 = rw.depth_rewrite(paper_title, paper_title, draft3, text_chunk, entities.split('\n'), paper_title, int(1.6*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            #print(f'\nRewrite 3 len: {len(draft4)}\n{draft4}\n')
+            id = index_section_synopsis(paper_dict, draft3)
+            section_synopses.append(draft3)
             section_ids.append(id)
             
             """
@@ -980,9 +938,6 @@ def search(query, web=False):
         for paper in results:
             print(f"    title: {paper['title']}")
 
-    for paper in results:
-        index_paper(paper)
-
     # arxiv search over, now search faiss
     ids, paper_summaries = search_sections(query, top_k=20)
     #print(f'found {len(paper_summaries)} sections')
@@ -992,10 +947,23 @@ def parse_arguments():
     """Parses command-line arguments using the argparse library."""
 
     parser = argparse.ArgumentParser(description="Process a single command-line argument.")
-    parser.add_argument("-index_url", type=str, help="The URL to process.")
+
     parser.add_argument("-template", type=str, help="the LLM template to use")
     args = parser.parse_args()
     return args
+
+def queue_paper_for_indexing(paper_dict):
+    print(f'queue_paper {str(paper_dict)}')
+    response = requests.post(f'http://127.0.0.1:5006/submit_paper/', params={'paper':json.dumps(paper_dict)})
+    data = response.json()
+    print(f'paper submitted for indexing, response: {data}')
+    return data
+
+def queue_url_for_indexing(url):
+    response = requests.post(f'http://127.0.0.1:5006/submit_url/', params={'url':url})
+    data = response.json()
+    print(f'url submitted for indexing, response: {data}')
+    return data
 
 if __name__ == '__main__':
     import OwlCoT as cot
@@ -1004,11 +972,20 @@ if __name__ == '__main__':
     if args.template is not None:
         template = args.template
         print(f' S2 using template {template}')
-    cot = cot.OwlInnerVoice(None, template=template)
+    cot = cot.OwlInnerVoice(None)
+    rw.cot = cot
     if args.index_url is not None:
         url = args.index_url.strip()
         print(f' S2 indexing url {url}')
         index_url(url)
+    if args.index_paper is not None:
+        try:
+            paper = json.loads(args.index_paper.strip())
+            print(f' S2 indexing ppr {ppr}')
+            index_paper(paper)
+        except Exception as e:
+            print(str(e))
+            
     else:
         print("No argument provided, running default main code.")
         #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
