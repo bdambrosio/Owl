@@ -172,7 +172,9 @@ def save_synopsis_data():
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
-    
+
+
+
 def search_sections(query, top_k=20):
     #print(section_library_df)
     # get embed
@@ -367,68 +369,12 @@ def extract_string_values(data):
 
 import re
 
-def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
-    """
-    Extracts acronyms from the given text using the specified regular expression pattern.
-    Parameters:
-    text (str): The text from which to extract acronyms.
-    pattern (str): The regular expression pattern to use for extraction.
-    Returns:
-    list: A list of extracted acronyms.
-    """
-    return re.findall(pattern, text)
-
-def extract_entities(paper_title, summary):
-    kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details.
-You are reading a paper titled:
-{paper_title}
-"""),
-                  UserMessage(f"""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {paper_title} from the following research excerpt.
-
-Respond using the following format:
-{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...] }}
-
-<RESEARCH EXCERPT>
-{summary}
-</RESEARCH EXCERPT>
-
-Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
-{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...]}}
-"""),
-                  AssistantMessage("")
-              ]
-    
-    response_json = cot.llm.ask('', kwd_messages, max_tokens=600, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
-    # remove all more common things
-    keywords = []
-    if 'found' in response_json:
-        for word in response_json['found']:
-            zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-            if zipf < 2.8 and word not in keywords:
-                keywords.append(word)
-    for word in extract_acronyms(summary):
-        zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 2.8 and word not in keywords:
-            keywords.append(word)
-    print(f'\nKeywords found: {keywords}\n')
-    return '\n'.join(keywords)
-    
 # Function to extract words from JSON
 def extract_words_from_json(json_data):
     string_values = extract_string_values(json_data)
     text = ' '.join(string_values)
     words = re.findall(r'\b\w+\b', text)
     return words
-
-def extract_keywords(text):
-    #print(f' extract keywords in {text}')
-    keywords = []
-    for word in text:
-        zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 3.4 and word not in keywords:
-            keywords.append(word)
-    #print(f' extract keywords out {keywords}')
-    return keywords
 
 def index_url(page_url, title='', authors='', publisher='', abstract='', citationCount=0, influentialCitationCount=0,
               pdf_url = None):
@@ -770,7 +716,8 @@ End your synopsis response as follows:
                 index_text += '\n'+text_chunk
 
             print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
-            entities = extract_entities(paper_title, text_chunk)
+            rw.cot = cot #just to be sure...
+            entities = rw.extract_entities(text_chunk, title=paper_title)
             print(f'entities: {entities}')
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
@@ -793,10 +740,13 @@ End your synopsis response as follows:
             print(f'\nInitial Draft len: {len(response)}\n{response}\n')
             # 'entities' is a single, newline delimited string for ease in llm processing
             print(f'max_tokens {max_tokens}')
+            rw.cot = cot #just to be sure...
             draft2 = rw.depth_rewrite(paper_title, paper_title, response, text_chunk, entities.split('\n'), paper_title, int(1.2*max_tokens), paper_title, paper_title, '', cot.llm.template)
             print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
+            rw.cot = cot #just to be sure...
             draft3 = rw.add_pp_rewrite(paper_title, paper_title, draft2, text_chunk, entities.split('\n'), paper_title, int(1.4*max_tokens), paper_title, paper_title, '', cot.llm.template)
             print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
+            rw.cot = cot #just to be sure...
             #draft4 = rw.depth_rewrite(paper_title, paper_title, draft3, text_chunk, entities.split('\n'), paper_title, int(1.6*max_tokens), paper_title, paper_title, '', cot.llm.template)
             #print(f'\nRewrite 3 len: {len(draft4)}\n{draft4}\n')
             id = index_section_synopsis(paper_dict, draft3)
@@ -910,7 +860,7 @@ def create_chunks_grobid(pdf_filepath):
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
 
-def search(query, web=False):
+def search(query, top_k=10, web=False):
     
     """Query is a *list* of keywords or phrases
     This function does the following:
@@ -939,8 +889,10 @@ def search(query, web=False):
             print(f"    title: {paper['title']}")
 
     # arxiv search over, now search faiss
-    ids, paper_summaries = search_sections(query, top_k=20)
-    #print(f'found {len(paper_summaries)} sections')
+    rw.cot = cot #just to be sure...
+    ids, paper_summaries = search_sections(' '.join(rw.extract_entities(query)), top_k=int(top_k/2))
+    #hyde_ids, hyde_texts = search_sections(hyde(query), top_k=int(top_k/2))
+    print(f'found {len(paper_summaries)} sections')
     return ids, paper_summaries
 
 def parse_arguments():

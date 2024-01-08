@@ -550,8 +550,8 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      response = self.owlCoT.s2_search(selectedText)
-      self.display_response('\n'+response+'\n')
+      response,titles = self.owlCoT.s2_search(selectedText)
+      self.display_response('\n'+response+'\n\nRefs:\n'+'\n'.join(titles))
       
    def index_url(self): # index a url in S2 faiss
       global PREV_LEN, op#, vmem, vmem_clock

@@ -48,6 +48,8 @@ class JSONResponseValidator(PromptResponseValidator):
         # Try to parse as JSON
         # Try to repair common errors and parse again
         s = s.strip()
+        s = s.replace("```\njson", "")  # get rid of markdown prefix
+        s = s.replace("```", "")  # get rid of markdown suffix
         if not (s.startswith('{') and s.endswith('}')):
             s = '{' + s + '}'
         s = re.sub(r"'([^\"']+)':", r'"\1":', s) # keys as doublequote

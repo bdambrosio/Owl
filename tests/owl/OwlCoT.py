@@ -125,7 +125,8 @@ class LLM():
         self.memory = memory
         self.openAIClient=openAIClient
         self.osClient= osClient
-        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
+        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"], logRequests=True)
+        print(f'mistral client {self.mistralAIClient}')
         self.template = template # default prompt template.
         print(f'LLM initializing default template to {template}')
         self.conv_template = cv.get_conv_template(self.template)
@@ -146,7 +147,7 @@ for example, in:
 {"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
 the inner form  {"action"...} should also be parsable as valid json.
 The provided TextString may have been prematurely truncated. If so, the repair should include adding any necessary JSON termination.
-Return ONLY the repaired json.
+Return only the repaired JSON without any Markdown or code block formatting.
 
 TextString:
 {{$input}}
@@ -206,7 +207,7 @@ TextString:
           else:
               client = self.osClient
           
-      if client==self.osClient or  'OSClient' in type(client):
+      if client==self.osClient or  'OSClient' in str(type(client)):
           try:
               response = requests.post('http://127.0.0.1:5004/template')
               if response.status_code == 200:
@@ -1304,9 +1305,14 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
        #
        #TODO rewrite query as answer (HyDE)
        #
-       s2_result = self.ui.s2.search(query)
-       summary=self.summarize(query, s2_result, short_profile)
-       return summary
+       ids, summaries = self.ui.s2.search(query)
+       print(f' s2_search query {query}, result {type(ids)}, {type(summaries[0])}')
+       print(f' s2_search summaries\n{summaries}')
+       titles = [item[0] for item in summaries]
+       titles = list(set(titles))
+       texts = [item[1] for item in summaries]
+       summary=self.summarize(query, '\n'.join(texts)[:16000], short_profile)
+       return summary, titles
 
     def gpt4(self, query, profile):
        short_profile = self.short_prompt()

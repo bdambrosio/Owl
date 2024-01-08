@@ -180,18 +180,6 @@ def get_template(row, config):
             return cot.template
     print(f'get_template fail {row}\n{json.dumps(config, indent=2)}')
         
-def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
-    """
-    Extracts acronyms from the given text using the specified regular expression pattern.
-    Parameters:
-    text (str): The text from which to extract acronyms.
-    pattern (str): The regular expression pattern to use for extraction.
-    Returns:
-    list: A list of extracted acronyms.
-    """
-    return re.findall(pattern, text)
-
-
 def format_outline(json_data, indent=0):
     """
     Formats a research paper outline given in JSON into an indented list as a string.
@@ -262,7 +250,7 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
             cached += 1
             items.extend(entity_cache[int_id])
         else:
-            excerpt_items = extract_entities(paper_title, paper_outline, excerpt[0]+'\n'+excerpt[1], template)
+            excerpt_items = rw.extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
             entity_cache[int_id]=excerpt_items
             items.extend(entity_cache[int_id])
     print(f'entities total {total}, in cache: {cached}')
@@ -270,46 +258,6 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
         json.dump(entity_cache, pf)
     print(f"wrote {entity_cache_filepath}")
     return list(set(items))
-
-def extract_entities(paper_title, paper_outline, summary, template):
-    kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
-You are writing a paper titled:
-{paper_title}
-"""),
-                  UserMessage(f"""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {paper_title} from the following research excerpt.
-
-Respond using the following format:
-{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...] }}
-
-If distinction between keyword, acronym, or named_entity is unclear, it is acceptable to list a term or phrase under multiple categories.
-
-<RESEARCH EXCERPT>
-{summary}
-</RESEARCH EXCERPT>
-
-Respond in a plain JSON format without any Markdown or code block formatting, and without any comments or explanatory text, using the following format:
-{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...]}}
-"""),
-                  AssistantMessage("")
-              ]
-    
-    response_json = cot.llm.ask('', kwd_messages, template=template, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
-    # remove all more common things
-    keywords = []
-    if 'found' in response_json:
-        for word in response_json['found']:
-            zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-            if zipf < 2.85 and word not in keywords:
-                keywords.append(word)
-    for word in extract_acronyms(summary):
-        zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 2.85 and word not in keywords:
-            keywords.append(word)
-    #print(f'\nKeywords: {keywords}\n')
-    return keywords
-
-def entities_to_str(item_list):
-    return '\n'.join(item_list)
 
 def count_keyphrase_occurrences(texts, keyphrases):
     """

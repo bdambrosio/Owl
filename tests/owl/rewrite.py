@@ -4,6 +4,7 @@ from tqdm import tqdm
 from termcolor import colored
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
+import re
 from transformers import AutoTokenizer, AutoModel
 from promptrix.VolatileMemory import VolatileMemory
 from promptrix.FunctionRegistry import FunctionRegistry
@@ -21,6 +22,10 @@ from alphawave_pyexts import LLMClient as lc
 
 # cot will be set by invoker
 cot=None
+
+def hyde(query):
+    # rewrite a query as an answer
+    pass
 
 def literal_missing_entities(entities, draft):
     # identifies items in the entities_list that DO appear in the summaries but do NOT appear in the current draft.
@@ -53,7 +58,7 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
             cached += 1
             items.extend(entity_cache[int_id])
         else:
-            excerpt_items = extract_entities(paper_title, paper_outline, excerpt[0]+'\n'+excerpt[1], template)
+            excerpt_items = extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
             entity_cache[int_id]=excerpt_items
             items.extend(entity_cache[int_id])
     print(f'entities total {total}, in cache: {cached}')
@@ -62,14 +67,25 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
     print(f"wrote {entity_cache_filepath}")
     return list(set(items))
 
-def extract_entities(paper_title, paper_topic, paper_outline, summary, template):
+def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
+    """
+    Extracts acronyms from the given text using the specified regular expression pattern.
+    Parameters:
+    text (str): The text from which to extract acronyms.
+    pattern (str): The regular expression pattern to use for extraction.
+    Returns:
+    list: A list of extracted acronyms.
+    """
+    return re.findall(pattern, text)
+
+def extract_entities(text, title=None, paper_topic=None, outline=None, template=None):
     topic = ''
-    if paper_title is not None:
-        topic += paper_title+'\n'
+    if title is not None:
+        topic += title+'\n'
     if paper_topic is not None:
         topic += paper_topic+'\n'
-    if paper_outline is not None and type(paper_outline) is dict:
-        topic += json.dumps(paper_outline, indent=2)
+    if outline is not None and type(outline) is dict:
+        topic += json.dumps(outline, indent=2)
         
     kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 """),
@@ -81,7 +97,7 @@ Respond using the following format:
 If distinction between keyword, acronym, or named_entity is unclear, it is acceptable to list a term or phrase under multiple categories.
 
 <RESEARCH EXCERPT>
-{summary}
+{text}
 </RESEARCH EXCERPT>
 
 Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
@@ -98,11 +114,11 @@ Respond in a plain JSON format without any Markdown or code block formatting,  u
             zipf = wf.zipf_frequency(word, 'en', wordlist='large')
             if zipf < 2.85 and word not in keywords:
                 keywords.append(word)
-    for word in extract_acronyms(summary):
+    for word in extract_acronyms(text):
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
         if zipf < 2.85 and word not in keywords:
             keywords.append(word)
-    #print(f'\nKeywords: {keywords}\n')
+    print(f'\nRewrite Extract_entities: {keywords}\n')
     return keywords
 
 def entities_to_str(item_list):

@@ -52,6 +52,7 @@ from scipy import spatial
 import pdfminer
 from OwlCoT import OwlInnerVoice as Owl
 from OwlCoT import LLM as llm
+import rewrite as rw
 
 today = date.today().strftime("%b-%d-%Y")
 
