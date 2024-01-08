@@ -1,6 +1,6 @@
 # Owl
 Owl is my experimental Research Coach / general support.
-Owl is built on Alphawave-py / promptrix, both heavily modded. Modded Alphawave-py is included, but promptrix-py isn't, I'll fix that before release.
+Owl is built on Alphawave-py / promptrix-py, both heavily modded. Modded Alphawave-py is included, but promptrix-py isn't, I'll fix that before release.
 
 So why yet another bot? Well, Owl is a personal research project into cognitive architecture. 
 * Of course Owl can do obvious stuff like search the web or wikipedia or retrieve articles from the new york times or ...
