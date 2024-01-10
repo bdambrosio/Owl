@@ -87,19 +87,22 @@ async def process_tasks():
             if spec['type'] == 'url':
                 try:
                     await run_in_threadpool(s2.index_url, spec['url'])
-                except:
-                    print(f"fail to url file {spec}")
+                except Exception as e:
+                    print(f"fail to url file {spec}\n{str(e)}")
+                    traceback.print_exc()
             if spec['type'] == 'dict':
                 try:
                     paper_json = json.loads(spec['paper'])
                     await run_in_threadpool(s2.index_paper, paper_json)
-                except:
-                    print(f"fail to parse paper descriptor as json {spec['paper']}")
+                except Exception as e:
+                    print(f"fail to parse paper descriptor as json {spec['paper']}\n{str(e)}")
+                    traceback.print_exc()
             if spec['type'] == 'file':
                 try:
                     await run_in_threadpool(s2.index_file, spec['filepath'])
-                except:
-                    print(f"fail to index file {spec}")
+                except Exception as e:
+                    print(f"fail to index file {spec}\n{str(e)}")
+                    traceback.print_exc()
         except Exception as e:
             traceback.print_exc()
         task_queue.task_done()

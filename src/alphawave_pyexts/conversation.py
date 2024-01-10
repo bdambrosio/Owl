@@ -89,31 +89,41 @@ class Conversation:
         ## ah, blank second, so asst replies '' to init message. that seems ok?
         ## or, below, check msg 1, and if from asst, insert '' user msg instead of using first
         B_INST, E_INST = "\n<s>[INST]", "[/INST]\n"
-        B_SYS, E_SYS = "\n<<SYS>>\n", "\n<</SYS>>\n"
+        B_SYS, E_SYS = "<<SYS>>", "<</SYS>>"
         DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and truthful assistant.""" 
-        messages = self.messages
+        messages_out = []
+        prompt_str=''
         #print(f'Input: {messages}')
-        if self.messages[0][0] != "system": # no initial system message, create empty one for consistent formatting
-            messages = [("system", DEFAULT_SYSTEM_PROMPT)] + self.messages
-        # now check - if first real msg is from asst, insert empty user msgs
-        if self.messages[1][0] != "user": # no first user message, create empty one for consistent formatting
-            print('adding empty user msg')
-            messages = [messages[0], ("user", ' ')] + self.messages[1:]
-        #construct an initial message with content as system prompt bracketed by <<SYS>> and <</SYS>>, followed by first user msg
-        prompt = B_INST+B_SYS + messages[0][1] + E_SYS + messages[1][1]+E_INST # note this is ONE message, from USER!
-        for m, message in enumerate(messages[2:]):
-            if message[0] == 'user':
-                prompt += B_INST+message[1]+E_INST
+        sysMsg = None
+        if self.messages[0][0] == "system": # no initial system message, create empty one for consistent formatting
+            sysMsg = self.messages[0][1]
+            if len(self.messages) > 1:
+                if self.messages[1][0] != "user":
+                    # no first user message, create empty one for consistent formatting
+                    prompt_str = B_INST+B_SYS+sysMsg+E_SYS+self.messages[1][1]+E_INST
+                    self.messages = self.messages[2:] #drop first two messages
+                else: #next msg is assistant
+                    prompt_str = B_INST+B_SYS+sysMsg+E_SYS+E_INST
+                    self.messages = self.messages[1:] #drop first message, we've translated sys msg to user
             else:
-                prompt += message[1]
-                if m < len(messages[2:])-1:
+                # just a single msg, the system msg
+                prompt_str = B_INST+B_SYS+sysMsg+E_SYS+E_INST
+                return prompt_str
+        for m, message in enumerate(self.messages):
+            # we now expect alternating asst/user, since we already inserted first user msg above
+            # note MistralAIClient will handle its dislike of final asst msg internally.
+            if message[0] == 'user':
+                prompt_str += B_INST+message[1]+E_INST
+            else:
+                prompt_str += message[1]
+                if m < len(self.messages)-1:
                     # if not last message, assumes last assistant message is a prime for asst response
-                    prompt+'</s>'
+                    prompt_str+'</s>'
         
-        #if not prompt.endswith('</s>'):
-        #    prompt += '</s>'
+        #if not prompt+str.endswith('</s>'):
+        #    prompt_str += '</s>'
 
-        return prompt
+        return prompt_str
 
         
     def get_prompt(self, include_system=False) -> str:

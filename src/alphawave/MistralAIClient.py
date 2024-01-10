@@ -142,25 +142,33 @@ class MistralAIClient(PromptCompletionClient):
         #change below to embed SystemMessage in User
         sysMsg = None; first_user_msg = True
         for i, msg in enumerate(rendered_prompt_msgs):
+            msg_role = msg['role']
+            msg_content = msg['content']
+            # check for special case of last message pair user/assistant, can't have assistant as last!
             if i == len(rendered_prompt_msgs) -2:
-                if msg['role'] == 'user' and rendered_prompt_msgs[i+1]['role'] == 'assistant':
+                if msg_role == 'user' and rendered_prompt_msgs[i+1]['role'] == 'assistant':
                     # trying to prime llm with an open-ended final asst msg, append to last user:
                     response_prime = rendered_prompt_msgs[i+1]['content']
                     chatMessage = ChatMessage(role = msg["role"], content = msg_content+'\n'+response_prime)
                     prompt.append(chatMessage)
                     break
-                continue
-            msg_content = msg['content']
-            if msg["role"] == 'system':
+
+            # check for first msg a 'system':
+            if i == 0 and msg["role"] == 'system':
                 sysMsg = msg["content"]
-                print(f'skipping sys, will insert later')
-                continue
-            if first_user_msg and msg["role"] == 'user' and sysMsg is not None:
-                print(f'inserting sys')
+                if len(rendered_prompt_msgs) == 1 or rendered_prompt_msgs[1]['role'] == 'assistant':
+                    # this is only msg!
+                    chatMessage = ChatMessage(role = 'user', content = sysMsg)
+                    prompt.append(chatMessage)
+                    continue
+                else:
+                    continue
+            if i==1 and msg["role"] == 'user' and sysMsg is not None:
                 msg_content = '<<SYS>>'+sysMsg+'<</SYS>>'+msg['content']
-                first_user_msg = False; sysMsg=None
-            print(f'ChatMessage {msg["role"]}')
-            print(f'   {msg_content}')
+                chatMessage = ChatMessage(role = msg["role"], content = msg_content)
+                prompt.append(chatMessage)
+                continue
+
             chatMessage = ChatMessage(role = msg["role"], content = msg_content)
             prompt.append(chatMessage)
         temp = .1
@@ -172,7 +180,7 @@ class MistralAIClient(PromptCompletionClient):
                 max_t= int(request[key])
             if key == "model":
                 model =request[key]
-        #print(f'mistral prompt {prompt}')
+        print(f'\nmistral prompt\n{prompt}\n\n')
         return self.mistralai_client.chat(model=model, messages = prompt, temperature=temp, max_tokens = max_t)
 
     # mistral prompt use example

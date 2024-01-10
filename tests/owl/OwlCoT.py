@@ -132,7 +132,8 @@ class LLM():
         self.conv_template = cv.get_conv_template(self.template)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-
+        self.context_size=8000 # available variable for clients, updated at every ask
+        
    def repair_json (self, item):
       #
       ## this asks gpt-4 to repair text that doesn't parse as json
@@ -157,7 +158,7 @@ TextString:
          #AssistantMessage('')
       ]
       input_tokens = len(self.tokenizer.encode(item)) 
-      response = self.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
+      response = self.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.5))
       if type(response) is dict:
           print(f'gpt repair returned dict {answer}')
           return responses
@@ -207,20 +208,26 @@ TextString:
           else:
               client = self.osClient
           
+      if client==self.openAIClient or  'OpenAIClient' in str(type(client)):
+          self.context_size=16000
+      if client==self.mistralAIClient or  'MistralAIClient' in str(type(client)):
+          self.context_size=16000 # I've read mistral can't really handle 32k
       if client==self.osClient or  'OSClient' in str(type(client)):
+          self.context_size=8000 # tulu default
           try:
               response = requests.post('http://127.0.0.1:5004/template')
               if response.status_code == 200:
                   template = response.json()['template']
+                  self.context_size = response.json()['context_size']
           except Exception as e:
               print(f' fail to get prompt template from server {str(e)}')
 
       print(f"ask {str(type(client))[str(type(client)).rfind('.')+1:]}, {template}") 
-      if template=='zephyr':
-          traceback.print_exc()
+      #if template=='zephyr':
+      #    traceback.print_exc()
       options = PromptCompletionOptions(completion_type='chat', model=template,
                                         temperature=temp, top_p= top_p, max_tokens=max_tokens,
-                                        stop=eos, stop_on_json=stop_on_json, max_input_tokens=24000)
+                                        stop=eos, stop_on_json=stop_on_json, max_input_tokens=min(24000, int(.75*self.context_size)))
       try:
           prompt = Prompt(prompt_msgs)
           #print(f'ask prompt {prompt_msgs}')
@@ -234,9 +241,17 @@ TextString:
               return None
           # check if expecting json or any other special form
           validation = None
+          if type(response) is not dict or 'status' not in response or response['status'] != 'success':
+              print(f'\nask fail, response not dict or status not success {template} {max_tokens}\n {response}')
+              return None
+          # check if expecting json or any other special form
+          validation = None
           if type(validator) is not DefaultResponseValidator:
               try:
                   validation = validator.validate_response(self.memory, self.functions, self.tokenizer, response, 0)
+                  if validation is not None and not validation['valid']:
+                      fixed_string = re.sub(r"\\([^\s'""])", r"\\\\\\\\1", response)
+                      validation = validator.validate_response(self.memory, self.functions, self.tokenizer, fixed_string, 0)
               except Exception as e:
                   print (f'ask validation fail {str(e)}')
               if validation is not None and validation['valid']:

@@ -406,6 +406,7 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
+    paper_library_df.to_parquet(paper_library_filepath)
 
 
 def index_file(filepath):
@@ -420,7 +421,15 @@ def index_file(filepath):
     result_dict["inflCitations"] = ''
     result_dict["evaluation"] = ''
     result_dict["pdf_filepath"]= filepath
-    
+    if len(paper_library_df) > 0:
+        dup = (paper_library_df['title'] == result_dict["title"]).any()
+        if dup:
+            print(f"\nalready indexed {result_dict['title']}\n")
+            return
+        else:
+            print(f"new title {result_dict['title']}\n")
+            
+
     print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
     result_dict['synopsis'] = ""
     result_dict['section_ids'] = [] # to be filled in after we get paper id
@@ -432,6 +441,7 @@ def index_file(filepath):
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
+    paper_library_df.to_parquet(paper_library_filepath)
 
 
 def get_arxiv_preprint_url(query, top_k=10):
@@ -580,7 +590,6 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                 result_dict['pdf_url'] = preprint_url
                 result_dict['pdf_filepath'] = download_pdf(preprint_url, title)
             queue_paper_for_indexing(result_dict)
-            paper_library_df.to_parquet(library_file)
             result_list.append(result_dict)
             
     except Exception as e:
@@ -615,6 +624,7 @@ def index_paper_synopsis(paper_dict, synopsis):
     embeds_np = np.array([embedding], dtype=np.float32)
     paper_indexIDMap.add_with_ids(embeds_np, ids_np)
     paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'synopsis'] = synopsis
+    paper_library_df.to_parquet(paper_library_filepath)
 
 
 def index_section_synopsis(paper_dict, synopsis):
@@ -722,10 +732,10 @@ End your synopsis response as follows:
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
-            max_tokens=max(384,int(len(text_chunk)/12)) # let len grow for big chunks
+            max_tokens=max(440,int(len(text_chunk)/12)) # let len grow for big chunks
             response = cot.llm.ask({"abstract":paper_abstract,
                                 "paper_synopsis":paper_synopsis,
-                                "entities":entities,
+                                "entities":', '.join(entities),
                                 "text":text_chunk},
                                prompt,
                                max_tokens=max_tokens,
@@ -741,13 +751,13 @@ End your synopsis response as follows:
             # 'entities' is a single, newline delimited string for ease in llm processing
             print(f'max_tokens {max_tokens}')
             rw.cot = cot #just to be sure...
-            draft2 = rw.depth_rewrite(paper_title, paper_title, response, text_chunk, entities.split('\n'), paper_title, int(1.2*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            draft2 = rw.depth_rewrite(paper_title, paper_title, response, text_chunk, entities, paper_title, int(1.2*max_tokens), paper_title, paper_title, '', cot.llm.template)
             print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
             rw.cot = cot #just to be sure...
-            draft3 = rw.add_pp_rewrite(paper_title, paper_title, draft2, text_chunk, entities.split('\n'), paper_title, int(1.4*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            draft3 = rw.add_pp_rewrite(paper_title, paper_title, draft2, text_chunk, entities, paper_title, int(1.4*max_tokens), paper_title, paper_title, '', cot.llm.template)
             print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
             rw.cot = cot #just to be sure...
-            #draft4 = rw.depth_rewrite(paper_title, paper_title, draft3, text_chunk, entities.split('\n'), paper_title, int(1.6*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            #draft4 = rw.depth_rewrite(paper_title, paper_title, draft3, text_chunk, entities, paper_title, int(1.6*max_tokens), paper_title, paper_title, '', cot.llm.template)
             #print(f'\nRewrite 3 len: {len(draft4)}\n{draft4}\n')
             id = index_section_synopsis(paper_dict, draft3)
             section_synopses.append(draft3)
@@ -860,17 +870,42 @@ def create_chunks_grobid(pdf_filepath):
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
 
+def reverse_reciprocal_ranking(*lists):
+    # Example usage
+    #list1 = ["a", "b", "c"]
+    #list2 = ["b", "c", "d"]
+    #list3 = ["c", "d", "e"]
+    #merged_list = reverse_reciprocal_ranking(list1, list2, list3)
+
+    scores = {}
+    for lst in lists:
+        for i, item in enumerate(lst, start=1):
+            if item not in scores:
+                scores[item] = 0
+            scores[item] += 1 / i
+
+    # Create a merged list of items sorted by their scores in descending order
+    merged_list = sorted(scores, key=scores.get, reverse=True)
+    return merged_list
+
+
+def hyde(query):
+    hyde_prompt="Write a short sentence responding to:\n{{$query}}\n\nEnd your sentence with: </RESPONSE>"
+    prompt = [SystemMessage(hyde_prompt)]
+    response = cot.llm.ask({"query":query},
+                           prompt,
+                           max_tokens=100,
+                           temp=0.2,
+                           eos='</RESPONSE>')
+    end_idx =  response.lower().rfind('</RESPONSE>'.lower())
+    if end_idx < 0:
+        end_idx = len(response)+1
+    return response[:end_idx]
+
+
 def search(query, top_k=10, web=False):
     
     """Query is a *list* of keywords or phrases
-    This function does the following:
-    - Reads in the paper_library.parquet file in including the embeddings
-    - optionally searches and retrieves an additional set of articles
-       - Scrapes the text out of any new files 
-         - separates the text into sections
-         - creates synopses at the section and document level
-         - creates an embed vector for each synopsis
-         - adds entries to the faiss IDMap and the section_library
     - Finds the closest n faiss IDs to the user's query
     - returns the section synopses and section_library and paper_library entries for the found items"""
 
@@ -890,10 +925,28 @@ def search(query, top_k=10, web=False):
 
     # arxiv search over, now search faiss
     rw.cot = cot #just to be sure...
-    ids, paper_summaries = search_sections(' '.join(rw.extract_entities(query)), top_k=int(top_k/2))
-    #hyde_ids, hyde_texts = search_sections(hyde(query), top_k=int(top_k/2))
-    print(f'found {len(paper_summaries)} sections')
-    return ids, paper_summaries
+    hyde_query = hyde(query)
+    print('\nhyde query:\n{hyde_query}')
+    query_ids, query_summaries = search_sections(query, top_k=int(top_k/2))
+    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query)), top_k=int(top_k/2))
+    hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k/2))
+    reranked = reverse_reciprocal_ranking(query_ids, kwd_ids, hyde_ids)
+    print(f'search found:\n{query_ids}\n{kwd_ids},\n{hyde_ids}')
+    print(f'rerank:\n{reranked}\n')
+    all_ids = query_ids+kwd_ids+hyde_ids
+    all_summaries = query_summaries+kwd_summaries+hyde_summaries
+    summaries = []
+    for n, id in enumerate(reranked):
+        if n > top_k:
+            return reranked[:10], summaries
+        try:
+            idx = all_ids.index(id)
+        except:
+            print(f"\n**ERROR** S2 search can't find {id} in {all_ids}\n")
+            continue
+        summaries.append(all_summaries[idx])
+
+    return reranked, summaries
 
 def parse_arguments():
     """Parses command-line arguments using the argparse library."""
@@ -916,6 +969,9 @@ def queue_url_for_indexing(url):
     data = response.json()
     print(f'url submitted for indexing, response: {data}')
     return data
+
+def repair_paper_library_from_section_library():
+    pass
 
 if __name__ == '__main__':
     import OwlCoT as cot

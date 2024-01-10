@@ -579,12 +579,17 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
    def speak(self): # lauching working memory editor
       if self.tts:
          self.tts = False
+         self.display_response('\nSpeech off\n')
       else:
+         self.display_response('\nSpeech on\n')
          self.tts = True
 
    def speech_service(self, text):
-      print("trying to speak")
-      r = requests.post("http://bruce-linux:5004/", json={"text":text})
+      #self.display_response('\nspeaking...\n')
+      try:
+         r = requests.post("http://bruce-linux:5004/", json={"text":text})
+      except Exception as e:
+         print('\nspeech attempt failed {str(e)}\n')
 
    def history(self):
       self.owlCoT.historyEditor() # save and display Conversation history for editting

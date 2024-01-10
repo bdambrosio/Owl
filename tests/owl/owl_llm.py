@@ -29,7 +29,8 @@ print(subdirs)
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'xDAN' in d or 'UNA' in d or 'Sakura' in d)]
 print(models)
 
-templates = {"LoneStriker/bagel-dpo-34b-v0.2-4.0bpw-h6-exl2": "llama-2",
+templates = {"bagel-dpo-34b-v0.2-4.0bpw-h6-exl2": "llama-2",
+             "bagel-dpo-34b-v0.2-8.0bpw-h8-exl2": "llama-2",
              "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
@@ -86,7 +87,10 @@ config.prepare()
 model = ExLlamaV2(config)
 
 print(f"Loading model: {model_name} prompt_template {model_prompt_template}")
-if 'tulu' in model_name:
+if 'bagel' in model_name.lower():
+    print(f' bagel load')
+    model.load([20, 23])
+elif 'tulu' in model_name:
     model.load([20, 23])
 elif 'ixtral' in model_name:
     print(f' mixtral load')
@@ -169,7 +173,7 @@ print(f"starting server")
 @app.post("/template")
 async def template(request: Request):
     global model_prompt_template
-    return {"template":model_prompt_template}
+    return {"template":model_prompt_template, "context_size":context_size}
     
 @app.post("/")
 async def get_stream(request: Request):

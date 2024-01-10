@@ -92,28 +92,34 @@ def extract_entities(text, title=None, paper_topic=None, outline=None, template=
                   UserMessage(f"""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {topic} from the following research excerpt.
 
 Respond using the following format:
-{{"found": ["keywd1", "Named Entity1", "Acronym1", "keywd2", ...] }}
+<NAMED_ENTITIES>
+Entity1
+Entity2
+...
+</NAMED_ENTITIES>
 
 If distinction between keyword, acronym, or named_entity is unclear, it is acceptable to list a term or phrase under multiple categories.
 
 <RESEARCH EXCERPT>
 {text}
 </RESEARCH EXCERPT>
-
-Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
-{{"found": ["keywd1", "Named Entity1", "keywd2", "Acronym1", ...]}}
 """),
-                  AssistantMessage("")
+                  AssistantMessage("<NAMED_ENTITIES>\n")
               ]
     
-    response_json = cot.llm.ask('', kwd_messages, template=template, max_tokens=400, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    response = cot.llm.ask('', kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NAMED_ENTITIES>')
     # remove all more common things
     keywords = []
-    if 'found' in response_json:
-        for word in response_json['found']:
-            zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-            if zipf < 2.85 and word not in keywords:
-                keywords.append(word)
+    end = response.lower().rfind ('</NAMED_ENTITIES>'.lower())
+    if end < 1: end = len(response)+1
+    response = response[:end]
+    response_entities = response.split('\n')
+    for entity in response_entities: 
+        if entity.startswith('<NAMED_E') or entity.startswith('</NAMED_E'):
+            continue
+        zipf = wf.zipf_frequency(entity, 'en', wordlist='large')
+        if zipf < 2.85 and entity not in keywords:
+            keywords.append(entity)
     for word in extract_acronyms(text):
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
         if zipf < 2.85 and word not in keywords:

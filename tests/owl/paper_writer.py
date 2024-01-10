@@ -120,7 +120,7 @@ class PWUI(QWidget):
 
             # Model ComboBox
             model_combo_box = QComboBox()
-            model_combo_box.addItems(["llm", "gpt3", "gpt4"])
+            model_combo_box.addItems(["llm", "gpt3", "gpt4", "mistral-small", "mistral-medium"])
             row_layout.addWidget(model_combo_box)
 
             # Store combo boxes in the dictionary with the row label as the key
@@ -174,6 +174,10 @@ def get_template(row, config):
                 return OPENAI_MODEL3
             if model == 'gpt4':
                 return OPENAI_MODEL4
+            if model == 'mistral-small':
+                return 'mistral-small'
+            if model == 'mistral-medium':
+                return 'mistral-medium'
             if model == 'llm':
                 return cot.template
         else:
