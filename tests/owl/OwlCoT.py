@@ -140,18 +140,24 @@ class LLM():
       #
 
       prompt_text=\
-         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
+         """You are a JSON expert. The following TextString does not parse using the python json.loads function.
 Please repair the text string so that the python JSON library loads method can parse it and return a valid dict.
 This may include removing any special characters that will cause loads to fail.
 This repair should be performed recursively, including all field values.
-for example, in:
-{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
-the inner form  {"action"...} should also be parsable as valid json.
-The provided TextString may have been prematurely truncated. If so, the repair should include adding any necessary JSON termination.
+The provided TextString may have been prematurely truncated. 
+If so, the repair should include adding any necessary JSON termination.
 Return only the repaired JSON without any Markdown or code block formatting.
 
-TextString:
-{{$input}}
+Problem 1: {"action": 'tell', "statement":'xyz
+Chain of Thought: the value for the statement field is not terminated. I should add a closing '. the overall JSON form does not have a close brace. I should add a close brace.
+Response: {"action": 'tell', "statement":'xyz'}
+
+Problem 2: ```json\n{"action": 'tell', "statement":'xyz'}```
+Chain of Thought: the JSON form is surrounded by markdown. I should remove the markdown
+Response: {"action": 'tell', "statement":'xyz'}
+
+New Problem:{{$input}}
+Chain of Thought:
 """
       prompt = [
          SystemMessage(prompt_text),

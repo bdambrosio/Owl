@@ -146,10 +146,10 @@ class MistralAIClient(PromptCompletionClient):
             msg_content = msg['content']
             # check for special case of last message pair user/assistant, can't have assistant as last!
             if i == len(rendered_prompt_msgs) -2:
-                if msg_role == 'user' and rendered_prompt_msgs[i+1]['role'] == 'assistant':
+                if (msg_role == 'user' or msg_role == 'system') and rendered_prompt_msgs[i+1]['role'] == 'assistant':
                     # trying to prime llm with an open-ended final asst msg, append to last user:
                     response_prime = rendered_prompt_msgs[i+1]['content']
-                    chatMessage = ChatMessage(role = msg["role"], content = msg_content+'\n'+response_prime)
+                    chatMessage = ChatMessage(role = 'user', content = msg_content+'\n'+response_prime)
                     prompt.append(chatMessage)
                     break
 

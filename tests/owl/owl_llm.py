@@ -29,8 +29,8 @@ print(subdirs)
 models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'xDAN' in d or 'UNA' in d or 'Sakura' in d)]
 print(models)
 
-templates = {"bagel-dpo-34b-v0.2-4.0bpw-h6-exl2": "llama-2",
-             "bagel-dpo-34b-v0.2-8.0bpw-h8-exl2": "llama-2",
+templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
+             "bagel-dpo-34b-v0.2-6.0bpw-h6-exl2": "llama-2",
              "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",

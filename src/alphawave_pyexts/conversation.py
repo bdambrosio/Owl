@@ -396,7 +396,7 @@ register_conv_template(
 # Vicuna v1.1 template
 register_conv_template(
     Conversation(
-        name="vicuna_v1.1",
+        name="vicuna",
         system="",
         roles=("USER", "ASSISTANT"),
         messages=(),

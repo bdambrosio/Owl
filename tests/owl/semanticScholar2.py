@@ -903,7 +903,7 @@ def hyde(query):
     return response[:end_idx]
 
 
-def search(query, top_k=10, web=False):
+def search(query, top_k=20, web=False):
     
     """Query is a *list* of keywords or phrases
     - Finds the closest n faiss IDs to the user's query
