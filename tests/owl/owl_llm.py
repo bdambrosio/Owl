@@ -30,18 +30,16 @@ models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'xDAN' in
 print(models)
 
 templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
-             "bagel-dpo-34b-v0.2-6.0bpw-h6-exl2": "llama-2",
              "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
-             "Mixtral-8x7b-Instruct-6.0b-exl2": "chatml",
-             "Mixtral-8x7b-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
+             "Mistral-7b-instruct": "llama-2",
+             "Mixtral-8x7b-Instruct-6.0b-exl2": "llama-2",
+             "Mixtral-8x7B-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
-             "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
+             #"OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
-             "platypus2-70b-instruct-exl2":"alpaca",
              "Sakura-SOLAR-Instruct-DPO-v2":"freewilly",
-             "ShiningValiant-4bpw-h6-exl2":"llama-2",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
              "xDAN-L1-Chat-RL-v1-8.0bpw-h8-exl2":"alpaca",
              "zephyr-7b-beta":"zephyr"

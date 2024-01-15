@@ -207,10 +207,10 @@ Chain of Thought:
       if client is None:
           if 'gpt' in self.template:
               client = self.openAIClient
-              print(f'llm.ask using OpenAIClient {template}')
+              #print(f'llm.ask using OpenAIClient {template}')
           elif "mistral-" in self.template:
               client=self.mistralAIClient
-              print(f'llm.ask using MistralAIClient {template}')
+              #print(f'llm.ask using MistralAIClient {template}')
           else:
               client = self.osClient
           
@@ -228,7 +228,7 @@ Chain of Thought:
           except Exception as e:
               print(f' fail to get prompt template from server {str(e)}')
 
-      print(f"ask {str(type(client))[str(type(client)).rfind('.')+1:]}, {template}") 
+      #print(f"ask {str(type(client))[str(type(client)).rfind('.')+1:]}, {template}") 
       #if template=='zephyr':
       #    traceback.print_exc()
       options = PromptCompletionOptions(completion_type='chat', model=template,
@@ -592,7 +592,7 @@ class OwlInnerVoice():
           #lines = inputLog.split('\n')
           lines = inputLog[-2000:]
         
-          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own. 
+          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own. End your response with '/END' 
 Doc's input:
 {{{{$input}}}}
 """
@@ -602,7 +602,7 @@ Doc's input:
              UserMessage(analysis_prompt_text),
              AssistantMessage(' ')
           ]
-          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=250, temp=0.2)
+          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=250, temp=0.2, eos='/END')
           if analysis is not None:
               self.docEs = analysis.strip().split('\n')[0:2] # just use the first 2 pp
           return self.docEs
@@ -790,12 +790,13 @@ Doc's input:
         index = faiss.IndexIDMap(faiss.IndexFlatL2(384))
         vectors_np = np.array(vectors)
         ids_np = np.array(candidate_ids, dtype=np.int64)
-        print(f'vectors {vectors_np.shape}, ids {type(ids_np)} {ids_np.shape}')
+        #print(f'vectors {vectors_np.shape}, ids {type(ids_np)} {ids_np.shape}')
         index.add_with_ids(vectors_np, ids_np)
         distances, ids = index.search(query_embed.reshape(1,-1), min(10, len(candidate_ids)))
-        print("Distances:", distances)
-        print("Id:",ids)
-        timestamps = [self.docHash[i]['timestamp'] for i in ids[0]]
+        #print("Distances:", distances)
+        #print("Id:",ids)
+        #print(f"DocHash: {self.docHash.keys()}")
+        timestamps = [self.docHash[np.int64(i)]['timestamp'] for i in ids[0]]
         # Compute score combining distance and recency
         scores = []
         for dist, id, ts in zip(distances[0], ids[0], timestamps):
@@ -889,24 +890,24 @@ Respond in a plain JSON format without any Markdown or code block formatting.
 Available actions include:
 
 <ACTIONS>
-- tell: Provide a direct response to user input. Consider adding insights or explanations, Integrating relevant context into your response, reflecting on broader implications. Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input. Example: {"action":"tell","argument":"Hey Doc, that sounds intriguing. What do you think about adding ..."}
-- question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?"}
-- article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites"}
-- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?"}
-- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture"}
-- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023"}
-- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?"}
+- tell: Provide a direct response to user input. Consider adding insights or explanations, integrating relevant context into your response, reflecting on broader implications. Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input. Example: {"action":"tell","argument":"Doc, that sounds intriguing. What do you think about adding ...", "reasoning":'reasons for choosing tell'}
+- question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?", "reasoning":'reasons for choosing ask'}
+- article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites", "reasoning":'reasons for choosing article'}
+- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?", "reasoning":'reasons for choosing gpt4'}
+- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture", "reasoning":'reasons for choosing recall'}
+- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023", "reasoning":'reasons for choosing web'}
+- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?", "reasoning":'reasons for choosing wiki'}
 
 Respond in a plain JSON format without any Markdown or code block formatting, as shown in the above examples.
 </ACTIONS>
 
-Given the following user input, determine which action is needed at this time.
+Given the following user input, reason about which action is needed at this time. concisely record your reasoning in the "reasoning" field of the response. 
 If there is an action directly specified in the input, select that action
 If you can respond to the input from known fact, logic, or reasoning, use the 'tell' action to respond directly.
 If you need more detail or personal information, consider using the 'question' action.
 If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
-If you need additional information, especially transient or ephemeral information like current events or weather, consider using the 'web' action.
-The usual default action is to use tell to directly respond using 'tell'.
+If you need additional transient or ephemeral information like current events or weather, consider using the 'web' action.
+The default action is to use tell to directly respond.
 Respond in a plain JSON format without any Markdown or code block formatting as shown in the above examples.
 
 """
@@ -1171,10 +1172,10 @@ User Input:
        #   wakeup_messages += f' - is web search service started?\n'
        prompt = [SystemMessage(self.core_prompt()),
                  ConversationHistory('history', 400),
-                 UserMessage(f'{greeting}'),
+                 UserMessage(f'end your response with "/END"\n\n{greeting}'),
                  AssistantMessage('')
                  ]
-       response = self.llm.ask('',prompt, temp=0.1, max_tokens=120)
+       response = self.llm.ask('',prompt, temp=0.1, max_tokens=120, eos='/END')
        if response is None:
            wakeup_messages += f' - is llm service started?\n'
        else:
@@ -1223,11 +1224,11 @@ User Input:
             AssistantMessage('')
             ]
         
-        feelings = self.llm.ask('Owl, if you had feelings, what would you be feeling right now? Answer in 28 words or less without disclaimers.', prompt, template = self.template, temp=.6, max_tokens=48)
+        feelings = self.llm.ask('Owl, if you had feelings, what would you be feeling right now? Answer in 28 words or less without disclaimers. End your response with "/END"', prompt, template = self.template, temp=.6, max_tokens=48, eos='/END')
         if feelings is not None:
             self.add_exchange("Owl, how are you feeling?", feelings)
             results['ai_feelings'] = feelings
-        goals = self.llm.ask('What would Owl like to be doing right now in 32 words or less.', prompt, template = self.template, temp=.6, max_tokens=48)
+        goals = self.llm.ask('What would Owl like to be doing right now in 32 words or less? End your response with "/END"', prompt, template = self.template, temp=.6, max_tokens=48, eos='/END')
         if goals is not None:
             self.add_exchange("Owl, what would you wish for?", goals)
             results['ai_goals'] = goals

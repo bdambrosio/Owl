@@ -114,8 +114,8 @@ def get_semantic_scholar_meta(doi):
     if response.status_code == 200:
         data = response.json()
         #print(data.keys())
-        citations = data.get("citationVelocity")
-        influential = data.get("influentialCitationCount")
+        citations = int(data.get("citationVelocity"))
+        influential = int(data.get("influentialCitationCount"))
         publisher = data.get("publicationVenue")
         return citations, influential, publisher
     else:
@@ -123,6 +123,8 @@ def get_semantic_scholar_meta(doi):
         return 0,0,''
 
 def paper_library_df_fixup():
+    paper_library_df['inflCitations'] = paper_library_df['inflCitations'].replace('', 0).astype(int)
+    paper_library_df['citationCount'] = paper_library_df['citationCount'].replace('', 0).astype(int)
     return
 
 paper_library_columns = ["faiss_id", "title", "authors", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
@@ -385,8 +387,8 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     result_dict["authors"] = authors
     result_dict["publisher"] = ''
     result_dict["summary"] = abstract 
-    result_dict["citationCount"]= citationCount
-    result_dict["inflCitations"] = influentialCitationCount
+    result_dict["citationCount"]= int(citationCount)
+    result_dict["inflCitations"] = int(influentialCitationCount)
     result_dict["evaluation"] = ''
     result_dict["pdf_url"] = pdf_url if pdf_url is not None else page_url
     pdf_filepath= download_pdf(page_url, title if len(title)>0  else page_url[page_url.rfind('/')+1:])
@@ -401,7 +403,7 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     paper_index = len(paper_library_df)
     paper_library_df.loc[paper_index] = result_dict
     # section and index paper
-    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
+    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict, paper_index)
     save_synopsis_data()
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
@@ -417,8 +419,8 @@ def index_file(filepath):
     result_dict["authors"] = ''
     result_dict["publisher"] = ''
     result_dict["summary"] = ''
-    result_dict["citationCount"]= ''
-    result_dict["inflCitations"] = ''
+    result_dict["citationCount"]= 0
+    result_dict["inflCitations"] = 0
     result_dict["evaluation"] = ''
     result_dict["pdf_filepath"]= filepath
     if len(paper_library_df) > 0:
@@ -436,7 +438,7 @@ def index_file(filepath):
     paper_index = len(paper_library_df)
     paper_library_df.loc[paper_index] = result_dict
     # section and index paper
-    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict)
+    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict, paper_index)
     save_synopsis_data()
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
@@ -530,7 +532,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                     continue
             url = paper['url']
             isOpenAccess = paper['isOpenAccess']
-            influentialCitationCount = paper['influentialCitationCount']
+            influentialCitationCount = int(paper['influentialCitationCount'])
             if isOpenAccess and 'openAccessPdf' in paper and type(paper['openAccessPdf']) is dict :
                 openAccessPdf = paper['openAccessPdf']['url']
             else: openAccessPdf = None
@@ -559,8 +561,8 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             result_dict["authors"] = [", ".join(author['name'] for author in authors)]
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
             result_dict["summary"] = abstract 
-            result_dict["citationCount"]= citationCount
-            result_dict["inflCitations"] = influentialCitationCount
+            result_dict["citationCount"]= int(citationCount)
+            result_dict["inflCitations"] = int(influentialCitationCount)
             result_dict["evaluation"] = ''
             result_dict["pdf_url"] = openAccessPdf
             print(f' url: {openAccessPdf}')
@@ -614,7 +616,7 @@ def check_entities_against_draft(entities, draft):
     return entities_in_text, entities_not_in_text
 
 
-def index_paper_synopsis(paper_dict, synopsis):
+def index_paper_synopsis(paper_dict, synopsis, paper_index):
     global paper_indexIDMap
     if 'embedding' in paper_dict and paper_dict['embedding'] is not None:
         embedding = paper_dict['embedding']
@@ -623,7 +625,7 @@ def index_paper_synopsis(paper_dict, synopsis):
     ids_np = np.array([paper_dict['faiss_id']], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
     paper_indexIDMap.add_with_ids(embeds_np, ids_np)
-    paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'synopsis'] = synopsis
+    paper_library_df.loc[paper_index, 'synopsis'] = synopsis
     paper_library_df.to_parquet(paper_library_filepath)
 
 
@@ -647,7 +649,10 @@ def index_section_synopsis(paper_dict, synopsis):
     return faiss_id
 
 
-def index_paper(paper_dict):
+def index_paper(paper_dict, paper_index=None):
+    if paper_index == None:
+        paper_index = len(paper_library_df)
+        paper_library_df.loc[paper_index] = paper_dict
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
     paper_abstract = paper_dict['summary']
@@ -665,6 +670,20 @@ def index_paper(paper_dict):
         print(f'\ngrobid fail {str(e)}')
         return paper_abstract, paper_faiss_id, [],[]
     print(f"grobid extract keys {extract.keys()}")
+
+    for item in ['authors', 'title']:
+        if item in paper_dict and item in extract and len(paper_dict[item]) < len(extract[item]):
+            print(f'correcting {item}')
+            paper_dict[item] = extract[item]
+    if 'summary' in paper_dict and 'abstract' in extract and len(paper_dict['summary']) < len(extract['abstract']):
+        paper_dict['summary'] = extract['abstract']
+    paper_title = paper_dict['title']
+    paper_authors = paper_dict['authors'] 
+    paper_abstract = paper_dict['summary']
+            
+    paper_library_df.loc[paper_index, 'title'] = paper_title
+    paper_library_df.loc[paper_index, 'authors'] = paper_authors
+    paper_library_df.loc[paper_index, 'summary'] = paper_abstract
     text_chunks = [paper_abstract]+extract['sections']
     print(f"Summarizing each chunk of text {len(text_chunks)}")
 
@@ -786,7 +805,7 @@ End your synopsis response as follows:
                 end_idx = len(response)
                 paper_synopsis = response[:end_idx-1]
             """
-    index_paper_synopsis(paper_dict, paper_abstract)
+    index_paper_synopsis(paper_dict, paper_abstract, paper_index)
     # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
     #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
     #paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'section_ids'] = section_ids

@@ -837,14 +837,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
        self.active_plan = None
 
 
-   def make_plan(self, name, task_dscp):
-      plan = {}
-      plan['name'] = name
-      plan['task'] = task_dscp
-      plan['sbar'] = {}
-      plan['steps'] = {}
-      return plan
-   
    def save_plan(self, task_name, plan):
        with open(task_name+'Plan.json', 'w') as f:
           json.dump(plan, f, indent=4)
@@ -892,17 +884,26 @@ Your conversation style is warm, gentle, humble, and engaging. """
           self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
        return self.active_plan
     
-   def init_plan(self):
+   def init_plan(self, topic='', awm=True):
        index_str = str(random.randint(0,999))+'_'
-       plan_suffix = self.owlCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
-       if plan_suffix is None or not plan_suffix:
-          return
-       plan_name = 'plan'+index_str+plan_suffix
-       task_dscp = self.owlCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
-       plan = self.make_plan(plan_name, task_dscp)
-       self.active_plan = plan
-       
-       self.owlCoT.create_awm(plan, name=plan_name, confirm=False)
+       plan_suffix = ''
+       if awm:
+          plan_suffix = self.owlCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
+          task_dscp = self.owlCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
+          if plan_suffix is None or not plan_suffix:
+             return
+          plan_name = 'plan'+index_str+plan_suffix
+       else:
+          plan_name = topic
+          task_dscp = topic
+       plan = {}
+       plan['name'] = plan_name
+       plan['task'] = task_dscp
+       plan['sbar'] = {}
+       plan['steps'] = {}
+       if awm:
+          self.active_plan = plan
+          self.owlCoT.create_awm(plan, name=plan_name, confirm=False)
        return plan
 
    def run_plan(self):
@@ -938,30 +939,41 @@ Your conversation style is warm, gentle, humble, and engaging. """
           print(f'run_plan step confirmed {next}')
           self.interpreter.do_item(step)
           
-   def analyze(self, plan, model=None):
+   def analyze(self, plan, short=False, model=None):
+      # short means ask only one clarification, maybe none if query is detailed (tbd)
       #not in args above because may not be available at def time
       if model is None:
          model = self.llm.template
       prefix = plan['name']
       task_dscp = plan['task']
+      print(f'Analyze task_dscp {task_dscp}')
       if 'sbar' not in plan:
          plan['sbar'] = {}
       sbar = plan['sbar']
       # Loop for obtaining user responses
       # Generate interview questions for the remaining steps using GPT-4
       interview_instructions = [
-         ("needs", "Generate an interview question to fill out specifications of the task the user wants to accomplish."),
+         ("needs", "Generate an interview question to add details to the task the user wants to accomplish."),
          ("background", "Generate a followup interview question about any additional requirements of the task."),
          ("observations", "Summarize the information about the task, and comment on any incompleteness in the definition."),
       ]
-      messages = [SystemMessage("Reason step by step"),
-                  UserMessage("The task is to "+task_dscp)]
+      if short:
+         #only ask one question
+         interview_instructions = [
+         ("background", "Generate a followup interview question about any additional requirements of the task."),
+      ]
+      messages = [SystemMessage("Your task is to interview the user to expand the known information about a task to be accomplished. The task title is "+task_dscp)]
       for step, instruction in interview_instructions:
-         messages.append(UserMessage(instruction))
+         messages.append(UserMessage(instruction+"""\nRespond using the following JSON template:
+
+{"question":"'<question text>'}
+
+Respond only with the above JSON, without any commentary or explanatory text
+"""))
          if step != 'observations':
-            user_prompt = self.llm.ask('', messages, template=model, temp = 0.05, max_tokens=100)
-            if user_prompt is not None:
-               user_prompt = user_prompt.split('\n')[0]
+            user_prompt = self.llm.ask('', messages, template=model, temp = 0.05, max_tokens=100, stop_on_json=True, validator=JSONResponseValidator())
+            if user_prompt is not None and type(user_prompt) is dict and 'question' in user_prompt:
+               user_prompt = user_prompt['question']
             print(f"\nAI : {step}, {user_prompt}")
             past = ''
             if sbar is not None and sbar == dict and step in plan['sbar']:
@@ -984,11 +996,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
             sbar['observations']={'q':observations,'a':user_response}
             # don't need to add a message since we're done with this conversation thread!
             print(f"Requirements \n{sbar}")
-         try:
-            with open(prefix+'Sbar.json', 'w') as pf:
-               json.dump(sbar, pf)
-         except:
-            traceback.print_exc()
          plan['sbar'] = sbar
       return plan
 

@@ -85,14 +85,14 @@ def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port
     if response.status_code == 200:
         # Read and print the streaming content
         response_text = ''
-        print()
+        #print()
         for chunk in response.iter_lines():
             if chunk:
                 line = chunk.decode('utf-8') + '\n'
                 if display is not None:
                     display(line)
                 response_text += line
-        print()
+        #print()
         return response_text
     else:
         print(f' server return code {response.status_code}')

@@ -1,4 +1,4 @@
-import os, sys, logging, glob
+import os, sys, logging, glob, time
 import pandas as pd
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
@@ -46,6 +46,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLa
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
+from PyQt5.QtCore import pyqtSignal
 import signal
 from OwlCoT import LLM, ListDialog, generate_faiss_id,OPENAI_MODEL3,OPENAI_MODEL4
 import wordfreq as wf
@@ -54,16 +55,12 @@ from transformers import AutoTokenizer, AutoModel
 import webbrowser
 from Planner import Planner
 import rewrite as rw
+import jsonEditWidget as ew
 
 # startup AI resources
 
 # load embedding model and tokenizer
 embedding_tokenizer = AutoTokenizer.from_pretrained('/home/bruce/Downloads/models/Specter-2-base')
-#load base model
-#embedding_model = AutoModel.from_pretrained('/home/bruce/Downloads/models/Specter-2-base')
-#load the adapter(s) as per the required task, provide an identifier for the adapter in load_as argument and activate it
-#embedding_model.load_adapter('/home/bruce/Downloads/models/Specter-2', source="hf", set_active=True)
-#embedding_model.load_adapter('/home/bruce/Downloads/models/Specter-2')
 from adapters import AutoAdapterModel
 
 embedding_model = AutoAdapterModel.from_pretrained("allenai/specter2_aug2023refresh_base")
@@ -400,28 +397,78 @@ def s2_search (config, outline, section_outline):
                         query = query.replace(bad, '')
                         result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
                         print(f's2_search found {len(result_list)} new papers')
-
+                        while len(result_list) == 0 and next_offset < total_papers\
+                              and cot.confirmation_popup('Continue?', ''):
+                            s2.get_articles(query, next_offset, confirm=True)
                 
-def write_report(config, length=None): 
+updated_json = None
+
+def handle_json_editor_closed(result):
+    global updated_json
+    print(f'got result {result}')
+    updated_json = result
+
+config = {}
+
+def write_report(app):
+    global updated_json, config
     #rows = ["Query", "SBAR", "Outline", "WebSearch", "Write", "ReWrite"]
+    plan = plan_search()
+    if 'config' in plan:
+        config = plan['config']
+    rows = ["Query", "SBAR", "Outline", "Search", "Write", "ReWrite"]
+    ex = PWUI(rows, config) # get config for this report task
+    ex.show()
+    app.exec()
+    #get updated config, in case it changed
+    if config is not None and len(config.keys()) > 0:
+        plan['config'] = config
+        save_plans()
+
     query_config = config['Query']
     query = ""
-    plan = plan_search()
     if query_config['exec'] == 'Yes':
         query = cot.confirmation_popup('Question to report on?', '')
-    else:
+        save_plans()
+    elif 'task' not in plan.keys():
         plan['task']=query
             
     sbar_config = config['SBAR']
     if sbar_config['exec'] == 'Yes':
         # pass in query to sbar!
-        plan = pl.analyze(plan)
+        print(f'sbar input plan\n{plan}')
+        if 'sbar' in plan and type(plan['sbar']) is dict and cot.confirmation_popup('Edit existing sbar?', json.dumps(plan['sbar'], indent=2)):
+            # we already have an sbar, edit it
+            app = QApplication(sys.argv)
+            editor = ew.JsonEditor(plan['sbar'])
+            editor.closed.connect(handle_json_editor_closed)
+            editor.show()
+            app.exec()
+            print(f'SBAR: {updated_json}')
+            if updated_json is not None:
+                plan['sbar'] = updated_json
+                save_plans()
+        else:
+            plan = pl.analyze(plan)
+            save_plans()
         
     outline_config = config['Outline']
     if outline_config['exec'] == 'Yes':
-        # make outline
-        pl.outline(outline_config, plan)
-        outline = plan['outline']
+        if 'outline' in plan and type(plan['outline']) is dict\
+           and cot.confirmation_popup('Edit existing plan?', json.dumps(plan['outline'], indent=2)) is not None:
+            # we already have an outline, edit it
+            app = QApplication(sys.argv)
+            editor = ew.JsonEditor(plan['outline'])
+            editor.closed.connect(handle_json_editor_closed)
+            editor.show()
+            app.exec()
+            #print(f'outline: {updated_json}')
+            if updated_json is not None:
+                plan['outline'] = updated_json
+        else:
+            # make outline
+            plan = pl.outline(outline_config, plan)
+            outline = plan['outline']
         save_plans() # save paper_writer plan memory
     else:
         outline = plan['outline']
@@ -449,8 +496,10 @@ def write_report(config, length=None):
         pass
 
 
-def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1=None, heading_1_draft = '', num_rewrites=1):
+def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1='', heading_1_draft = '', num_rewrites=1):
     template = get_template('Write',config)
+    if depth == 0: #set section number initially to 0
+        n = 0; refs=[]
     if len(paper_title) == 0 and depth == 0 and 'title' in paper_outline:
         paper_title=paper_outline['title']
     if 'length' in section_outline:
@@ -479,7 +528,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
                 heading_1 = subsection['title']
                 heading_1_draft = ''
             print(f"subsection title {subsection['title']}")
-            subsection_text = '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
+            subsection_text, subsection_refs = '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
                                                                                     paper_outline=paper_outline,
                                                                                     section_outline=subsection,
                                                                                     length=subsection_token_length,
@@ -494,27 +543,38 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
                                                                                     heading_1_draft=heading_1_draft,
                                                                                     num_rewrites=num_rewrites)
             section += subsection_text
+            for ref in subsection_refs:
+                if ref not in refs:
+                    refs.append(ref)
             heading_1_draft += subsection_text
             if depth==0:
                 with open(f'section{n}.txt', 'w') as pf:
-                    pf.write(section)
+                    pf.write(section +'\n\nReferences:+\n'+'\n'.join(refs))
                 n += 1
             
-        return section
+        if depth != 0:
+            return section, refs
+        else:
+            return section +'\n\nReferences:+\n'+'\n'.join(refs)
     
     elif 'title' in section_outline:
         # actuall llm call to write this terminal section
         section = section_outline['title']
+        print(f'heading_1 {heading_1}\npst {parent_section_title}\nst {subsection_topic}')
         query = heading_1+', '+parent_section_title+' '+subsection_topic
         ids, excerpts = s2.search(query) # this assumes web searching has been done note we aren't using dscp for search
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
-        subsection_token_length = max(320,length) # no less than a paragraph
+        subsection_refs =  []
+        for ref in [s[0]for s in excerpts]:
+            if ref not in subsection_refs:
+                subsection_refs.append(ref)
+        subsection_token_length = max(500,length) # no less than a paragraph
         
         #
         ### Write initial content
         #
         
-        print(f"\nWriting:{section_outline['title']} length {length}\n  within {parent_section_title}\n covering {subsection_topic}")
+        print(f"\nWriting:{section_outline['title']} length {length}\n covering {subsection_topic}")
         messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 You are writing a paper titled:
 {paper_title}
@@ -552,13 +612,13 @@ End the section as follows:
 """),
               AssistantMessage("<DRAFT>\n")
               ]
-        response = cot.llm.ask('', messages, template=template, max_tokens=subsection_token_length, temp=0.1, eos='</DRAFT>')
+        response = cot.llm.ask('', messages, template=template, max_tokens=int(subsection_token_length), temp=0.1, eos='</DRAFT>')
         end_idx = response.rfind('</DRAFT>')
         if end_idx < 0:
             end_idx = len(response)
         draft = response[:end_idx]
 
-        print(f'\nFirst Draft:\n{draft}\n')
+        #print(f'\nFirst Draft:\n{draft}\n')
         if num_rewrites < 1:
             return draft
 
@@ -569,7 +629,7 @@ End the section as follows:
         #
         keywds = entities(paper_title, paper_outline, excerpts, ids, template)
         missing_entities = literal_missing_entities(keywds, draft)
-        print(f'\n missing entities in initial draft {len(missing_entities)}\n')
+        #print(f'\n missing entities in initial draft {len(missing_entities)}\n')
         for i in range(num_rewrites):
             if i < num_rewrites-1:
                 template = template
@@ -589,128 +649,77 @@ End the section as follows:
             with open(f'section{n}.txt', 'w') as pf:
                 pf.write(section)
             n += 1
-    return draft
 
+    print(f'Refs:\n{subsection_refs}\n')
+    return draft, subsection_refs
 
-if __name__ == '__main__':
-    default_outline = {
-        "task":
-        """write a detailed research survey on circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.""",
-        "title":"Circulating miRNA and DNA methylation patterns as biomarkers for early stage lung cancer detection.",
-        "sections":[
-            {"title":"Introduction", "length": 600, "rewrites":1,
-             "sections":[
-                 {"title":"Overview of Lung Cancer",
-                  "dscp":"Prevalence and impact and importance of early detection for improved prognosis"},
-                 {"title":"Biomarkers in Cancer Detection", "rewrites": 2,
-                  "dscp":"Definition and role of biomarkers in cancer. Traditional biomarkers used in lung cancer"},
-                 {"title":"Emerging Biomarkers: miRNA and DNA Methylation", "rewrites":2,
-                  "dscp":"Explanation of miRNA and DNA methylation. Potential advantages over traditional biomarkers"},
-             ]
-             },
-                 
-            {"title":"Circulating miRNA as Biomarkers", "length":1000,"rewrites":2,
-             "sections":[
-                 {"title":"Biological Role of miRNAs",
-                  "sections":[
-                      {"title":"Function and significance in cell regulation"},
-                      {"title":"How alterations in miRNA can contribute to cancer development"},
-                  ],
-                  },
-                 {"title":"miRNAs in Lung Cancer",
-                  "sections":[
-                      {"title":"Studies showing miRNA expression profiles in lung cancer patients"},
-                      {"title":"Specific miRNAs frequently dysregulated in lung cancer", "length":300},
-                  ],
-                  },
-                 {"title":"Circulating miRNAs",
-                  "dscp":"Circulating miRNAs in blood and other bodily fluids. Advantages as non-invasive biomarkers"},
-                 {"title":"Studies on miRNAs in Early Lung Cancer Detection",
-                  "dscp":"Summary of key research findings. Analysis of sensitivity, specificity, and overall effectiveness"}
-             ]
-             },
+def discuss(topic):
+    global updated_json, config
+    plan = pl.init_plan(topic = topic, awm=False)
+    plan['task'] = f'Discuss {topic}'
+    plan = pl.analyze(plan, short=True)
+    config={}
+    rows = ["Outline", "Search", "Write", "ReWrite"]
+    ex = PWUI(rows, config) # get config for this discussion task
+    ex.show()
+    app.exec()
+    #get updated config
+    if config is not None and len(config.keys()) > 0:
+        plan['config'] = config
+
+    # now enter conversation loop.
+    query = 'not None'
+    searched = False
+    while query is not None:
+        query = cot.confirmation_popup('Initial Question?', '')
+        if query is None or not query:
+            return 
+        plan['task']=query
+        
+        search_config = config['Search']
+        outline_config = config['Outline']
+        length = 400 # default response - should pick up from ui max_tokens if run from ui, tbd
+        outline_config['length'] = length
+
+        #create detail instruction for response from task, sbar, query
+        instruction_prompt = """generate an instruction for a research assistant telling her what to extract from a set of research papers.
+Respond using this JSON format:
+{"instruction": '<instruction>'}
+
+Topic: {{$topic}}
+Background: {{$sbar}}
+Query: {{$query}}
+
+Respond in plain JSON, with no markdown or code formatting.
+"""
+        messages = [SystemMessage(cot.v_short_prompt()),
+                    UserMessage(instruction_prompt),
+                    AssistantMessage('')
+                    ]
+        sbar_text=plan['sbar']['background']['a']
+        instruction = cot.llm.ask({"topic":topic, "query":query, "sbar": sbar_text},
+                                  messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
+        outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
+        plan['outline'] = outline
+        cot.display_response(json.dumps(outline, indent=2))
+        
+        # Note this is web search. Local faiss or other resource search will be done in Write below
+        if search_config['exec'] == 'Yes' and not searched:
+            # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
+            # also need to configure prompt, depth (depth in terms of # articles total or new per section?)
+            s2_search(config, outline, outline)
+            searched = True
             
-            {"title":"DNA Methylation Patterns as Biomarkers", "length":1000,"rewrites":2,
-             "sections":[
-                 {"title":"Basics of DNA Methylation",
-                  "sections":[
-                      {"title":"Role in gene expression and regulation"},
-                      {"title":"How aberrant methylation patterns are linked to cancer"},
-                  ],
-                  },
-                 {"title":"DNA Methylation in Lung Cancer",
-                  "sections":[
-                      {"title":"Commonly observed methylation changes in lung cancer"},
-                      {"title":"Genes frequently affected by methylation in lung cancer"},
-                  ],
-                  },
-                 {"title":"Research on DNA Methylation Patterns in Early Lung Cancer",
-                  "sections":[
-                      {"title":"Overview of significant studies"},
-                      {"title":"Discussion on the feasibility and accuracy"},
-                  ],
-                  },
-                 {"title":"Detection of Methylation Patterns",
-                  "sections":[
-                      {"title":"Techniques used to detect DNA methylation"},
-                      {"title":"Challenges in using methylation patterns for early detection"},
-                  ],
-                  },
-             ]
-             },
-            
-            {"title":"Comparative Analysis: miRNA and DNA Methylation Biomarkers", "rewrites":2,
-             "dscp":"miRNA and DNA Methylation Biomarkers",
-             "sections":[
-                 {"title":"Comparison in terms of reliability, cost, and accessibility"},
-                 {"title":"miRNA vs. DNA Methylation Biomarkers - Potential for combining both markers for improved detection",
-                  "length":1000, "rewrites":3},
-             ],
-             },
-            
-            {"title":"Near-term Opportunities, Challenges and Future directions", "length":1200, "rewrites":2,
-             "sections":[
-                 {"title":"Near-term Opportunites for combined miRNA / DNA methylation as biomarkers", "length":800,
-                  "dscp":"near-term opportunities in utilizing these biomarkers for blood (cell free, tumor-cell, and vesicle) assay of early lung cancer",
-                  },
-                 {"title":"Challenges",
-                  "dscp":"Technical and clinical challenges in utilizing these biomarkers for cell-free serum assay for early cancer detection",
-                  "sections":[
-                      {"title":"Challenges in utilizing miRNA and DNA methylation as biomarkers"},
-                      {"title":"Standardization and validation"},
-                  ]
-                  },
-                 {"title":"Future Research",
-                  "dscp": "areas needing further development for using circulating miRNA and DNA methylation assay in early stage cancer detection",
-                  "sections":[
-                      {"title":"Areas needed further investigation"},
-                      {"title":"Potential advances in technology and methodology"}
-                  ]
-                  },
-             ]
-             },
-            
-            {"title":"Conclusion", "rewrites":2,
-             "sections":[
-                 {"title":"Summary of Current Understanding",
-                  "dscp":"Recap of the potential of circulating miRNA and DNA methylation patterns in early lung cancer detection",
-                  },
-                 {"title":"Prediction",
-                  "dscp": "Prediction for when assay of circulating miRNA and DNA methylation will appear in clinical practise"},
-             ]
-             }
-        ]
-    }
+        write_config = config['Write']
+        # write report! pbly should add # rewrites
+        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1=query, length=outline_config['length'])
     
-    #print(format_outline(outline))
-    config = {}
-    app = QApplication(sys.argv)
-    rows = ["Query", "SBAR", "Outline", "Search", "Write", "ReWrite"]
-    ex = PWUI(rows, config) # get config for this report task
-    app.exec_()
+if __name__ == '__main__':
     try:
-        cot.display_response('calling paper_writer')
-        paper = write_report(config)
+        #cot.display_response('calling paper_writer')
+        app = QApplication(sys.argv)
+        #paper = write_report(app)
+        discuss(input('Topic to discuss?'))
     except Exception as e:
         traceback.print_exc()
         print(str(e))

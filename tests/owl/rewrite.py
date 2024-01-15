@@ -64,7 +64,7 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
     print(f'entities total {total}, in cache: {cached}')
     with open(entity_cache_filepath, 'w') as pf:
         json.dump(entity_cache, pf)
-    print(f"wrote {entity_cache_filepath}")
+    #print(f"wrote {entity_cache_filepath}")
     return list(set(items))
 
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
@@ -89,7 +89,7 @@ def extract_entities(text, title=None, paper_topic=None, outline=None, template=
         
     kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 """),
-                  UserMessage(f"""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {topic} from the following research excerpt.
+                  UserMessage("""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
 
 Respond using the following format:
 <NAMED_ENTITIES>
@@ -101,19 +101,20 @@ Entity2
 If distinction between keyword, acronym, or named_entity is unclear, it is acceptable to list a term or phrase under multiple categories.
 
 <RESEARCH EXCERPT>
-{text}
+{{$text}}
 </RESEARCH EXCERPT>
 """),
                   AssistantMessage("<NAMED_ENTITIES>\n")
               ]
     
-    response = cot.llm.ask('', kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NAMED_ENTITIES>')
+    response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NAMED_ENTITIES>')
     # remove all more common things
-    keywords = []
-    end = response.lower().rfind ('</NAMED_ENTITIES>'.lower())
-    if end < 1: end = len(response)+1
-    response = response[:end]
-    response_entities = response.split('\n')
+    keywords = []; response_entities = []
+    if response is not None:
+        end = response.lower().rfind ('</NAMED_ENTITIES>'.lower())
+        if end < 1: end = len(response)+1
+        response = response[:end]
+        response_entities = response.split('\n')
     for entity in response_entities: 
         if entity.startswith('<NAMED_E') or entity.startswith('</NAMED_E'):
             continue
@@ -124,7 +125,7 @@ If distinction between keyword, acronym, or named_entity is unclear, it is accep
         zipf = wf.zipf_frequency(word, 'en', wordlist='large')
         if zipf < 2.85 and word not in keywords:
             keywords.append(word)
-    print(f'\nRewrite Extract_entities: {keywords}\n')
+    #print(f'\nRewrite Extract_entities: {keywords}\n')
     return keywords
 
 def entities_to_str(item_list):
@@ -160,7 +161,7 @@ def select_top_n_texts(texts, keyphrases, n):
     Returns:
     list: The top n texts with the most keyphrase occurrences.
     """
-    print(f'select top n texts type {type(texts)}, len {len(texts[0])}, keys {keyphrases}')
+    #print(f'select top n texts type {type(texts)}, len {len(texts[0])}, keys {keyphrases}')
     #print(f'select top n texts {keyphrases}')
     counts = count_keyphrase_occurrences(texts, keyphrases)
     # Sort the texts by their counts in descending order and select the top n

@@ -318,6 +318,12 @@ class ChatApp(QtWidgets.QWidget):
       self.index_button.clicked.connect(self.index_url)
       control_layout2.addWidget(self.index_button)
       
+      self.report_button = QPushButton("Report")
+      self.report_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.report_button.setFont(self.widgetFont)
+      self.report_button.clicked.connect(self.generate_report)
+      control_layout2.addWidget(self.report_button)
+      
       
       control_layout.addStretch(1)  # Add stretch to fill the remaining space
       control_layout2.addStretch(1)  # Add stretch to fill the remaining space
@@ -564,8 +570,26 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
          print(f'cursor has selected {len(selectedText)} chars')
+      start = selectedText.find('http')
+      if start < 0:
+         self.display_response(f'\n\nnot url: {selectedText}')
+         return
+      if start > 0:
+         selectedText = selectedText[start:]
       self.s2.queue_url_for_indexing(selectedText)
       self.display_response("Indexing request submitted.")
+
+   def generate_report(self): # index a url in S2 faiss
+      global PREV_LEN, op#, vmem, vmem_clock
+      selectedText = ''
+      cursor = self.input_area.textCursor()
+      if cursor.hasSelection():
+         selectedText = cursor.selectedText()
+      elif PREV_LEN < len(self.input_area.toPlainText())+2:
+         selectedText = self.input_area.toPlainText()[PREV_LEN:]
+         selectedText = selectedText.strip()
+      rr = subprocess.Popen(['python3', 'paper_writer.py', selectedText])
+      self.display_response("report writer spawned.")
          
    def workingMem(self): # lauching working memory editor
       self.owlCoT.save_workingMemory() # save current working memory so we can edit it

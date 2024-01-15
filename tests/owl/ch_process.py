@@ -159,8 +159,7 @@ class Interactions:
                asst = self.interactions[i+1]
             else:
                continue
-            prompt = [SystemMessage(self.owl.short_prompt()),
-                      UserMessage(f""""Determine the main topic of the following interaction, together with subtopics, key points, and a text summary. 
+            prompt = [SystemMessage(f""""Determine the main topic of the following interaction, together with subtopics, key points, and a text summary. 
                       The topic must be one of:\n{self.owl.format_topic_names()}
                       The response should be a JSON form including the topic selected from above, possible subtopics, and key points: {{"topic": '<topic>', "subtopics":['<subtopic1>',], "key_points":'<a list of the key points to remember in this interaction>', "summary":'<a summary of the interaction with respect to the topic, subtopics, and key points>'}}
                       
@@ -199,8 +198,7 @@ class Interactions:
            for update in interaction_updates[topic]:
               thread += json.dumps(update)+'\n'
            # specify prompt
-           prompt = [SystemMessage(self.owl.short_prompt()),
-                     UserMessage(f""""Combine the above individual interaction records into a single update record.
+           prompt = [SystemMessage(f""""Combine the following individual interaction records into a single update record.
 The response should be a JSON form, including topic, possible subtopics, key points, summary, inconsistencies, and future directions: 
 {{"topic": '<topic>', 
   "subtopics":['<subtopic1>',], 
@@ -233,11 +231,11 @@ Respond only in JSON using the above format.
 
 
     def update_topics(self):
-        with open('topic_thread_updates.json', 'r') as j:
-           topic_updates = json.load(j)
+       with open('topic_thread_updates.json', 'r') as j:
+          topic_updates = json.load(j)
          
-        # topic thread_updates uses fully qualified 'Topic: <topic_name>' as keys for topic items
-        for topic in topic_updates.keys():
+       # topic thread_updates uses fully qualified 'Topic: <topic_name>' as keys for topic items
+       for topic in topic_updates.keys():
            print(f'\n\n***** processing topic {topic} *****')
            update = topic_updates[topic]
            docHash_container  = self.owl.find_wm_topic(topic) # find will add 'Topic: ' if needed
@@ -262,66 +260,84 @@ Respond only in JSON using the above format.
               
            # ok, ready to update topic
            wm_topic = docHash_container['item']
-           prompt = [SystemMessage(self.owl.short_prompt()+
-                                   f"""
-Your task is to update the current topic model below using the recent interaction summary. 
-The current topic model is the more authoritative long-term representation, and is in JSON format as follows:
-{{"summary":'',   # a comprehensive text summary of the questions, answers, and decisions in this topic
- "subtopics": [], # a list of major subtopics occuring in interactions
- "key_points":[], # a list of specific key information, statements, questions, decisions, and commitments on the topic or a subtopic.
- "recent_thoughts":'', # information, statements, questions, decisions, or commitments appearing for the first time. 
- "inconsistencies":[], # a list of inconsistencies noted across interactions 
- "future_directions":[] # a list of projections for future activity comparing recent thoughts to summary
-}}
-"""),
-                     UserMessage(f"""Current topic model:
-{json.dumps(wm_topic, indent=2)}
+           
+           summary_prompt = [SystemMessage("""Your task is to update the prior summary below for '{{$topic}}':
 
-Recent interaction summary:
+{{$summary}}
 
-{json.dumps(update, indent=2)}
+Using the recent interaction summary:
 
+{{$update}}
+
+Your updated summary should be detailed and complete, including all information from the prior summary and updating it with the provided incremental information. Respond in this JSON format:
+
+{"summary": '<a comprehensive text summary of the questions, answers, and decisions in this topic>'}
 """),
                      AssistantMessage('')
                      ]
-           updated_wm_topic = self.llm.ask('', prompt, temp=0.1, max_tokens=600, stop_on_json=True, validator = JSONResponseValidator())
-           print(f'   updated topic received from llm: {topic}\n{updated_wm_topic}\n')
-           if updated_wm_topic is not None:
-              if type(updated_wm_topic) is dict:
-                 print(f'   updating wm_topic {topic}')
-                 self.owl.update_wm_topic(docHash_container, updated_wm_topic)
-              else: print(f'   update failed: updated_wm_topic type: {type(updated_wm_topic)}')
-        print(f'saving wm_topics')
-        self.owl.save_workingMemory()
+           subtopics_prompt = [SystemMessage("""Your task is to update the prior topic subtopics:
 
+{{$subtopics}}
 
-    def summarize(self, query, response, profile):
-      prompt = [
-         SystemMessage(profile),
-         UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
-         AssistantMessage('')
-      ]
-      response = self.llm.ask(response, prompt, template = self.template, temp=.1, max_tokens=500)
-      if response is not None:
-         return '\nWiki Summary:\n'+response+'\n'
-      else: return 'wiki lookup and summary failure'
+Using the recent interaction subtopics:
 
-    def wiki(self, query, profile):
-       short_profile = profile.split('\n')[0]
-       query = query.strip()
-       #
-       #TODO rewrite query as answer (HyDE)
-       #
-       if len(query)> 0:
-          if self.op is None:
-             self.op = op.OpenBook()
-          wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
-          return wiki_lookup_summary
+{{$update}}
+ 
+The updated subtopics list must use  this JSON format:
+
+{"subtopics": ['subtopic-a', 'subtopic-b', ...]}
+"""),
+                     AssistantMessage('')
+                     ]
+           key_points_prompt = [SystemMessage("""Your task is to update the prior key_points:
+
+{{$key_points}}
+
+using the recent interaction key_points:
+
+{{$update}}
+
+Respond using this JSON format:
+
+{"key_points": ['key_point-1', 'key_point-2', ...]}
+"""),
+                     AssistantMessage('')
+                     ]
+
+           summary=item['summary']
+           summary_update = update['summary']
+           updated_summary = self.llm.ask({"summary":summary, "update": summary_update}, summary_prompt, temp=0.1, max_tokens=1000, stop_on_json=True, validator = JSONResponseValidator())
+           if updated_summary is not None:
+              item['summary']=updated_summary
+              
+           subtopics = item['subtopics']
+           subtopics_update = update['summary']
+           updated_subtopics = self.llm.ask({"subtopics":subtopics, "update": subtopics_update}, subtopics_prompt, temp=0.1, max_tokens=1000, stop_on_json=True, validator = JSONResponseValidator())
+           if updated_subtopics is not None:
+              item['subtopics'] = updated_subtopics
+              
+           key_points = item['key_points']
+           key_points_update = update['summary']
+           updated_key_points = self.llm.ask({"key_points":key_points, "update":key_points_update},
+                                             key_points_prompt,
+                                             temp=0.1,
+                                             max_tokens=1000,
+                                             stop_on_json=True,
+                                             validator = JSONResponseValidator())
+           if updated_key_points is not None:
+              item['key_points'] = updated_key_points
+
+           print(f'   updated topic received from llm: {topic}\n{item}\n')
+           if type(item) is dict:
+              print(f'   updating wm_topic {topic}')
+              self.owl.update_wm_topic(docHash_container, item)
+           else: print(f'   update failed: updated_wm_topic type: {type(item)}')
+       print(f'saving wm_topics')
+       self.owl.save_workingMemory()
 
 
 if __name__ == '__main__':
     i = Interactions('zephyr')
-    i.topic_analysis()
-    i.create_thread_updates()
+    #i.topic_analysis()
+    #i.create_thread_updates()
     i.update_topics()
