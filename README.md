@@ -1,4 +1,4 @@
-# Owl ![alt text](https://github.com/bdambrosio/Owl/images/Owl.jpg?raw=true)
+# Owl ![alt text](https://github.com/bdambrosio/Owl/blob/main/images/Owl.jpg?raw=true)
 Owl is my experimental Research Assistant / general support / research project on Language-based cognitive architecture. 
 * Owl has a UI, so you can chat with it. Complex context management include conversation history management, topic-based working memory, sentiment analysis, background reflection, even respond in speech if you like.
 * Owl has a long term topic/subtopic memory, updated offline when it isn't busy.
