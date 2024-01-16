@@ -18,6 +18,7 @@ Owl is mostly useful at  the moment, if at all, as bits of example code. There i
 * a fastapi-based indexing server (so paper-indexing happens asynchonously, server handles queueing of multiple index requests)
 * a grobid server for parsing pdfs (this one is easy, just a stock grobid container)
 * a simple tts server (again trivial, but still, one more server to start, only if you want speech)
+* all the code needed for all these servers is included in this repository, but there is no info yet on how to run any of them!
 
 Owl is built on Alphawave-py / promptrix-py, both heavily modded. Modded Alphawave-py is included, but promptrix-py isn't, I'll fix that soon, but it should work with stock promptrix_py.
 
