@@ -448,6 +448,7 @@ def index_file(filepath):
 
 def get_arxiv_preprint_url(query, top_k=10):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
+    It is used by s2 search when it can't download a title from S2 provided url.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
     """
 
@@ -909,11 +910,11 @@ def reverse_reciprocal_ranking(*lists):
 
 
 def hyde(query):
-    hyde_prompt="Write a short sentence responding to:\n{{$query}}\n\nEnd your sentence with: </RESPONSE>"
+    hyde_prompt="Write a short sentence of 10-20 words responding to:\n{{$query}}\n\nEnd your sentence with: </RESPONSE>"
     prompt = [SystemMessage(hyde_prompt)]
     response = cot.llm.ask({"query":query},
                            prompt,
-                           max_tokens=100,
+                           max_tokens=50,
                            temp=0.2,
                            eos='</RESPONSE>')
     end_idx =  response.lower().rfind('</RESPONSE>'.lower())
@@ -922,9 +923,35 @@ def hyde(query):
     return response[:end_idx]
 
 
-def search(query, top_k=20, web=False):
+def relevant (text, query, background):
+    #print(f'enter relevant {query} {background}\n{text}')
+    prompt = [SystemMessage("""Given the query:
+
+<QUERY>
+{{$query}}
+{{$background}}
+</QUERY>
+
+<TEXT>
+{{$text}}
+</TEXT>
+
+Respond using this JSON template. Return only JSON without any Markdown or code block formatting.
+
+{"relevant": "Yes" or "No"}
+""")
+              ]
+    response = cot.llm.ask({'text':text, 'query':query, 'background':background}, prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
+    print(f"relevant {response['relevant']}\n")
+    if type(response) == dict:
+        if 'relevant' in response and 'yes' in str(response['relevant']).lower():
+            return True
+    return False
+
+def search(query, dscp='', top_k=20, web=False):
     
     """Query is a *list* of keywords or phrases
+    - 'dscp' is an expansion that can be used for reranking using llm
     - Finds the closest n faiss IDs to the user's query
     - returns the section synopses and section_library and paper_library entries for the found items"""
 
@@ -934,7 +961,7 @@ def search(query, top_k=20, web=False):
     i = 0
     next_offset = 0
     total = 999
-    #query = cot.confirmation_popup("Search ARXIV using this query?", query )
+    #query = cot.confirmation_popup("Search SemanticScholar using this query?", query )
     while web and next_offset < total:
         results, total, next_offset = get_articles(query, next_offset)
         i+=1
@@ -944,28 +971,36 @@ def search(query, top_k=20, web=False):
 
     # arxiv search over, now search faiss
     rw.cot = cot #just to be sure...
-    hyde_query = hyde(query)
-    print('\nhyde query:\n{hyde_query}')
-    query_ids, query_summaries = search_sections(query, top_k=int(top_k/2))
-    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query)), top_k=int(top_k/2))
+    if dscp is not None and len(dscp) > 0:
+        top_k = top_k * 1.5 # get more so we can rerank
+        rerank = True
+
+    hyde_query = hyde(query+'. '+dscp)
+    print(f'hyde query: {hyde_query}')
+    query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k/2))
+    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k/2))
     hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k/2))
     reranked = reverse_reciprocal_ranking(query_ids, kwd_ids, hyde_ids)
     print(f'search found:\n{query_ids}\n{kwd_ids},\n{hyde_ids}')
     print(f'rerank:\n{reranked}\n')
     all_ids = query_ids+kwd_ids+hyde_ids
     all_summaries = query_summaries+kwd_summaries+hyde_summaries
-    summaries = []
-    for n, id in enumerate(reranked):
+    selected_summaries = []
+    selected_ids = []
+    n=0
+    for id in reranked:
         if n > top_k:
-            return reranked[:10], summaries
+            return selected_ids, selected_summaries
         try:
             idx = all_ids.index(id)
         except:
             print(f"\n**ERROR** S2 search can't find {id} in {all_ids}\n")
             continue
-        summaries.append(all_summaries[idx])
-
-    return reranked, summaries
+        if relevant(all_summaries[idx][0]+'\n'+all_summaries[idx][1], query, dscp):
+            selected_ids.append(idx)
+            selected_summaries.append(all_summaries[idx])
+            n += 1
+    return selected_ids, selected_summaries
 
 def parse_arguments():
     """Parses command-line arguments using the argparse library."""

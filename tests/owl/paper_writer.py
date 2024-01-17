@@ -350,7 +350,7 @@ def plan_search():
         return
     return plan
 
-def make_search_queries(outline, section_outline, template):
+def make_search_queries(outline, section_outline, sbar, template):
     prompt = """
 Following is an outline for a research paper, in JSON format: 
 
@@ -359,7 +359,7 @@ Following is an outline for a research paper, in JSON format:
 From this outline generate 3 SemanticScholar search queries for the section:
 {{$target_section}}
 
-Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
+A query can contain no more than 100 characters, Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
 {"query1":'query 1 text',"query2": 'query 2 text', "query3": query 3 text'}
 
 Respond ONLY with the JSON above, do not include any commentary or explanatory text.
@@ -367,40 +367,45 @@ Respond ONLY with the JSON above, do not include any commentary or explanatory t
     messages = [SystemMessage(prompt),
                 AssistantMessage('')
                 ]
-    queries = cot.llm.ask({"outline":outline, "target_section":section_outline}, messages, stop_on_json=True, template=template, max_tokens=150, validator=JSONResponseValidator())
+    queries = cot.llm.ask({"outline":json.dumps(outline, indent=2), "target_section":json.dumps(section_outline, indent=2)}, messages, stop_on_json=True, template=template, max_tokens=150, validator=JSONResponseValidator())
     if type(queries) is dict:
         print(f'\nquery forsection:\n{section_outline}\nqueries:\n{json.dumps(queries, indent=2)}')
     else:
         print(f'\nquery forsection:\n{section_outline}\nqueries:\n{queries}')
     return queries
     
-def s2_search (config, outline, section_outline):
+def s2_search (config, outline, section_outline, sbar=None):
     #
+    ### Note - ALL THIS IS DOING IS PRE-LOADING LOCAL LIBRARY!!! Doesn't need to return anything!
     ## call get_articles in semanticScholar2 to query semanticScholar for each section or subsection in article
     ## we can get 0 results if too specific, so probabilistically relax query as needed
     #
-    print(f'paper_writer entered s2_search with {section_outline}')
+    #print(f'paper_writer entered s2_search with {section_outline}')
     template = get_template('Search', config)
-    print(f' paper_writer s2_search template: {template}')
+    #print(f' paper_writer s2_search template: {template}')
     # llms sometimes add an empty 'sections' key on leaf sections.
     if 'sections' in section_outline and len(section_outline['sections']) > 0: 
         for subsection in section_outline['sections']:
-            s2_search(config, outline, subsection)
+            s2_search(config, outline, subsection, sbar)
     else:
-        queries = make_search_queries(outline, section_outline, template)
+        queries = make_search_queries(outline, section_outline, sbar, template)
         bads = ['(',')',"'",' AND', ' OR'] #tulu sometimes tries to make fancy queries, S2 doesn't like them
-        if type(queries) is dict:
-            for i in range(3):
-                if 'query'+str(i) in queries:
-                    query = queries['query'+str(i)]
-                    for bad in bads:
-                        query = query.replace(bad, '')
-                        result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
-                        print(f's2_search found {len(result_list)} new papers')
-                        while len(result_list) == 0 and next_offset < total_papers\
-                              and cot.confirmation_popup('Continue?', ''):
-                            s2.get_articles(query, next_offset, confirm=True)
+        if type(queries) is not dict:
+            print(f's2_search query construction failure')
+            return None
+        for i in range(3):
+            if 'query'+str(i) not in queries:
+                continue
+            query = queries['query'+str(i)]
+            for bad in bads:
+                query = query.replace(bad, '')
+                result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
+                print(f's2_search found {len(result_list)} new papers')
+                while len(result_list) == 0 and next_offset < total_papers\
+                      and cot.confirmation_popup('Continue?', ''):
+                    s2.get_articles(query, next_offset, confirm=True)
                 
+# global passed into jsonEditor widget
 updated_json = None
 
 def handle_json_editor_closed(result):
@@ -496,7 +501,7 @@ def write_report(app):
         pass
 
 
-def write_report_aux(config, paper_outline=None, section_outline=None, length=400, inst='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1='', heading_1_draft = '', num_rewrites=1):
+def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=None, length=400, dscp='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1_title='', heading_1_draft = '', num_rewrites=1):
     template = get_template('Write',config)
     if depth == 0: #set section number initially to 0
         n = 0; refs=[]
@@ -506,11 +511,14 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
         length = section_outline['length']
     if 'rewrites' in section_outline:
         num_rewrites = section_outline['rewrites']
+
+    # subsection dscp is full path dscp descending from root
+    subsection_dscp = dscp
     if 'task' in section_outline:
-        # overall instruction for this outline
-        subsection_inst = inst+ '\n'+ section_outline['task']
-    else:
-        subsection_inst = inst
+        # overall instruction for this subsection
+        subsection_dscp += '\n'+ section_outline['task']
+        
+    # subsection topic is local title or dscp 
     subsection_topic = section_outline['dscp'] if 'dscp' in section_outline else section_outline['title']
     subsection_title = section_outline['title']
     #print(f"\nWRITE_PAPER section: {topic}")
@@ -519,29 +527,31 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
         ### write section intro first draft
         #
         subsection_depth = 1+depth
-        num_sections = len(paper_outline['sections'])
+        num_sections = len(section_outline['sections'])
         subsection_token_length = int(length/len(section_outline['sections']))
         section = ''
         n=0
         for subsection in section_outline['sections']:
             if depth == 0:
-                heading_1 = subsection['title']
+                heading_1_title = subsection['title']
                 heading_1_draft = ''
             print(f"subsection title {subsection['title']}")
-            subsection_text, subsection_refs = '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
-                                                                                    paper_outline=paper_outline,
-                                                                                    section_outline=subsection,
-                                                                                    length=subsection_token_length,
-                                                                                    inst=subsection_inst,
-                                                                                    topic=subsection_topic,
-                                                                                    paper_title=paper_title,
-                                                                                    abstract=abstract,
-                                                                                    depth=subsection_depth,
-                                                                                    parent_section_title=subsection_title,
-                                                                                    parent_section_partial=section,
-                                                                                    heading_1= heading_1,
-                                                                                    heading_1_draft=heading_1_draft,
-                                                                                    num_rewrites=num_rewrites)
+            subsection_text, subsection_refs =\
+                '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
+                                                                           paper_outline=paper_outline,
+                                                                           section_outline=subsection,
+                                                                           excerpts=excerpts,
+                                                                           length=subsection_token_length,
+                                                                           dscp=subsection_dscp,
+                                                                           topic=subsection_topic,
+                                                                           paper_title=paper_title,
+                                                                           abstract=abstract,
+                                                                           depth=subsection_depth,
+                                                                           parent_section_title=subsection_title,
+                                                                           parent_section_partial=section,
+                                                                           heading_1_title= heading_1_title,
+                                                                           heading_1_draft=heading_1_draft,
+                                                                           num_rewrites=num_rewrites)
             section += subsection_text
             for ref in subsection_refs:
                 if ref not in refs:
@@ -560,9 +570,12 @@ def write_report_aux(config, paper_outline=None, section_outline=None, length=40
     elif 'title' in section_outline:
         # actuall llm call to write this terminal section
         section = section_outline['title']
-        print(f'heading_1 {heading_1}\npst {parent_section_title}\nst {subsection_topic}')
-        query = heading_1+', '+parent_section_title+' '+subsection_topic
-        ids, excerpts = s2.search(query) # this assumes web searching has been done note we aren't using dscp for search
+        print(f'heading_1 {heading_1_title}\npst {parent_section_title}\nsubsection topic {subsection_topic}')
+        query = heading_1_title+', '+parent_section_title+' '+subsection_topic
+        # below assumes web searching has been done
+        if excerpts is None:
+            # do local search, excerpts to use not provided
+            ids, excerpts = s2.search(query, subsection_dscp) 
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
         subsection_refs =  []
         for ref in [s[0]for s in excerpts]:
@@ -589,11 +602,11 @@ The outline for the full paper is:
 </RESEARCH EXCERPTS>
 
 
-The {heading_1} section content up to this point is:
+The {heading_1_title} section content up to this point is:
 
-<{heading_1}_SECTION_CONTENT>
+<{heading_1_title}_SECTION_CONTENT>
 {heading_1_draft}
-</{heading_1}_SECTION_CONTENT>
+</{heading_1_title}_SECTION_CONTENT>
 
 Again, your current task is to write the next part, titled: '{section_outline["title"]}'
 
@@ -637,10 +650,10 @@ End the section as follows:
                 template = get_template('ReWrite', config)
             if i < num_rewrites-1:
                 #add new entities
-                draft = rw.add_pp_rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, int((1.3**(i+1))*subsection_token_length), parent_section_title, heading_1, heading_1_draft, template)
+                draft = rw.add_pp_rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, int((1.3**(i+1))*subsection_token_length), parent_section_title, heading_1_title, heading_1_draft, template)
             else:
                 # refine in final rewrite
-                draft = rw.rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1, heading_1_draft, template)
+                draft = rw.rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1_title, heading_1_draft, template)
             missing_entities = literal_missing_entities(keywds, draft)
             print(f'\n missing entities after rewrite {len(missing_entities)} \n')
 
@@ -668,21 +681,20 @@ def discuss(topic):
         plan['config'] = config
 
     # now enter conversation loop.
-    query = 'not None'
     searched = False
+    query = cot.confirmation_popup('Initial Question?', '')
+    if query is None or not query:
+        return 
+    plan['task']=query
     while query is not None:
-        query = cot.confirmation_popup('Initial Question?', '')
-        if query is None or not query:
-            return 
-        plan['task']=query
         
         search_config = config['Search']
         outline_config = config['Outline']
-        length = 400 # default response - should pick up from ui max_tokens if run from ui, tbd
+        length = 600 # default response - should pick up from ui max_tokens if run from ui, tbd
         outline_config['length'] = length
 
         #create detail instruction for response from task, sbar, query
-        instruction_prompt = """generate an instruction for a research assistant telling her what to extract from a set of research papers.
+        instruction_prompt = """generate a concise instruction for a research assistant telling her what to extract from a set of research papers.
 Respond using this JSON format:
 {"instruction": '<instruction>'}
 
@@ -706,13 +718,18 @@ Respond in plain JSON, with no markdown or code formatting.
         # Note this is web search. Local faiss or other resource search will be done in Write below
         if search_config['exec'] == 'Yes' and not searched:
             # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
-            # also need to configure prompt, depth (depth in terms of # articles total or new per section?)
+            # s2_search needs sbar, no?
             s2_search(config, outline, outline)
             searched = True
             
         write_config = config['Write']
         # write report! pbly should add # rewrites
-        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1=query, length=outline_config['length'])
+        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=outline_config['length'])
+
+        query = cot.confirmation_popup('Initial Question?', '')
+        if query is None or not query:
+            return report, refs 
+        plan['task']=query
     
 if __name__ == '__main__':
     try:

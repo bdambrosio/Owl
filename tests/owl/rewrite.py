@@ -171,7 +171,7 @@ def select_top_n_texts(texts, keyphrases, n):
 
 def rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
     missing_entities = literal_missing_entities(entities, draft)
-    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone.
 You are writing a paper titled:
 {paper_title}
 
@@ -223,7 +223,7 @@ End your response with:
 </ME>
 """
 
-    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_title}', to increase the density of relevant information it contains. 
+    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_title}', to increase the density of relevant information it contains. You write in a professional, objective tone.
 The current version of the DRAFT is:
 
 <DRAFT>
@@ -293,7 +293,7 @@ def add_pp_rewrite(paper_title, section_title, draft, paper_summaries, entities,
     missing_entities = literal_missing_entities(entities, draft)
 
     # add a new paragraph on new entities
-    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone.
 You are writing a paper titled:
 {paper_title}
 
@@ -412,7 +412,7 @@ end the rewrite as follows:
 def depth_rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
 
     missing_entities = literal_missing_entities(entities, draft)
-    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+    sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone
 You are writing a paper titled: '{paper_title}'
 
 The following is a set of published research extracts that may be useful in writing the draft of this part of the paper:
@@ -458,7 +458,7 @@ End your response with:
 </ME>
 """
 
-    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_title}', to increase the density of relevant information it contains. 
+    rewrite_prompt=f"""Your current task is to rewrite the DRAFT for the part titled: '{section_title}', to increase the density of relevant information it contains. You write in a professional, objective tone.
 The current version of the DRAFT is:
 
 <DRAFT>

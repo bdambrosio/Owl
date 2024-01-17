@@ -1324,9 +1324,6 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
     def s2_search(self, query):
        short_profile = self.short_prompt()
        query = query.strip()
-       #
-       #TODO rewrite query as answer (HyDE)
-       #
        ids, summaries = self.ui.s2.search(query)
        print(f' s2_search query {query}, result {type(ids)}, {type(summaries[0])}')
        print(f' s2_search summaries\n{summaries}')
