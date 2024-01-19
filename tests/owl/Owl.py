@@ -218,7 +218,7 @@ class ChatApp(QtWidgets.QWidget):
       self.top_p_combo = self.make_combo(control_layout, 'Top_P', [".01", ".1", ".2", ".4", ".5", ".7", ".9", "1.0"])
       self.top_p_combo.setCurrentText('1.0')
       
-      self.max_tokens_combo = self.make_combo(control_layout, 'Max_Tokens', ["10", "25", "50", "100", "150", "250", "400", "1000", "2000", "4000"])
+      self.max_tokens_combo = self.make_combo(control_layout, 'Max_Tokens', ["25", "50", "100", "150", "250", "400", "600", "1000", "2000", "4000"])
       self.max_tokens_combo.setCurrentText('400')
       
       #self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])

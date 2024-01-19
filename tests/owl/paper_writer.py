@@ -501,7 +501,7 @@ def write_report(app):
         pass
 
 
-def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=None, length=400, dscp='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1_title='', heading_1_draft = '', num_rewrites=1):
+def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=None, length=400, dscp='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1_title='', heading_1_draft = '', num_rewrites=1, resources=None):
     template = get_template('Write',config)
     if depth == 0: #set section number initially to 0
         n = 0; refs=[]
@@ -551,7 +551,8 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
                                                                            parent_section_partial=section,
                                                                            heading_1_title= heading_1_title,
                                                                            heading_1_draft=heading_1_draft,
-                                                                           num_rewrites=num_rewrites)
+                                                                           num_rewrites=num_rewrites,
+                                                                           resources=resources)
             section += subsection_text
             for ref in subsection_refs:
                 if ref not in refs:
@@ -573,9 +574,14 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
         print(f'heading_1 {heading_1_title}\npst {parent_section_title}\nsubsection topic {subsection_topic}')
         query = heading_1_title+', '+parent_section_title+' '+subsection_topic
         # below assumes web searching has been done
-        if excerpts is None:
+        if resources is None:
             # do local search, excerpts to use not provided
             ids, excerpts = s2.search(query, subsection_dscp) 
+        else:
+            ids = [], excerpts = []
+            for entry in resources:
+                ids.append(entry[0])
+                excerpts.append(entry[1])
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
         subsection_refs =  []
         for ref in [s[0]for s in excerpts]:
@@ -666,7 +672,7 @@ End the section as follows:
     print(f'Refs:\n{subsection_refs}\n')
     return draft, subsection_refs
 
-def discuss(topic):
+def discuss(topic, excerpts=None):
     global updated_json, config
     plan = pl.init_plan(topic = topic, awm=False)
     plan['task'] = f'Discuss {topic}'
@@ -682,7 +688,7 @@ def discuss(topic):
 
     # now enter conversation loop.
     searched = False
-    query = cot.confirmation_popup('Initial Question?', '')
+    query = cot.confirmation_popup('?', '')
     if query is None or not query:
         return 
     plan['task']=query
@@ -724,7 +730,7 @@ Respond in plain JSON, with no markdown or code formatting.
             
         write_config = config['Write']
         # write report! pbly should add # rewrites
-        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=outline_config['length'])
+        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=outline_config['length'], resources=excerpts)
 
         query = cot.confirmation_popup('Initial Question?', '')
         if query is None or not query:

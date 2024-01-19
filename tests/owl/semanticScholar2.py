@@ -40,9 +40,12 @@ from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave_pyexts import utilityV2 as ut
 from alphawave_pyexts import LLMClient as lc
-from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtGui import QFont, QKeySequence
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec, QRect
+from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication, QCheckBox
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
-from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem, QLineEdit
 from OwlCoT import LLM, ListDialog, generate_faiss_id
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
@@ -948,13 +951,14 @@ Respond using this JSON template. Return only JSON without any Markdown or code 
             return True
     return False
 
-def search(query, dscp='', top_k=20, web=False):
+def search(query, dscp='', top_k=20, web=False, whole_papers=False):
     
     """Query is a *list* of keywords or phrases
     - 'dscp' is an expansion that can be used for reranking using llm
     - Finds the closest n faiss IDs to the user's query
-    - returns the section synopses and section_library and paper_library entries for the found items"""
-
+    - returns the section synopses and section_library and paper_library entries for the found items
+        -- or just one section for each paper if whole_papers=True"""
+    
     # A prompt to dictate how the recursive summarizations should approach the input paper
     #get_ articles does arxiv library search. This should be restructured
     results = []
@@ -988,6 +992,7 @@ def search(query, dscp='', top_k=20, web=False):
     selected_summaries = []
     selected_ids = []
     n=0
+    relevant_titles = []
     for id in reranked:
         if n > top_k:
             return selected_ids, selected_summaries
@@ -996,10 +1001,15 @@ def search(query, dscp='', top_k=20, web=False):
         except:
             print(f"\n**ERROR** S2 search can't find {id} in {all_ids}\n")
             continue
+        if (whole_papers and all_summaries[idx][0] in relevant_titles):
+            continue
         if relevant(all_summaries[idx][0]+'\n'+all_summaries[idx][1], query, dscp):
+            # if we already know this paper is relevant, then all sections are (hmm)
             selected_ids.append(idx)
             selected_summaries.append(all_summaries[idx])
             n += 1
+            relevant_titles.append(all_summaries[idx][0])
+
     return selected_ids, selected_summaries
 
 def parse_arguments():
@@ -1008,6 +1018,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Process a single command-line argument.")
 
     parser.add_argument("-template", type=str, help="the LLM template to use")
+    parser.add_argument("-index_url", type=str, help="index a pdf url - deprecated")
+    parser.add_argument("-index_paper", type=str, help="index a paper - deprecated")
+    parser.add_argument("-browse", type=str, help="browse local library")
     args = parser.parse_args()
     return args
 
@@ -1027,31 +1040,193 @@ def queue_url_for_indexing(url):
 def repair_paper_library_from_section_library():
     pass
 
+class PaperSelect(QWidget):
+    def __init__(self, papers):
+        super().__init__()
+        self.papers = papers
+        self.title_rows = []
+        self.select_rows = []
+        layout = QVBoxLayout()
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QtGui.QColor("#444444"))  # Use any hex color code
+        palette.setColor(self.foregroundRole(), QtGui.QColor("#EEEEEE"))  # Use any hex color code
+        self.setPalette(palette)
+        self.codec = QTextCodec.codecForName("UTF-8")
+        self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
+        for paper in self.papers:
+            row_layout = QHBoxLayout()
+            select = QCheckBox(paper, self)
+            row_layout.addWidget(select)
+            self.title_rows.append(paper)
+            self.select_rows.append(select)
+            layout.addLayout(row_layout)
+
+        # Search Button
+        discuss_button = QPushButton('Discuss', self)
+        discuss_button.clicked.connect(self.on_discuss_clicked)
+        layout.addWidget(discuss_button)
+        show_button = QPushButton('Show', self)
+        show_button.clicked.connect(self.on_show_clicked)
+        layout.addWidget(show_button)
+
+        self.setLayout(layout)
+
+        self.setWindowTitle('Papers')
+        self.setGeometry(300, 300, 400, 250)
+        self.show()
+
+    def collect_checked_resources(self):
+        # 'resources' must match return from search, that is: [[section_id, ...], [[paper_title, section_excerpt],...]
+        resources = []
+        for title_row, select_row in zip(self.title_rows, self.select_rows):
+            if not select_row.isChecked():
+                continue
+            title=title_row
+            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+            if len(search_result) > 0:
+                paper_id = str(search_result.iloc[0]["faiss_id"])
+                sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_id)]
+                print(f'sections in paper {paper_id}, {len(sections)}')
+                resources.append([[sections['faiss_id'].tolist(), [title, synopsis]] for synopsis in sections['synopsis'].tolist()])
+                                 
+
+    def on_discuss_clicked(self):
+        """ Handles the discuss button click event. """
+        resources = self.collect_checked_resources()
+        print(f'resources')
+
+        
+    def on_show_clicked(self):
+        """ Handles the show button click event. """
+        search_config={}
+
+
+class BrowseUI(QWidget):
+    def __init__(self, papers):
+        super().__init__()
+        self.parent_papers = papers # a dict to receive result
+        layout = QVBoxLayout()
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QtGui.QColor("#444444"))  # Use any hex color code
+        palette.setColor(self.foregroundRole(), QtGui.QColor("#EEEEEE"))  # Use any hex color code
+        self.setPalette(palette)
+        self.codec = QTextCodec.codecForName("UTF-8")
+        self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
+        self.rows = {'Title':None, 'Abstract':None, 'Year':None}
+        for row in self.rows.keys():
+            row_layout = QHBoxLayout()
+            label = QLabel(row)
+            row_layout.addWidget(label)
+            self.rows[row] = QLineEdit(row)
+            row_layout.addWidget(self.rows[row])
+            layout.addLayout(row_layout)
+
+        # Search Button
+        search_button = QPushButton('Search', self)
+        search_button.clicked.connect(self.on_search_clicked)
+        layout.addWidget(search_button)
+
+        self.setLayout(layout)
+
+        self.setWindowTitle('Browse Library')
+        self.setGeometry(300, 300, 400, 250)
+        self.show()
+
+    def on_search_clicked(self):
+        """
+        Handles the search button click event. 
+        """
+        search_config={}
+        for row_label in self.rows.keys():
+             search_config[row_label] = self.rows[row_label].text()
+        print(search_config)
+        query = ''; dscp = ''
+        if search_config['Title'] is not None  and search_config['Title'] != 'Title':
+            query = search_config['Title'].strip()
+            if search_config['Abstract'] is not None  and search_config['Abstract'] != 'Abstract':
+                dscp = search_config['Abstract'].strip()
+        elif search_config['Abstract'] is not None  and search_config['Abstract'] != 'Abstract':
+            query = search_config['Abstract'].strip()
+        else:
+            print(f'Please enter title and/or abstract')
+            return
+
+        # browse is about papers, not sections
+        # 'whole_papers=True' only returns one section for each paper
+        finds = search(query, dscp, whole_papers=True) 
+        # finds is a list: [[section_id,...], [[paper_title, section_text],...]]
+        section_ids = finds[0]
+        excerpts = finds[1] # so note excerpts is a list of [paper_title, section_excerpt]
+        #
+        ### filter out duplicates at paper level and display list of found titles.
+        #
+        paper_titles = []
+        for excerpt in excerpts:
+            if excerpt[0] not in paper_titles: # shouldn't be necessary anymore with whole_papers=True, but doesn't hurt
+                paper_titles.append(excerpt[0])
+        filepaths = []
+        for title in paper_titles:
+            print(f'title: {title}')
+            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+            if len(search_result) > 0:
+                filepath = search_result.iloc[0]["pdf_filepath"]
+                #pubdate = search_result.iloc[0]["year"]
+                filepaths.append(filepath)
+                print(f"   Found file: {filepath}")
+            else:
+                filepaths.append(None)
+                print("    No matching rows found.")
+        self.parent_papers['titles'] = paper_titles
+        self.parent_papers['filepaths'] = filepaths
+        self.parent_papers['years'] = filepaths
+        self.close()
+
+    
+def browse():
+    global updated_json, config
+    papers = {}
+    ex = BrowseUI(papers) # get config for this discussion task
+    ex.show()
+    app.exec()
+    # display chooser, then call discuss with selected pprs (or excerpts?)
+    chooser = PaperSelect(papers['titles']) # get config for this discussion task
+    chooser.show()
+    app.exec()
+
+    #get updated config
+
 if __name__ == '__main__':
     import OwlCoT as cot
     args = parse_arguments()
     template = None
-    if args.template is not None:
+    if hasattr(args, 'template') and args.template is not None:
         template = args.template
         print(f' S2 using template {template}')
     cot = cot.OwlInnerVoice(None)
     rw.cot = cot
-    if args.index_url is not None:
+    if hasattr(args, 'index_url') and args.index_url is not None:
         url = args.index_url.strip()
         print(f' S2 indexing url {url}')
         index_url(url)
-    if args.index_paper is not None:
+    if hasattr(args, 'index_paper') and args.index_paper is not None:
         try:
             paper = json.loads(args.index_paper.strip())
             print(f' S2 indexing ppr {ppr}')
             index_paper(paper)
         except Exception as e:
             print(str(e))
-            
+    if hasattr(args, 'browse'):
+        app = QApplication(sys.argv)
+        browse()
+        
     else:
-        print("No argument provided, running default main code.")
+        #print("No argument provided, running default main code.")
         #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
         #search("miRNA and DNA Methylation assay cancer detection", web=True)
-        index_url("https://arxiv.org/pdf/2306.08302.pdf")
+        #index_url("https://arxiv.org/pdf/2306.08302.pdf")
         #print(get_arxiv_preprint_url("QLoRA Efficient Finetuning of Quantized LLMs"))
+        pass
+
 
