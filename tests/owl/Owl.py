@@ -212,13 +212,13 @@ class ChatApp(QtWidgets.QWidget):
       self.clear_button.clicked.connect(self.clear)
       control_layout.addWidget(self.clear_button)
       
-      self.temp_combo = self.make_combo(control_layout, 'Temp', [".01", ".1", ".2", ".4", ".5", ".7", ".9", "1.0"])
+      self.temp_combo = self.make_combo(control_layout, '   Temp', [".01", ".1", ".2", ".4", ".5", ".7", ".9", "1.0"])
       self.temp_combo.setCurrentText('.1')
       
-      self.top_p_combo = self.make_combo(control_layout, 'Top_P', [".01", ".1", ".2", ".4", ".5", ".7", ".9", "1.0"])
+      self.top_p_combo = self.make_combo(control_layout, '  Top_P', [".01", ".1", ".2", ".4", ".5", ".7", ".9", "1.0"])
       self.top_p_combo.setCurrentText('1.0')
       
-      self.max_tokens_combo = self.make_combo(control_layout, 'Max_Tokens', ["25", "50", "100", "150", "250", "400", "600", "1000", "2000", "4000"])
+      self.max_tokens_combo = self.make_combo(control_layout, 'MaxTkns', ["25", "50", "100", "150", "250", "400", "600", "1000", "2000", "4000"])
       self.max_tokens_combo.setCurrentText('400')
       
       #self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])
@@ -233,7 +233,7 @@ class ChatApp(QtWidgets.QWidget):
       self.history_button.clicked.connect(self.history)
       control_layout.addWidget(self.history_button)
       
-      self.wmem_button = QPushButton("WorkingMem") # launch working memory editor
+      self.wmem_button = QPushButton("WrkMem") # launch working memory editor
       self.wmem_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.wmem_button.setFont(self.widgetFont)
       self.wmem_button.clicked.connect(self.workingMem)
@@ -246,45 +246,57 @@ class ChatApp(QtWidgets.QWidget):
       control_layout.addWidget(self.tts_button)
 
 
-      self.create_awm_button = QPushButton("Create awm")
+      label = QLabel("    AWM")
+      label.setStyleSheet("QLabel {background-color: #202020; color: #AAAAAA; }")
+      label.setFont(self.widgetFont)
+      label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)  # Fixed vertical size policy
+      control_layout2.addWidget(label)
+      
+      self.create_awm_button = QPushButton("Create")
       self.create_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.create_awm_button.setFont(self.widgetFont)
       self.create_awm_button.clicked.connect(self.create_awm)
       control_layout2.addWidget(self.create_awm_button)
       
-      self.recall_wm_button = QPushButton("Recall WM")
+      self.recall_wm_button = QPushButton("Recall")
       self.recall_wm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.recall_wm_button.setFont(self.widgetFont)
       self.recall_wm_button.clicked.connect(self.recall_wm)
       control_layout2.addWidget(self.recall_wm_button)
       
-      self.edit_awm_button = QPushButton("Edit awm")
+      self.edit_awm_button = QPushButton("Edit")
       self.edit_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.edit_awm_button.setFont(self.widgetFont)
       self.edit_awm_button.clicked.connect(self.edit_awm)
       control_layout2.addWidget(self.edit_awm_button)
       
-      self.eval_awm_button = QPushButton("Eval awm")
-      self.eval_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.eval_awm_button.setFont(self.widgetFont)
-      self.eval_awm_button.clicked.connect(self.eval_awm)
-      control_layout2.addWidget(self.eval_awm_button)
-      
-      self.gc_awm_button = QPushButton("gc awm")
-      self.gc_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
-      self.gc_awm_button.setFont(self.widgetFont)
-      self.gc_awm_button.clicked.connect(self.gc_awm)
-      control_layout2.addWidget(self.gc_awm_button)
-      
-      self.save_awm_button = QPushButton("Save awm")
+      self.save_awm_button = QPushButton("Save")
       self.save_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.save_awm_button.setFont(self.widgetFont)
       self.save_awm_button.clicked.connect(self.save_awm)
       control_layout2.addWidget(self.save_awm_button)
       
+      self.eval_awm_button = QPushButton("Eval")
+      self.eval_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.eval_awm_button.setFont(self.widgetFont)
+      self.eval_awm_button.clicked.connect(self.eval_awm)
+      control_layout2.addWidget(self.eval_awm_button)
+      
+      self.gc_awm_button = QPushButton("GC")
+      self.gc_awm_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+      self.gc_awm_button.setFont(self.widgetFont)
+      self.gc_awm_button.clicked.connect(self.gc_awm)
+      control_layout2.addWidget(self.gc_awm_button)
+      
       spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
       control_layout2.addItem(spacer)  # Add spacer to the layout
 
+      label = QLabel(" Planner")
+      label.setStyleSheet("QLabel {background-color: #202020; color: #AAAAAA; }")
+      label.setFont(self.widgetFont)
+      label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)  # Fixed vertical size policy
+      control_layout2.addWidget(label)
+      
       self.plan_button = QPushButton("Plan")
       self.plan_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.plan_button.setFont(self.widgetFont)
@@ -306,6 +318,12 @@ class ChatApp(QtWidgets.QWidget):
       spacer = QSpacerItem(0, 20)  # vertical spacer with 20 pixels height
       control_layout2.addItem(spacer)  # Add spacer to the layout
 
+      label = QLabel("Library")
+      label.setStyleSheet("QLabel {background-color: #202020; color: #AAAAAA; }")
+      label.setFont(self.widgetFont)
+      label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)  # Fixed vertical size policy
+      control_layout2.addWidget(label)
+      
       self.arxiv_button = QPushButton("Search")
       self.arxiv_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
       self.arxiv_button.setFont(self.widgetFont)
@@ -341,7 +359,7 @@ class ChatApp(QtWidgets.QWidget):
       control_layout.addItem(spacer)  # Add spacer to the layout
       
       label = QLabel(label)
-      label.setStyleSheet("QLabel { background-color: #101820; color: #FAEBD7; }")
+      label.setStyleSheet("QLabel {background-color: #202020; color: #AAAAAA; }")
       label.setFont(self.widgetFont)
       label.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)  # Fixed vertical size policy
       control_layout.addWidget(label)
@@ -588,7 +606,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      rr = subprocess.Popen(['python3', 'paper_writer.py', selectedText])
+      rr = subprocess.Popen(['python3', 'paper_writer.py', '-report', 't'])
       self.display_response("report writer spawned.")
          
    def workingMem(self): # lauching working memory editor

@@ -3,12 +3,14 @@ import pandas as pd
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
 import ast
-import concurrent
+import concurrent, subprocess
 from csv import writer
 #from IPython.display import display, Markdown, Latex
 import json
 import re
 import random
+import argparse
+import pickle
 import openai
 import traceback
 from lxml import etree
@@ -78,8 +80,10 @@ openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
 memory = VolatileMemory()
 #llm = LLM(None, memory, osClient=OSClient(api_key=None), openAIClient=openAIClient, template=OS_MODEL)
 
-import OwlCoT as cot
-cot = cot.OwlInnerVoice(None)
+import OwlCoT as oiv
+cot = oiv.OwlInnerVoice(None)
+print (type(cot), type(cot.llm))
+print (cot.template)
 # set cot for rewrite so it can access llm
 rw.cot = cot
 
@@ -164,6 +168,7 @@ class PWUI(QWidget):
 import re
 
 def get_template(row, config):
+    global cot
     if row in config:
         if 'model' in config[row]:
             model = config[row]['model']
@@ -240,8 +245,9 @@ def literal_included_entities(entities, text):
     #print(f'Missing entities from draft: {missing_entities}')
     return included_entities
 
-def entities(paper_title, paper_outline, paper_summaries, ids,template):
+def entities(paper_title, paper_outline, paper_summaries, ids, template):
     global entity_cache
+    print(ids)
     items = []
     total=len(ids); cached=0
     for id, excerpt in zip(ids, paper_summaries):
@@ -415,7 +421,7 @@ def handle_json_editor_closed(result):
 
 config = {}
 
-def write_report(app):
+def write_report(app, topic):
     global updated_json, config
     #rows = ["Query", "SBAR", "Outline", "WebSearch", "Write", "ReWrite"]
     plan = plan_search()
@@ -487,13 +493,12 @@ def write_report(app):
 
     write_config = config['Write']
     if write_config['exec'] == 'Yes':
-        if length is None:
-            if 'length' in config:
-                length = int(config['length'])
-            else:
-                length = 1200
-        # write report! pbly should add # rewrites
-        write_report_aux(config, paper_outline=outline, section_outline=outline, length=length)
+        if 'length' in config:
+            length = int(config['length'])
+        else:
+            length = 1200
+    # write report! pbly should add # rewrites
+    write_report_aux(config, paper_outline=outline, section_outline=outline, length=length)
         
     rewrite_config = config['ReWrite'] # not sure, is this just for rewrite of existing?
     if rewrite_config['exec'] == True:
@@ -536,23 +541,24 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
                 heading_1_title = subsection['title']
                 heading_1_draft = ''
             print(f"subsection title {subsection['title']}")
-            subsection_text, subsection_refs =\
-                '\n\n'+'.'*depth+subsection['title']+'\n'+write_report_aux(config,
-                                                                           paper_outline=paper_outline,
-                                                                           section_outline=subsection,
-                                                                           excerpts=excerpts,
-                                                                           length=subsection_token_length,
-                                                                           dscp=subsection_dscp,
-                                                                           topic=subsection_topic,
-                                                                           paper_title=paper_title,
-                                                                           abstract=abstract,
-                                                                           depth=subsection_depth,
-                                                                           parent_section_title=subsection_title,
-                                                                           parent_section_partial=section,
-                                                                           heading_1_title= heading_1_title,
-                                                                           heading_1_draft=heading_1_draft,
-                                                                           num_rewrites=num_rewrites,
-                                                                           resources=resources)
+            text, subsection_refs =\
+                write_report_aux(config,
+                                 paper_outline=paper_outline,
+                                 section_outline=subsection,
+                                 excerpts=excerpts,
+                                 length=subsection_token_length,
+                                 dscp=subsection_dscp,
+                                 topic=subsection_topic,
+                                 paper_title=paper_title,
+                                 abstract=abstract,
+                                 depth=subsection_depth,
+                                 parent_section_title=subsection_title,
+                                 parent_section_partial=section,
+                                 heading_1_title= heading_1_title,
+                                 heading_1_draft=heading_1_draft,
+                                 num_rewrites=num_rewrites,
+                                 resources=resources)
+            subsection_text = '\n\n'+'.'*depth+subsection['title']+'\n'+text
             section += subsection_text
             for ref in subsection_refs:
                 if ref not in refs:
@@ -578,10 +584,8 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
             # do local search, excerpts to use not provided
             ids, excerpts = s2.search(query, subsection_dscp) 
         else:
-            ids = [], excerpts = []
-            for entry in resources:
-                ids.append(entry[0])
-                excerpts.append(entry[1])
+            ids = resources['sections'][0]
+            excerpts = resources['sections'][1]
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
         subsection_refs =  []
         for ref in [s[0]for s in excerpts]:
@@ -621,7 +625,7 @@ Again, your current task is to write the next part, titled: '{section_outline["t
 
  - Output ONLY the text, do NOT output your reasoning.
  - Write a dense, detailed text using known fact and the above research excepts, of about {subsection_token_length} words in length.
- - This section should cover the specific topic: {parent_section_title} - {subsection_topic}
+ - This section should cover the specific topic: {parent_section_title}: {subsection_topic}
  - You may refer to, but not repeat, prior section content in any text you produce.
  - Present an integrated view of the assigned topic, noting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
  - Ensure the section provides depth while removing redundant or superflous detail, ensuring that every critical aspect of the source argument, observations, methods, findings, or conclusions is included.
@@ -672,40 +676,28 @@ End the section as follows:
     print(f'Refs:\n{subsection_refs}\n')
     return draft, subsection_refs
 
-def discuss(topic, excerpts=None):
+def discuss_resources(query, sections, dscp=''):
+    """ resources is [[section_ids], [[title, section_synopsis], ...]]"""
+    # excerpts is just [[title, section_synopsis], ...]
     global updated_json, config
-    plan = pl.init_plan(topic = topic, awm=False)
-    plan['task'] = f'Discuss {topic}'
-    plan = pl.analyze(plan, short=True)
+    section_ids = sections[0]
+    excerpts = sections[1]
     config={}
     rows = ["Outline", "Search", "Write", "ReWrite"]
-    ex = PWUI(rows, config) # get config for this discussion task
-    ex.show()
-    app.exec()
-    #get updated config
-    if config is not None and len(config.keys()) > 0:
-        plan['config'] = config
-
+    # make dummy config, write_aux needs it
+    for row in rows:
+        config[row] = {"model":'llm', "exec":'Yes'}
+    
     # now enter conversation loop.
-    searched = False
-    query = cot.confirmation_popup('?', '')
-    if query is None or not query:
-        return 
-    plan['task']=query
     while query is not None:
-        
-        search_config = config['Search']
-        outline_config = config['Outline']
         length = 600 # default response - should pick up from ui max_tokens if run from ui, tbd
-        outline_config['length'] = length
-
         #create detail instruction for response from task, sbar, query
-        instruction_prompt = """generate a concise instruction for a research assistant telling her what to extract from a set of research papers.
+        instruction_prompt = """generate a concise instruction for a research assistant telling him what to extract from a set of research papers.
 Respond using this JSON format:
 {"instruction": '<instruction>'}
 
 Topic: {{$topic}}
-Background: {{$sbar}}
+Background: {{$dscp}}
 Query: {{$query}}
 
 Respond in plain JSON, with no markdown or code formatting.
@@ -714,41 +706,47 @@ Respond in plain JSON, with no markdown or code formatting.
                     UserMessage(instruction_prompt),
                     AssistantMessage('')
                     ]
-        sbar_text=plan['sbar']['background']['a']
-        instruction = cot.llm.ask({"topic":topic, "query":query, "sbar": sbar_text},
+        instruction = cot.llm.ask({"topic":dscp, "query":query, "dscp": dscp},
                                   messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
         outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
-        plan['outline'] = outline
         cot.display_response(json.dumps(outline, indent=2))
         
-        # Note this is web search. Local faiss or other resource search will be done in Write below
-        if search_config['exec'] == 'Yes' and not searched:
-            # do search - eventually we'll need subsearches: wiki, web, axriv, s2, self?, ...
-            # s2_search needs sbar, no?
-            s2_search(config, outline, outline)
-            searched = True
-            
-        write_config = config['Write']
-        # write report! pbly should add # rewrites
-        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=outline_config['length'], resources=excerpts)
+        if len(excerpts) > 10: 
+            # s2_search_resources(outline, resources)
+            pass
 
-        query = cot.confirmation_popup('Initial Question?', '')
+        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=resources)
+
+        query = cot.confirmation_popup('Query?', '')
         if query is None or not query:
             return report, refs 
-        plan['task']=query
     
 if __name__ == '__main__':
+    def parse_arguments():
+        """Parses command-line arguments using the argparse library."""
+        
+        parser = argparse.ArgumentParser(description="Process a single command-line argument.")
+        
+        parser.add_argument("-discuss", type=str, help="discuss a provided set of resources")
+        parser.add_argument("-report", type=str, help="discuss a provided set of resources")
+        args = parser.parse_args()
+        return args
     try:
-        #cot.display_response('calling paper_writer')
         app = QApplication(sys.argv)
-        #paper = write_report(app)
-        discuss(input('Topic to discuss?'))
+        args = parse_arguments()
+        if hasattr(args, 'discuss') and args.discuss is not None:
+            print(args.discuss)
+            with open(args.discuss, 'rb') as f:
+                resources = pickle.load(f)
+            print(f'\nResources:\n{json.dumps(resources, indent=2)}')
+            discuss_resources(input('?'), resources['sections'], resources['dscp'])
+        if hasattr(args, 'report') and args.report is not None:
+            write_report(app, args.report)
+        else:
+            print('paper_writer.py -report expects to be called from Owl with topic')
+            pass
     except Exception as e:
         traceback.print_exc()
         print(str(e))
         sys.exit(-1)
-    #print(f'\n\n\n\n{paper}')
-    #with open('paper.txt', 'w') as pf:
-    #    pf.write(paper)
-    #print(json.dumps(outline, indent=2))
     

@@ -1,6 +1,11 @@
 import os, sys, logging, glob, time
 import argparse
+import requests
+import urllib.request
+import numpy as np
 import pandas as pd
+import pickle
+import subprocess
 import json
 import re
 import random
@@ -17,9 +22,6 @@ from PyPDF2 import PdfReader
 import pdfminer.high_level as miner
 from pdfminer.pdfparser import PDFParser
 from pdfminer.pdfdocument import PDFDocument
-import requests
-import urllib.request
-import numpy as np
 import faiss
 from scipy import spatial
 from tenacity import retry, wait_random_exponential, stop_after_attempt
@@ -251,7 +253,7 @@ def latest_google_pdf():
         path = max(files, key=os.path.getmtime)  # Find the file with the latest modification time
         size = os.path.getsize(path)
         age = int(time.time()-os.path.getmtime(path))
-        print(f"secs old: {age}, size: {size}, name: {path}")
+        #print(f"secs old: {age}, size: {size}, name: {path}")
     except Exception:
         return '', 99999, 0
     return path, age, size
@@ -260,17 +262,17 @@ def wait_for_chrome(url, temp_filepath):
     found = False; time_left = 20
     while time_left >0:
         path, age, size = latest_google_pdf()
-        print(f'age {age}, size {size}, path {path}')
+        #print(f'age {age}, size {size}, path {path}')
         if age < 2 and size > 1000:
             # now wait for completion - .5 sec with no change in size,we're done!
             prev_size = 0
-            print(f'\nwaiting for size to stablize\n')
+            #print(f'\nwaiting for size to stablize\n')
             while prev_size < size:
                 time.sleep(.5)
                 prev_size = size
                 path, age, size = latest_google_pdf()
             os.rename(path, temp_filepath)
-            print(f'\nGot it!\n')
+            #print(f'\nGot it!\n')
             return temp_filepath
         time.sleep(.5)
         time_left = time_left-0.5
@@ -304,7 +306,7 @@ def download_pdf_wbb(url, title):
 def download_pdf_5005(url, title):
     global papers_dir
     # Send GET request to fetch PDF data
-    print(f' fetching url {url}')
+    #print(f' fetching url {url}')
     
     pdf_data = None
     response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=10)
@@ -402,7 +404,7 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     result_dict['section_ids'] = [] # to be filled in after we get paper id
     #if status is None:
     #    continue
-    print(f' new article:\n{json.dumps(result_dict, indent=2)}')
+    #print(f' new article:\n{json.dumps(result_dict, indent=2)}')
     paper_index = len(paper_library_df)
     paper_library_df.loc[paper_index] = result_dict
     # section and index paper
@@ -478,14 +480,14 @@ def get_arxiv_preprint_url(query, top_k=10):
                 continue
         candidate_embed = embedding_request(result.title)
         cosine_similarity = np.dot(title_embed, candidate_embed) / (np.linalg.norm(title_embed) * np.linalg.norm(candidate_embed))
-        print(f' score {cosine_similarity}, title {result.title}')
+        #print(f' score {cosine_similarity}, title {result.title}')
         if cosine_similarity > best_score:
             best_ppr = result
             best_score = cosine_similarity
     if best_ppr is None:
         return None
     else:
-        print(f'considering {best_ppr.title}')
+        #print(f'considering {best_ppr.title}')
         if cot.confirmation_popup("found this, index it?", best_ppr.title):
             return [x.href for x in best_ppr.links][1]
         return None
@@ -516,7 +518,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             print(f'SemanticsSearch fail code {response.status_code}')
             return [],0,0
         results = response.json()
-        print(f' s2 response keys {results.keys()}')
+        #print(f' s2 response keys {results.keys()}')
         total_papers = results["total"]
         current_offset = results["offset"]
         if total_papers == 0:
@@ -525,7 +527,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             return [],0,0
         next_offset = results["next"]
         papers = results["data"]
-        print(f'get article search returned first {len(papers)} papers of {total_papers}')
+        #print(f'get article search returned first {len(papers)} papers of {total_papers}')
         for paper in papers:
             title = paper["title"]
             print(f'considering {title}')
@@ -569,18 +571,18 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             result_dict["inflCitations"] = int(influentialCitationCount)
             result_dict["evaluation"] = ''
             result_dict["pdf_url"] = openAccessPdf
-            print(f' url: {openAccessPdf}')
+            #print(f' url: {openAccessPdf}')
             pdf_filepath = None
             if openAccessPdf is not None:
                 pdf_filepath= download_pdf(openAccessPdf, title)
             result_dict["pdf_filepath"]= pdf_filepath
             
-            print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
+            #print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
             result_dict['synopsis'] = ""
             result_dict['section_ids'] = [] # to be filled in after we get paper id
             #if status is None:
             #    continue
-            print(f' new article:\n{json.dumps(result_dict, indent=2)}')
+            #print(f' new article:\n{json.dumps(result_dict, indent=2)}')
             paper_index = len(paper_library_df)
             paper_library_df.loc[paper_index] = result_dict
             # section and index paper
@@ -643,7 +645,7 @@ def index_section_synopsis(paper_dict, synopsis):
     embedding = embedding_request(synopsis)
     ids_np = np.array([faiss_id], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
-    print(f'section synopsis length {len(synopsis)}')
+    #print(f'section synopsis length {len(synopsis)}')
     section_indexIDMap.add_with_ids(embeds_np, ids_np)
     synopsis_dict = {"faiss_id":faiss_id,
                      "paper_id": paper_dict["faiss_id"],
@@ -677,7 +679,7 @@ def index_paper(paper_dict, paper_index=None):
 
     for item in ['authors', 'title']:
         if item in paper_dict and item in extract and len(paper_dict[item]) < len(extract[item]):
-            print(f'correcting {item}')
+            #print(f'correcting {item}')
             paper_dict[item] = extract[item]
     if 'summary' in paper_dict and 'abstract' in extract and len(paper_dict['summary']) < len(extract['abstract']):
         paper_dict['summary'] = extract['abstract']
@@ -689,7 +691,7 @@ def index_paper(paper_dict, paper_index=None):
     paper_library_df.loc[paper_index, 'authors'] = paper_authors
     paper_library_df.loc[paper_index, 'summary'] = paper_abstract
     text_chunks = [paper_abstract]+extract['sections']
-    print(f"Summarizing each chunk of text {len(text_chunks)}")
+    #print(f"Summarizing each chunk of text {len(text_chunks)}")
 
     section_prompt = """Given this abstract of a paper:
     
@@ -751,7 +753,7 @@ End your synopsis response as follows:
             print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
             rw.cot = cot #just to be sure...
             entities = rw.extract_entities(text_chunk, title=paper_title)
-            print(f'entities: {entities}')
+            #print(f'entities: {entities}')
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
@@ -832,7 +834,7 @@ def strings_ranked_by_relatedness(
     ]
     strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
     strings, relatednesses = zip(*strings_and_relatednesses)
-    print(strings[0])
+    #print(strings[0])
     return strings[:top_n]
 
 def create_chunks_grobid(pdf_filepath):
@@ -876,14 +878,14 @@ def create_chunks_grobid(pdf_filepath):
     print("Authors:", extract["authors"])
     extract["abstract"]=abstract_text
     print("Abstract:", len(abstract_text))
-    print("Section titles:", len(titles_list))
-    print("body divs:", len(titles_list))
+    #print("Section titles:", len(titles_list))
+    #print("body divs:", len(titles_list))
     sections = []
     for element in body_divs:
         all_text = element.xpath('.//text()')
         # Combine text nodes into a single string
         combined_text = ''.join(all_text)
-        print("Section text:", len(combined_text))
+        #print("Section text:", len(combined_text))
         if len(combined_text) > 7:
             sections.append(combined_text)
     extract["sections"] = sections
@@ -945,7 +947,7 @@ Respond using this JSON template. Return only JSON without any Markdown or code 
 """)
               ]
     response = cot.llm.ask({'text':text, 'query':query, 'background':background}, prompt, max_tokens=100, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
-    print(f"relevant {response['relevant']}\n")
+    #print(f"relevant {response['relevant']}\n")
     if type(response) == dict:
         if 'relevant' in response and 'yes' in str(response['relevant']).lower():
             return True
@@ -985,8 +987,8 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False):
     kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k/2))
     hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k/2))
     reranked = reverse_reciprocal_ranking(query_ids, kwd_ids, hyde_ids)
-    print(f'search found:\n{query_ids}\n{kwd_ids},\n{hyde_ids}')
-    print(f'rerank:\n{reranked}\n')
+    #print(f'search found:\n{query_ids}\n{kwd_ids},\n{hyde_ids}')
+    #print(f'rerank:\n{reranked}\n')
     all_ids = query_ids+kwd_ids+hyde_ids
     all_summaries = query_summaries+kwd_summaries+hyde_summaries
     selected_summaries = []
@@ -1041,9 +1043,10 @@ def repair_paper_library_from_section_library():
     pass
 
 class PaperSelect(QWidget):
-    def __init__(self, papers):
+    def __init__(self, papers, search_terms):
         super().__init__()
         self.papers = papers
+        self.dscp = search_terms
         self.title_rows = []
         self.select_rows = []
         layout = QVBoxLayout()
@@ -1079,6 +1082,25 @@ class PaperSelect(QWidget):
     def collect_checked_resources(self):
         # 'resources' must match return from search, that is: [[section_id, ...], [[paper_title, section_excerpt],...]
         resources = []
+        section_ids = [] # a list of all section ids (in this case, all for every paper selected!)
+        excerpts = [] # a list of [paper_title, section_synopsis] for every section of every paper
+        for title_row, select_row in zip(self.title_rows, self.select_rows):
+            if not select_row.isChecked():
+                continue
+            title=title_row
+            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+            if len(search_result) > 0: # found paper, gather all sections
+                paper_id = str(search_result.iloc[0]["faiss_id"])
+                sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_id)]
+                print(f'sections in paper {paper_id}, {len(sections)}')
+                paper_sections = sections['faiss_id'].tolist()
+                paper_excerpts = [[title, synopsis] for synopsis in sections['synopsis'].tolist()]
+                section_ids.extend(paper_sections)
+                excerpts.extend(paper_excerpts)
+        return [section_ids, excerpts]
+    
+    def first_checked_paper_url(self):
+        # returns the pdf url (file or http) for the first checked paper
         for title_row, select_row in zip(self.title_rows, self.select_rows):
             if not select_row.isChecked():
                 continue
@@ -1086,20 +1108,30 @@ class PaperSelect(QWidget):
             search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
             if len(search_result) > 0:
                 paper_id = str(search_result.iloc[0]["faiss_id"])
-                sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_id)]
-                print(f'sections in paper {paper_id}, {len(sections)}')
-                resources.append([[sections['faiss_id'].tolist(), [title, synopsis]] for synopsis in sections['synopsis'].tolist()])
-                                 
+                filepath = str(search_result.iloc[0]["pdf_filepath"])
+                if filepath is not None and len(filepath) > 0:
+                    return 'file:///home/bruce/Downloads/owl/tests/owl/'+filepath
+                http = str(search_result.iloc[0]["pdf_url"])
+                if url is not None and len(url) > 0:
+                    return http
+        return None
 
     def on_discuss_clicked(self):
         """ Handles the discuss button click event. """
-        resources = self.collect_checked_resources()
-        print(f'resources')
-
+        resources = {}
+        resources['sections'] = self.collect_checked_resources()
+        resources['dscp'] = self.dscp
+        with open('discuss_resources.pkl', 'wb') as f:
+            pickle.dump(resources, f)
+        rc = subprocess.run(['python3', 'paper_writer.py', '-discuss', 'discuss_resources.pkl'])
         
     def on_show_clicked(self):
         """ Handles the show button click event. """
-        search_config={}
+        pdf_url = self.first_checked_paper_url()
+        if pdf_url is not None:
+            webbrowser.open_new(pdf_url)
+        else:
+            print(f"Sorry, I don't have file or url")
 
 
 class BrowseUI(QWidget):
@@ -1145,13 +1177,13 @@ class BrowseUI(QWidget):
         query = ''; dscp = ''
         if search_config['Title'] is not None  and search_config['Title'] != 'Title':
             query = search_config['Title'].strip()
-            if search_config['Abstract'] is not None  and search_config['Abstract'] != 'Abstract':
-                dscp = search_config['Abstract'].strip()
-        elif search_config['Abstract'] is not None  and search_config['Abstract'] != 'Abstract':
-            query = search_config['Abstract'].strip()
-        else:
+        if search_config['Abstract'] is not None  and search_config['Abstract'] != 'Abstract':
+            dscp = search_config['Abstract'].strip()
+        if query == '' and dscp == '':
             print(f'Please enter title and/or abstract')
             return
+        elif query == '': # use abstract search terms for primary search
+            query = dscp
 
         # browse is about papers, not sections
         # 'whole_papers=True' only returns one section for each paper
@@ -1181,6 +1213,7 @@ class BrowseUI(QWidget):
         self.parent_papers['titles'] = paper_titles
         self.parent_papers['filepaths'] = filepaths
         self.parent_papers['years'] = filepaths
+        self.parent_papers['dscp'] = dscp
         self.close()
 
     
@@ -1191,7 +1224,7 @@ def browse():
     ex.show()
     app.exec()
     # display chooser, then call discuss with selected pprs (or excerpts?)
-    chooser = PaperSelect(papers['titles']) # get config for this discussion task
+    chooser = PaperSelect(papers['titles'], papers['dscp']) # get config for this discussion task
     chooser.show()
     app.exec()
 
