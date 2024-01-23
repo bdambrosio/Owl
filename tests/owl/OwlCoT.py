@@ -335,6 +335,8 @@ class OwlInnerVoice():
             self.template = template
         else:
             self.template = get_model_template()
+        self.city = city
+        self.state = state
         self.osClient = OSClient(api_key=None)
         self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
         self.functions = FunctionRegistry()
@@ -386,6 +388,13 @@ class OwlInnerVoice():
     def display_response(self, response):
         if self.ui is not None:
             self.ui.display_response(response)
+        else:
+            print(response)
+
+
+    def display_msg(self, response):
+        if self.ui is not None:
+            self.ui.display_msg(response)
         else:
             print(response)
 
@@ -453,10 +462,7 @@ class OwlInnerVoice():
                       print(f' problem with this form in conversation history, skipping {d}')
                 self.memory.set('history', sanitized_history)
           except Exception as e:
-             if self.ui is not None:
-                 self.ui.display_response(f'Failure to reload conversation history {str(e)}')
-             else:
-                 print(f'Failure to reload conversation history {str(e)}')
+                 self.display_msg(f'Failure to reload conversation history {str(e)}')
 
     def has_awm(self, name):
         if name in self.active_wm:
@@ -713,11 +719,8 @@ Doc's input:
                       return 'edit aborted by user'
                    json_item = json.loads(editted_item)
                 except Exception as e:
-                   if self.ui is not None:
-                       self.ui.display_response(f'invalid json {str(e)}')
-                   else:
-                       print(f'invalid json {str(e)}')
-                   continue
+                    self.display_msg(f'invalid json {str(e)}')
+                    continue
                 valid_json = True
                 self.active_wm[name]=json_item
                 item_w_embed = json_item.copy()

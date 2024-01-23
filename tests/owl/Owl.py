@@ -189,11 +189,11 @@ class ChatApp(QtWidgets.QWidget):
       self.input_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
       text_layout.addWidget(self.input_area)
       
-      self.prompt_area = MyTextEdit(self)
-      self.prompt_area.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
-      self.prompt_area.setFont(self.widgetFont)
-      self.prompt_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
-      text_layout.addWidget(self.prompt_area)
+      self.msg_area = MyTextEdit(self)
+      self.msg_area.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
+      self.msg_area.setFont(self.widgetFont)
+      self.msg_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
+      text_layout.addWidget(self.msg_area)
       
       # Control Panel
       control_layout = QVBoxLayout()
@@ -219,7 +219,7 @@ class ChatApp(QtWidgets.QWidget):
       self.top_p_combo.setCurrentText('1.0')
       
       self.max_tokens_combo = self.make_combo(control_layout, 'MaxTkns', ["25", "50", "100", "150", "250", "400", "600", "1000", "2000", "4000"])
-      self.max_tokens_combo.setCurrentText('400')
+      self.max_tokens_combo.setCurrentText('600')
       
       #self.prompt_combo = self.make_combo(control_layout, 'Prompt', ["None", "New", "Helpful", "Analytical", "Bhagavan", "ACT", "Owl", "React",])
       #self.prompt_combo.setCurrentText('Owl')
@@ -352,7 +352,7 @@ class ChatApp(QtWidgets.QWidget):
       main_layout.addLayout(control_layout2)
       self.setLayout(main_layout)
       greeting = self.owlCoT.wakeup_routine()
-      self.display_response(greeting+'\n')
+      self.display_response(greeting)
 
    def make_combo(self, control_layout, label, choices, callback=None):
       spacer = QSpacerItem(0, 10)  # Vertical spacer with 20 pixels width
@@ -427,7 +427,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif input_text == "New":
          input_text = self.input_area.toPlainText()
          self.clear()
-      self.prompt_area.clear()
+      #self.prompt_area.clear()
 
    def display_response(self, r):
       global PREV_LEN
@@ -436,6 +436,8 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       encoded = self.codec.fromUnicode(r)
       # Decode bytes back to string
       decoded = encoded.data().decode('utf-8')
+      if not decoded.endswith('\n'):
+         decoded += '\n'
       self.input_area.insertPlainText(decoded)  # Insert the text at the cursor position
       if self.tts:
          try:
@@ -444,6 +446,20 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
             traceback.print_exc()
       self.input_area.repaint()
       PREV_LEN=len(self.input_area.toPlainText())-1
+      
+   def display_msg(self, r):
+      self.msg_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+      r = str(r)
+      # presumably helps handle extended chars
+      encoded = self.codec.fromUnicode(r)
+      decoded = encoded.data().decode('utf-8')+'\n'
+      self.msg_area.insertPlainText(decoded)  # Insert the text at the cursor position
+      if self.tts:
+         try:
+            self.speech_service(decoded)
+         except:
+            traceback.print_exc()
+      self.msg_area.repaint()
       
    def submit(self):
       global PREV_LEN
@@ -575,7 +591,8 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
       response,titles = self.owlCoT.s2_search(selectedText)
-      self.display_response('\n'+response+'\n\nRefs:\n'+'\n'.join(titles))
+      self.display_response('\n'+response)
+      self.display_msg('\nRefs:\n'+'\n'.join(titles))
       
    def index_url(self): # index a url in S2 faiss
       global PREV_LEN, op#, vmem, vmem_clock
@@ -590,12 +607,12 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          print(f'cursor has selected {len(selectedText)} chars')
       start = selectedText.find('http')
       if start < 0:
-         self.display_response(f'\n\nnot url: {selectedText}')
+         self.display_msg(f'not url: {selectedText}')
          return
       if start > 0:
          selectedText = selectedText[start:]
       self.s2.queue_url_for_indexing(selectedText)
-      self.display_response("Indexing request submitted.")
+      self.display_msg("Indexing request submitted.")
 
    def generate_report(self): # index a url in S2 faiss
       global PREV_LEN, op#, vmem, vmem_clock
@@ -607,7 +624,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
       rr = subprocess.Popen(['python3', 'paper_writer.py', '-report', 't'])
-      self.display_response("report writer spawned.")
+      self.display_msg("report writer spawned.")
          
    def workingMem(self): # lauching working memory editor
       self.owlCoT.save_workingMemory() # save current working memory so we can edit it
@@ -616,18 +633,18 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          try:
             self.workingMemory = self.owlCoT.load_workingMemory()
          except Exception as e:
-            self.display_response(f'Failure to reload working memory {str(e)}')
+            self.display_msg(f'Failure to reload working memory\n  {str(e)}')
 
    def speak(self): # lauching working memory editor
       if self.tts:
          self.tts = False
-         self.display_response('\nSpeech off\n')
+         self.display_msg('Speech off')
       else:
-         self.display_response('\nSpeech on\n')
+         self.display_msg('Speech on')
          self.tts = True
 
    def speech_service(self, text):
-      #self.display_response('\nspeaking...\n')
+      #self.display_msg('speaking...')
       try:
          r = requests.post("http://bruce-linux:5004/", json={"text":text})
       except Exception as e:

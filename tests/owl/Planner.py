@@ -96,6 +96,44 @@ action_primitive_names = \
     "wiki",
     ]
 
+action_primitive_descriptions = \
+   """
+[
+    {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
+    {"action": "append", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
+    {"action": "article", "arguments": ["$item1/literal1"], "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
+    {"action": "assign", "arguments": ["$item1/literal1)"], "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
+    {"action": "choose", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
+    {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
+    {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
+    {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "entails", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
+    {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
+    {"action": "gpt4", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke gpt4 with the instruction $item1 and details $item2. Assign the response to variable $item3"},
+    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
+    {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
+    {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
+    {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
+    {"action": "sort", "arguments": ["$item1", "$item2"], "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
+    {"action": "tell", "arguments": ["$item1"], "result": "$Trash", "description": "present $item1 to the user."},
+    {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
+    {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
+]
+
+Example Plan (1-shot):
+
+Plan:
+[
+{"action": "assign", "arguments": ["Apple", "$item1"], "result": "$item2"},
+{"action": "assign", "arguments": [], "result": "$item1"},
+{"action": "assign", "arguments": ["5"], "result": "$item1"},
+{"action": "append", "arguments": ["number1", "$list1"], "result": "$List2"},
+{"action": "gpt4", "arguments": ["What is the meaning of life?", "philosophy"], "result": "$response1"},
+{"action": "tell", "arguments": ["$response1"], "result": "$Trash"}
+]
+"""
+
 #
 ## from gpt4:
 #
@@ -199,44 +237,6 @@ Certainly, a structured plan for researching the status of small nuclear fusion 
 This plan uses semantic operations as building blocks for an iterative, intelligent research process. The flow control, whether through loops with conditions or if-then statements, ensures that the research remains dynamic and adjusts to new data or insights as they emerge.
 """
 
-action_primitive_descriptions = \
-   """
-[
-    {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
-    {"action": "append", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
-    {"action": "article", "arguments": ["$item1/literal1"], "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
-    {"action": "assign", "arguments": ["$item1/literal1)"], "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
-    {"action": "choose", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
-    {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
-    {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
-    {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "entails", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
-    {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
-    {"action": "gpt4", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke gpt4 with the instruction $item1 and details $item2. Assign the response to variable $item3"},
-    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
-    {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
-    {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
-    {"action": "sort", "arguments": ["$item1", "$item2"], "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
-    {"action": "tell", "arguments": ["$item1"], "result": "$Trash", "description": "present $item1 to the user."},
-    {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
-    {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
-]
-
-Example Plan (1-shot):
-
-Plan:
-[
-{"action": "assign", "arguments": ["Apple", "$item1"], "result": "$item2"},
-{"action": "assign", "arguments": [], "result": "$item1"},
-{"action": "assign", "arguments": ["5"], "result": "$item1"},
-{"action": "append", "arguments": ["number1", "$list1"], "result": "$List2"},
-{"action": "gpt4", "arguments": ["What is the meaning of life?", "philosophy"], "result": "$response1"},
-{"action": "tell", "arguments": ["$response1"], "result": "$Trash"}
-]
-"""
-
 
 def generate_faiss_id(document):
    hash_object = hashlib.sha256()
@@ -275,12 +275,16 @@ class PlanInterpreter():
       self.tokenizer = GPT3Tokenizer()
       self.cvHistory = load_conv_history()  # load conversation history.
       self.memory = VolatileMemory({'input':'', 'history':self.cvHistory})
-      self.max_tokens = 4000
+      self.max_tokens = 8000
       self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
       self.current_topics = None # topics under discussion - mostly a keyword list
       self.wmHash = {} # actual texts in working memory 
       self.wmMetaData = {} # working memory metadata
       self.wmIndex = faiss.IndexIDMap(faiss.IndexFlatL2(384))
+
+
+
+
       # note many activities will use first paragraph only. Keep it relevant!
       
       self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
@@ -290,99 +294,6 @@ Your conversation style is warm, gentle, humble, and engaging. """
       #self.op = op.OpenBook() # comment out for testing.
       
       
-   def repair_json (self, item):
-      #
-      ## this asks gpt-4 to repair text that doesn't parse as json
-      #
-
-      prompt_text=\
-         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
-Please repair the text string so that loads can parse it and return a valid dict.
-This repair should be performed recursively, including all field values.
-for example, in:
-{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
-the inner form  {"action"...} should be valid json.
-Return ONLY the repaired json.
-
-TextString:
-{{$input}}
-"""
-      prompt = [
-         SystemMessage(prompt_text),
-         AssistantMessage('')
-      ]
-      print(f'gpt4 repair input {str(item)}')
-      input_tokens = len(self.tokenizer.encode(item)) 
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25), validator=JSONResponseValidator())
-      print(f'gpt4 repair response {response}')
-      return response
-
-   def cast_steps_as_json(self, steps):
-      if type(steps) != dict:
-          try:
-             steps = json.loads(steps)
-          except:
-             steps = self.repair_json_list(steps)
-             if steps is None or steps is not list:
-                self.owlCoT.display_response(f'\nFailed to create valid JSON list from text plan')
-                return
-            
-      final_steps = []
-      for s, step in enumerate(steps):
-         if type(step) == dict:
-            step_j = step
-         else:
-            try:
-             step_j = json.loads(step)
-            except:
-               step_j = self.repair_json(step)
-         if step_j is None:
-            self.owlCoT.display_response(f'\nstep {s} cannot be formatted as JSON')
-            return
-         else:
-            final_steps.append(step_j)
-      print(f'plan steps as json list {json.dumps(final_steps, indent=4)}')
-      return final_steps
-
-   def repair_json_list (self, item):
-      #
-      ## this asks gpt-4 to repair text that doesn't parse as json, where response should be a list of JSON forms
-      #
-
-      prompt_text=\
-         """You are a JSON expert. The following TextString does not parse using the python JSON loads function.
-Please repair the text string so that loads can parse it and return a valid dict.
-This repair should be performed recursively, including all field values.
-for example, in:
-{"item": {"action":"assign", "arguments":"abc", "result":"$xyz"} }
-the inner form  {"action"...} should be valid json.
-Return ONLY the repaired json.
-
-TextString:
-{{$input}}
-"""
-      prompt = [
-         SystemMessage(prompt_text),
-         AssistantMessage('')
-      ]
-      print(f'gpt4 repair input {str(item)}')
-      input_tokens = len(self.tokenizer.encode(item)) 
-      response = self.llm.ask(item, prompt, template=GPT4, max_tokens=int(20+input_tokens*1.25))
-      if response is not None:
-         # won't handle nested lists very well
-         idx = response.find('[')
-         if idx > -1:
-            response = response[idx:]
-         idx = response.rfind(']')
-         if idx > -1:
-            response = response[:idx+1]
-         try:
-            responsej = json.loads(response.strip())
-            print(f'gpt4 repair response {response}')
-            return responsej
-         except:
-            self.owlCoT.display_response(f'is this json?\n{response}')
-      return response
 
    #
    ### Eval a form in awm, assuming it is a plan-step
@@ -408,7 +319,7 @@ TextString:
          if type(awm_entry) is not dict:
             entry = self.repair_json(awm_entry)
             if entry is None:
-               self.owlCoT.display_response(f'unable to repair {awm_entry}')
+               self.owlCoT.display_msg(f'unable to repair {awm_entry}')
                continue
          else:
             entry = awm_entry
@@ -424,7 +335,7 @@ TextString:
                   valid_json=True
                   print(f"repair succeeded")
                except:
-                  self.owlCoT.display_response(f'invalid json {str(e)}')
+                  self.owlCoT.display_msg(f'invalid json {str(e)}')
                   return "failed to convert to json"
       # finally have clean json
       return self.do_item(entry['item'])
@@ -444,7 +355,7 @@ TextString:
              print(f'do_item repair failed {dict_item}')
              return None
        if 'action' not in dict_item:
-          self.owlCoT.display_response(f'item is not an action {item}')
+          self.owlCoT.display_msg(f'item is not an action {item}')
           return 'action not yet implemented'
        elif dict_item['action'] == 'append':
           return self.do_append(dict_item)
@@ -485,20 +396,20 @@ TextString:
        elif dict_item['action'] == 'wiki':
           return self.do_wiki(dict_item)
        else:
-          self.owlCoT.display_response(f"action not yet implemented {item['action']}")
+          self.owlCoT.display_msg(f"action not yet implemented {item['action']}")
        return
    
 
    def parse_as_action(self, item):
        if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
-          self.owlCoT.display_response(f'form is not an action/arguments/result {item}')
+          self.owlCoT.display_msg(f'form is not an action/arguments/result {item}')
           raise InvalidAction(str(item))
        args = item['arguments']
        if type(args) is not list:
           args = [args]
        result = item['result']
        if type(result) is not str or not result.startswith('$'):
-          self.owlCoT.display_response(f"result must be a variable name: {result}")
+          self.owlCoT.display_msg(f"result must be a variable name: {result}")
           raise InvalidAction(str(item))
        else:
           return item['action'], args, result
@@ -547,7 +458,7 @@ TextString:
           arg0 = arguments[0]
           arg1 = arguments[1]
        else:
-          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+          self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
        if type(arg0) is not str or type(arg1) is not str:
           raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
        criteron = self.resolve_arg(arg0)
@@ -575,7 +486,7 @@ TextString:
           arg0 = arguments[0]
           arg1 = arguments[1]
        else:
-          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+          self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
        if type(arg0) is not str or type(arg1) is not str:
           raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
        criteron = self.resolve_arg(arg0)
@@ -603,7 +514,7 @@ TextString:
          arg0 = arguments[0]
          arg1 = arguments[1]
       else:
-         self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
+         self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
       if type(arg0) is not str or type(arg1) is not str:
          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
       criterion = self.resolve_arg(arg0)
@@ -616,11 +527,11 @@ TextString:
       response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
       if response is not None:
          self.owlCoT.create_awm(response, name=result, confirm=False)
-         self.owlCoT.display_response(f'{action}:\n{response}')
+         self.owlCoT.display_msg(f'{action}:\n{response}')
          return 
       else: 
          self.owlCoT.create_awm('', name=result, confirm=False)
-         self.owlCoT.display_response(f'{action}:\nNo Text Extracted')
+         self.owlCoT.display_msg(f'{action}:\nNo Text Extracted')
          return 'extract lookup and summary failure'
       
    def do_first(self, action):
@@ -1170,47 +1081,3 @@ if __name__ == '__main__':
    ]"""
    json.loads(steps)
 
-   steps = pl.interpreter.repair_json_list(
-      """
-***** Plan *****
-Plan:
-
-1. {"action": "request", "arguments": ["https://arxiv.org/abs/2311.05584"], "result": "$paper_content"}
-    - Request the content of the paper from the provided URL.
-
-2. {"action": "extract", "arguments": ["Q-Learning", "$paper_content"], "result": "$q_learning_content"}
-    - Extract the content related to Q-Learning from the paper.
-
-3. {"action": "extract", "arguments": ["applications", "$q_learning_content"], "result": "$applications_content"}
-    - Extract the content related to applications of Q-Learning from the extracted Q-Learning content.
-
-4. {"action": "tell", "arguments": ["$q_learning_content"], "result": "$Trash"}
-    - Present the extracted Q-Learning content to the user.
-
-5. {"action": "tell", "arguments": ["$applications_content"], "result": "$Trash"}
-    - Present the extracted applications content to the user.
-
-6. {"action": "web", "arguments": ["other methods for goal-directed behavior in large language models"], "result": "$other_methods_content"}
-    - Perform a web search for other methods used for goal-directed behavior in large language models.
-
-7. {"action": "extract", "arguments": ["PPO", "$other_methods_content"], "result": "$ppo_content"}
-    - Extract the content related to PPO from the web search results.
-
-8. {"action": "extract", "arguments": ["DPO", "$other_methods_content"], "result": "$dpo_content"}
-    - Extract the content related to DPO from the web search results.
-
-9. {"action": "tell", "arguments": ["$ppo_content"], "result": "$Trash"}
-    - Present the extracted PPO content to the user.
-
-10. {"action": "tell", "arguments": ["$dpo_content"], "result": "$Trash"}
-    - Present the extracted DPO content to the user.
-
-11. {"action": "question", "arguments": ["Do you have any other questions or need further clarification?"], "result": "$user_response"}
-    - Ask the user if they have any other questions or need further clarification.
-"""
-)
-
-   print(f' type steps {type(steps)}')
-   print(f' type steps0 {type(steps[0])}')
-   
-   

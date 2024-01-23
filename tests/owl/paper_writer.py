@@ -466,7 +466,7 @@ def write_report(app, topic):
     outline_config = config['Outline']
     if outline_config['exec'] == 'Yes':
         if 'outline' in plan and type(plan['outline']) is dict\
-           and cot.confirmation_popup('Edit existing plan?', json.dumps(plan['outline'], indent=2)) is not None:
+           and cot.confirmation_popup('Edit existing outline?', json.dumps(plan['outline'], indent=2)) is not None:
             # we already have an outline, edit it
             app = QApplication(sys.argv)
             editor = ew.JsonEditor(plan['outline'])
@@ -574,9 +574,9 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
         else:
             return section +'\n\nReferences:+\n'+'\n'.join(refs)
     
-    elif 'title' in section_outline:
-        # actuall llm call to write this terminal section
-        section = section_outline['title']
+    else:
+        # no subsections, write this terminal section
+        section = '' if 'sections' not in section_outline else section_outline['title']
         print(f'heading_1 {heading_1_title}\npst {parent_section_title}\nsubsection topic {subsection_topic}')
         query = heading_1_title+', '+parent_section_title+' '+subsection_topic
         # below assumes web searching has been done
@@ -643,7 +643,7 @@ End the section as follows:
 
         #print(f'\nFirst Draft:\n{draft}\n')
         if num_rewrites < 1:
-            return draft
+            return draft, subsection_refs
 
         #
         ### Now do rewrites
@@ -667,19 +667,100 @@ End the section as follows:
             missing_entities = literal_missing_entities(keywds, draft)
             print(f'\n missing entities after rewrite {len(missing_entities)} \n')
 
+        
+        section = draft
         # make sure we write out top level sections even if they have no subsections!
-        if depth==0:
+        if depth==0: # single top-level section with no subsections
             with open(f'section{n}.txt', 'w') as pf:
-                pf.write(section)
+                pf.write(draft)
             n += 1
 
-    print(f'Refs:\n{subsection_refs}\n')
-    return draft, subsection_refs
+    if depth == 0:
+        print(f'\nSection:\n{section}\n')
+        print(f'Refs:\n{subsection_refs}\n')
+        
+    return section, subsection_refs
 
-def discuss_resources(query, sections, dscp=''):
+class DisplayApp(QtWidgets.QWidget):
+    def __init__(self, query, sections, dscp, template):
+        super().__init__()
+        self.query = query
+        self.sections = sections
+        self.dscp = dscp
+        self.template = template
+
+        self.memory_display = None
+        self.windowCloseEvent = self.closeEvent
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QtGui.QColor("#202020"))  # Use any hex color code
+        self.setPalette(palette)
+        self.codec = QTextCodec.codecForName("UTF-8")
+        self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
+        
+        # Main Layout
+        main_layout = QHBoxLayout()
+        # Text Area
+        text_layout = QVBoxLayout()
+        main_layout.addLayout(text_layout)
+        
+        class MyTextEdit(QTextEdit):
+            def __init__(self, app):
+                super().__init__()
+                self.app = app
+                self.textChanged.connect(self.on_text_changed)
+                
+            def on_text_changed(self):
+                #legacy from Owl, but who knows
+                pass
+            
+            def keyPressEvent(self, event):
+                #legacy from Owl, but who knows
+                if event.matches(QKeySequence.Paste):
+                    clipboard = QApplication.clipboard()
+                    self.insertPlainText(clipboard.text())
+                else:
+                    super().keyPressEvent(event)
+            
+        self.display_area = MyTextEdit(self)
+        self.display_area.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+      
+        self.mainFont = QFont("Noto Color Emoji", 14)
+        self.display_area.setFont(self.widgetFont)
+        self.display_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
+        text_layout.addWidget(self.display_area)
+        # Control Panel
+        control_layout = QVBoxLayout()
+      
+        # Buttons and Comboboxes
+        self.discuss_button = QPushButton("discuss")
+        self.discuss_button.setFont(self.widgetFont)
+        self.discuss_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+        self.discuss_button.clicked.connect(self.discuss)
+        control_layout.addWidget(self.discuss_button)
+      
+        main_layout.addLayout(control_layout)
+        self.setLayout(main_layout)
+        self.show()
+        
+    def display_msg(self, r):
+        self.display_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+        r = str(r)
+        # presumably helps handle extended chars
+        encoded = self.codec.fromUnicode(r)
+        decoded = encoded.data().decode('utf-8')+'\n'
+        self.display_area.insertPlainText(decoded)  # Insert the text at the cursor position
+        self.display_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+        self.display_area.repaint()
+
+    def discuss(self):
+        discuss_resources(self, self.query, self.sections, self.dscp, self.template)
+
+def discuss_resources(display, query, sections, dscp='', template=None):
     """ resources is [[section_ids], [[title, section_synopsis], ...]]"""
     # excerpts is just [[title, section_synopsis], ...]
     global updated_json, config
+
     section_ids = sections[0]
     excerpts = sections[1]
     config={}
@@ -687,12 +768,13 @@ def discuss_resources(query, sections, dscp=''):
     # make dummy config, write_aux needs it
     for row in rows:
         config[row] = {"model":'llm', "exec":'Yes'}
+
     
     # now enter conversation loop.
     while query is not None:
         length = 600 # default response - should pick up from ui max_tokens if run from ui, tbd
         #create detail instruction for response from task, sbar, query
-        instruction_prompt = """generate a concise instruction for a research assistant telling him what to extract from a set of research papers.
+        instruction_prompt = """Generate a concise instruction for a research assistant on what to extract from a set of research papers to answer the Query below, given the Topic and Background information provided.
 Respond using this JSON format:
 {"instruction": '<instruction>'}
 
@@ -700,7 +782,7 @@ Topic: {{$topic}}
 Background: {{$dscp}}
 Query: {{$query}}
 
-Respond in plain JSON, with no markdown or code formatting.
+Respond only with the instruction, in plain JSON as above, with no markdown or code formatting.
 """
         messages = [SystemMessage(cot.v_short_prompt()),
                     UserMessage(instruction_prompt),
@@ -709,7 +791,7 @@ Respond in plain JSON, with no markdown or code formatting.
         instruction = cot.llm.ask({"topic":dscp, "query":query, "dscp": dscp},
                                   messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
         outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
-        cot.display_response(json.dumps(outline, indent=2))
+        display.display_msg(json.dumps(outline, indent=2))
         
         if len(excerpts) > 10: 
             # s2_search_resources(outline, resources)
@@ -717,6 +799,8 @@ Respond in plain JSON, with no markdown or code formatting.
 
         report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=resources)
 
+        display.display_msg(report)
+        display.display_msg(refs)
         query = cot.confirmation_popup('Query?', '')
         if query is None or not query:
             return report, refs 
@@ -732,16 +816,20 @@ if __name__ == '__main__':
         args = parser.parse_args()
         return args
     try:
-        app = QApplication(sys.argv)
         args = parse_arguments()
         if hasattr(args, 'discuss') and args.discuss is not None:
             print(args.discuss)
             with open(args.discuss, 'rb') as f:
                 resources = pickle.load(f)
             print(f'\nResources:\n{json.dumps(resources, indent=2)}')
-            discuss_resources(input('?'), resources['sections'], resources['dscp'])
+            app = QApplication(sys.argv)
+            window = DisplayApp(input('?'), resources['sections'], resources['dscp'], resources['template'])
+            #window.show()
+            app.exec()
+            sys.exit(0)
         if hasattr(args, 'report') and args.report is not None:
             write_report(app, args.report)
+            sys.exit(0)
         else:
             print('paper_writer.py -report expects to be called from Owl with topic')
             pass

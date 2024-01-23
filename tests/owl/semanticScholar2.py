@@ -1121,6 +1121,7 @@ class PaperSelect(QWidget):
         resources = {}
         resources['sections'] = self.collect_checked_resources()
         resources['dscp'] = self.dscp
+        resources['template'] = cot.template
         with open('discuss_resources.pkl', 'wb') as f:
             pickle.dump(resources, f)
         rc = subprocess.run(['python3', 'paper_writer.py', '-discuss', 'discuss_resources.pkl'])
