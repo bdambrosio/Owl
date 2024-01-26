@@ -1,4 +1,4 @@
-import os, json, math, time, requests
+import os, json, math, time, requests, sys, re
 import traceback
 import requests
 import nyt
@@ -69,6 +69,7 @@ action_primitive_names = \
     "append",
     "article",
     "assign",
+    "calc",
     "choose",
     "concatenate"
     "difference",
@@ -76,77 +77,83 @@ action_primitive_names = \
     "entails",
     "extract",
     "first",
-    "llm",
+    "if",
     "integrate",
+    "llm",
     "question",
     "recall",
     "request",
+    "rest",
+    "return",
     "sort",
     "tell",
     "web",
+    "while",
     "wiki",
     ]
 
 action_primitive_descriptions = \
-   """
-[
+   """This plan language has 6 datatypes: int, str, list, dict, action, and plan.
+int corresponds to python int type
+str corresponds to python str type
+list corresponds to python list type
+dict corresponds to python dict type
+action is a subtype of dict as shown below
+plan is a list of actions.
+
+Following is a complete list of all valid actions:
+
     {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
-    {"action": "append", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
-    {"action": "article", "arguments": ["$item1/literal1"], "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
-    {"action": "assign", "arguments": ["$item1/literal1)"], "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
-    {"action": "choose", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
-    {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
-    {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
-    {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "entails", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
-    {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
-    {"action": "llm", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke llm with the instruction $item1 and details $item2. Assign the response to variable $item3"},
-    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
-    {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
-    {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
-    {"action": "sort", "arguments": ["$item1", "$item2"], "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
-    {"action": "tell", "arguments": ["$item1"], "result": "$Trash", "description": "present $item1 to the user."},
-    {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
-    {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
-]
+    {"action": "append", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
+    {"action": "article", "arguments": "$item1", "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
+    {"action": "assign", "arguments": "$item1/literal1", "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
+    {"action": "calc", "arguments": "$item1", "result": "$item2", "description": "evaluate $item1 using python, and assign the result to variable $item2. This action is for evaluating simple arithmetic expressions. ""},
+    {"action": "choose", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
+    {"action": "concatenate", "arguments": ("$item1", "'$item2"), "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
+    {"action": "difference", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
+    {"action": "empty", "arguments": "$item1", "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "entails", "arguments": "$item1", "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
+    {"action": "extract", "arguments": ("$item1/literal1", "$item2"), "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
+    {"action": "first", "arguments": "$item1", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
+    {"action": "if", "arguments": ("$item1" ,"$item2"), "result": "$test_result", "description": "Step1: interpret $item1 and assign the result to $test_result. Step2: If $test_result is not False, interpret $item2. $item1 must be type action, $item2 can be type of action or plan"},
+    {"action": "integrate", "arguments": ("$item1" ,"$item2"), "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
+    {"action": "library_research", "arguments": "$item1", "result": "$item2", "description": "search the library for information about the subject in $item1 and assign the resulting information to the variable $item2."},
+    {"action": "llm", "arguments": ("$item1", "item2") "result": "$item3", "description": "invoke llm with the instruction $item1 and details $item2. Assign the response to variable $item3"},
+    {"action": "question", "arguments": "$item1", "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
+    {"action": "question", "arguments": "$item1", "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
+    {"action": "recall", "arguments": "$item1/literal1", "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
+    {"action": "request", "arguments": "$item1", "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
+    {"action": "rest", "arguments": "$item1", "result": "$item2", "description": "return $item1[1:], that is, the remainder of the input list after the first element."},
+    {"action": "return", "arguments": "$item1", "result": "$item2", "description": "return from nested plan, assigning value of $item1 in this plan to the value of $item2 in the name-space of the enclosing plan."},
+    {"action": "sort", "arguments": ("$item1", "$item2"), "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
+    {"action": "tell", "arguments": "$item1", "result": "$Trash", "description": "present $item1 to the user."},
+    {"action": "web", "arguments": "$item1/literal1", "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
+    {"action": "wiki", "arguments": "$item1/literal1", "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
+
 
 Example Plan (1-shot):
 
 Plan:
 [
-{"action": "assign", "arguments": ["Apple", "$item1"], "result": "$item2"},
+{"action": "assign", "arguments": "Apple", "result": "$item1"},
+{"action": "tell", "arguments": "$item1", "result": "$Trash"},
+{"action": "assign", "arguments": 5, "result": "$item1"},
+{"action": "tell", "arguments": "$item1", "result": "$Trash"},
 {"action": "assign", "arguments": [], "result": "$item1"},
-{"action": "assign", "arguments": ["5"], "result": "$item1"},
-{"action": "append", "arguments": ["number1", "$list1"], "result": "$List2"},
-{"action": "llm", "arguments": ["What is the meaning of life?", "philosophy"], "result": "$response1"},
-{"action": "tell", "arguments": ["$response1"], "result": "$Trash"}
+{"action": "tell", "arguments": "$item1", "result": "$Trash"},
+{"action": "assign", "arguments": {"key":"value"}, "result": "$item1"},
+{"action": "tell", "arguments": "$item1", "result": "$Trash"},
+{"action": "append", "arguments": "number1", "$list1", "result": "$List2"},
+{"action": "llm", "arguments": "What is the meaning of life?", "result": "$response1"},
+{"action": "tell", "arguments": "$response1", "result": "$Trash"}
 ]
 """
 
-def generate_faiss_id(document):
-   hash_object = hashlib.sha256()
-   hash_object.update(document.encode("utf-8"))
-   hash_value = hash_object.hexdigest()
-   faiss_id = int(hash_value[:8], 16)
-   return faiss_id
 
-def load_conv_history():
-   try:
-      with open('Owl.pkl', 'rb') as f:
-         data = pickle.load(f)
-         history = data['history']
-         print(f'loading conversation history for Owl')
-         return history
-   except Exception as e:
-      print(f'Failure to load conversation history {str(e)}')
-      return []
-   
 class InvalidAction(Exception):
    # raised by parse_as_action
    pass
-       
+
 class Interpreter():
     def __init__(self, owlCoT):
         self.wm = wm()
@@ -215,6 +222,8 @@ Your conversation style is warm, gentle, humble, and engaging."""
             return self.do_sort(dict_item)
         elif dict_item['action'] == 'tell':
             return self.do_tell(dict_item)
+        elif dict_item['action'] == 'test':
+            return self.do_test(dict_item)
         elif dict_item['action'] == 'web':
             return self.do_web(dict_item)
         elif dict_item['action'] == 'wiki':
@@ -228,9 +237,7 @@ Your conversation style is warm, gentle, humble, and engaging."""
         if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
             self.cot.display_msg(f'form is not an action/arguments/result {item}')
             raise InvalidAction(str(item))
-        args = item['arguments']
-        if type(args) is not list:
-            args = [args]
+        args = item['arguments'] # 
         result = item['result']
         if type(result) is not str or not result.startswith('$'):
             self.cot.display_msg(f"result must be a variable name: {result}")
@@ -250,7 +257,21 @@ Your conversation style is warm, gentle, humble, and engaging."""
                 raise InvalidAction(f"{item} referenced before definition")
         else: # presume a literal
             return item
-      
+
+    def substitute(self, item):
+        """
+        find an argument in working memory. Note str literals will be resolved to vars if possible
+        """
+        if type(item) is not str:
+           return # can only substitute into a string
+        positions = [match for match in re.finditer('\\$\\w*', item)]
+        positions.reverse() # start from end, otherwise positions will change!
+        substituted = item
+        for position in positions:
+           substituted = substituted[0:position.start()]+str(self.resolve_arg(position[0]))+substituted[position.end():]
+        print(f'item {item}\n substituted {substituted}')
+        return substituted
+
     def do_article(self, titleAddr):
         print(f'article {action}')
         action, arguments, result = self.parse_as_action(action)
@@ -267,15 +288,9 @@ Your conversation style is warm, gentle, humble, and engaging."""
         ##   should we recreate key? Not clear, as use case and semantics of key is unclear.
         ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
         print(f'assign {action}')
-        action, arguments, result = self.parse_as_action(action)
-        if type(arguments) is list: # assign takes a single argument, extract it from arguments list
-            argument0 = arguments[0]
-        else:
-            argument0 = arguments
-        if type(argument0) is not str:
-            raise InvalidAction(f'argument for assign must be a literal or name: {json.dumps(action)}')       
-        arg0_resolved = self.resolve_arg(argument0)
-        self.wm.assign(result, arg0_resolved)
+        action, arg, result = self.parse_as_action(action)
+        arg_resolved = self.resolve_arg(arg)
+        self.wm.assign(result, arg_resolved)
 
     def do_choose(self, action):
         action, arguments, result = self.parse_as_action(action)
@@ -296,7 +311,7 @@ Your conversation style is warm, gentle, humble, and engaging."""
         options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
         response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
         if response is not None:
-            self.assign(result, response)
+            self.wm.assign(result, response)
         else: 
             raise InvalidAction(f'choose returned None')
                  
@@ -377,28 +392,25 @@ Your conversation style is warm, gentle, humble, and engaging."""
             return 'unknown'
        
     def do_llm(self, action):
-        #
+        # llm takes a single arg, the prompt
         print(f'gpt {action}')
         action, arguments, result = self.parse_as_action(action)
-        if type(arguments) is not list or type(arguments[0]) is not str:
-            raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
-        prompt_text = ""
-        for arg in arguments:
-            resolved_arg = self.resolve_arg(arg)
-            prompt_text += str(resolved_arg)+'\n'
+        if type(arguments) is not str:
+            raise InvalidAction(f'argument for llm must be a literal or name: {str(arguments)}')       
+        prompt_text = self.resolve_arg(arguments)
+        substituted_prompt_text = self.substitute(prompt_text)
         prompt = [SystemMessage(prompt_text)]
         response = self.llm.ask("", prompt)
-        self.cot.display_response(response)
+        #self.cot.display_response(response)
         self.wm.assign(result, response)
 
     def do_request(self, action):
         print(f'request {action}')
         action, arguments, result = self.parse_as_action(action)
-        if type(arguments) is not list or type(arguments[0]) is not str:
-            raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
-        arg0 = arguments[0]
+        if type(arguments) is not str:
+            raise InvalidAction(f'argument for request must be a literal or name: {str(arguments)}')
         title = ' '
-        url = self.resolve_arg(arg0)
+        url = self.resolve_arg(arguments)
         print(f' requesting url from server {url}')
         try:
             print(f"http://127.0.0.1:5005/retrieve?title={title}&url={url}")
@@ -415,10 +427,59 @@ Your conversation style is warm, gentle, humble, and engaging."""
         #
         print(f'tell {action}')
         action, arguments, result = self.parse_as_action(action)
-        if type(arguments) is not list or type(arguments[0]) is not str:
+        if type(arguments) is not str:
             raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
-        value = self.resolve_arg(arguments[0])
-        self.cot.display_response(value)
+        value = self.resolve_arg(arguments)
+        self.cot.display_response(f'\nTell: {value}\n')
+
+    def test_form(self, form):
+        # simple core llm version of test, where argument is a prompt for llm
+        # 'is $item1 > 0?'
+        # used to eval condition body of control flow forms test, if, while
+        print(f'test {form}')
+        if type(form) is not str:
+            raise InvalidAction(f'argument for test must be a literal or name: {str(form)}')       
+        question = self.resolve_arg(form)
+        substituted_question = self.substitute(question)
+        prompt = [
+           SystemMessage("""The user will provide a text to evaluate. 
+Read the text, reason about the text and respond 'True' or 'False' according to its truth value.
+Respond only with True or False, do not include any introduction or explanation.
+"""),
+           UserMessage("""Text:
+
+{{$text}}
+
+Answer:""")
+        ]
+        response = self.llm.ask({"text":substituted_question}, prompt, max_tokens=3, temp=0.01)
+        print(f'\nTest: {substituted_question}, result: {response}\n')
+        if response is not None:
+            response = response.lower()
+            if 'yes' in response or 'true' in response:
+               return True
+            elif 'no' in response or 'false' in response:
+               return False
+        raise InvalidAction(f'test returned None')
+        return False
+
+    def do_test(self, action):
+        # simple llm version of test, where argument is a prompt for llm
+        # {"action":"testl", "arguments":'is $item1 > 0?', "result":'$item2'}
+        print(f'test {action}')
+        action, arguments, result = self.parse_as_action(action)
+        response = self.test_form(arguments)
+        if response is not None:
+            if type(response) is str:
+               response = response.lower()
+            if response or (type(response) is str and ('yes' in response or 'true' in response)):
+               self.wm.assign(result, 'True')
+               return True
+            elif (not response) or (type(response) is str and ('no' in response or 'false' in response)):
+               self.wm.assign(result, 'False')
+               return False
+        raise InvalidAction(f'test_form eval failed')
+        return None
 
 
     def do_web(self, action):
@@ -456,6 +517,9 @@ Your conversation style is warm, gentle, humble, and engaging."""
         return True
 
     def is_controlFlow(self, action):
+        action_name = action['action']
+        if action_name in ['break', 'continue', 'if', 'return', 'while']:
+           return True
         return False
    
     def interpret(self, actions):
@@ -471,12 +535,27 @@ Your conversation style is warm, gentle, humble, and engaging."""
             # pop action label from top of stack
             counter, actions = IP.pop()
             action = actions[counter]
+            # default is execute next instruction, push next inst onto IP stack
+            if counter < len(actions)-2: 
+                counter += 1
+                IP.append((counter, actions))
             if not self.is_controlFlow(action):
-                if counter < len(actions)-2: # default is execute next instruction
-                    counter += 1
-                    IP.append((counter, actions))
-                    print(f'executing {action}')
-                    self.do_item(action)
+               print(f'executing {action}')
+               self.do_item(action)
+            else:
+                # only if, rest tbd
+                action, arguments, result = self.parse_as_action(action)
+                if type(arguments) is tuple and len(arguments)==2: 
+                    test = arguments[0]
+                    body = arguments[1]
+                else:
+                    self.cot.display_response('if needs a tuple: (test, body)\n {arguments}')
+                    raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')
+                tr = self.test_form(test)
+                if tr:
+                    do_item(body)
+                    self.wm.assign(result, test_result)
+                    # now modify IP- push then on stack.
          
           
 if __name__ == '__main__':
@@ -484,17 +563,30 @@ if __name__ == '__main__':
    cot = OwlCoT.OwlInnerVoice()
    interp = Interpreter(cot)
  
+   steps = [{"label": 'one', "action": "assign", "arguments": "Apple", "result": "$item1"},
+            {"label": 'two', "action": "tell", "arguments": "$item1", "result": "$Trash"},
+            {"label": 'three', "action": "assign", "arguments": 5, "result": "$item2"},
+            {"label": 'four', "action": "tell", "arguments": "$item2", "result": "$Trash"},
+            {"label": 'five', "action": "assign", "arguments": [], "result": "$item1"},
+            {"label": 'six', "action": "tell", "arguments": "$item1", "result": "$Trash"},
+            {"label": 'seven', "action": "assign", "arguments": {"key":"value"}, "result": "$item1"},
+            {"label": 'eight', "action": "test", "arguments": "is $item1 the same as $item2 ?", "result": "$item3"},
+            {"label": 'last', "action": "tell", "arguments": "$item1", "result": "$Trash"},
+            {"label": 'last', "action": "tell", "arguments": "$item1", "result": "$Trash"},
+            ]
+   interp.interpret(steps)
+   sys.exit(0)
    steps = [
-    {"label": 'one', "action": "request", "arguments": ["https://arxiv.org/abs/2311.05584"], "result": "$paper_content"},
-    {"label": 'two', "action": "llm", "arguments": ["$paper_content", "extract key points"], "result": "$paper_key_points"},
-    {"label": 'three', "action": "tell", "arguments": ["$paper_key_points"], "result":"$Trash"},
-    {"label": 'four', "action": "question", "arguments": ["Do you want to know more about Q-Learning or other methods?"], "result": "$user_choice"},
-    {"label": 'five', "action": "web", "arguments": ["$user_choice in large language models"], "result": "$chosen_method_info"},
-    {"label": 'six', "action": "tell", "arguments": ["$chosen_method_info"], "result":"$Trash"},
-    {"label": 'seven', "action": "question", "arguments": ["Do you have any other questions?"], "result": "$user_question"},
-    {"label": 'eight', "action": "llm", "arguments": ["$user_question", "answer"], "result": "$user_question_answer"},
-    {"label": 'nine', "action": "tell", "arguments": ["$user_question_answer"], "result":"$Trash"},
-    {"label": 'ten', "action": "none", "arguments": ["None"], "result": "$Trash"}
+      {"label": 'one', "action": "request", "arguments": "https://arxiv.org/abs/2311.05584", "result": "$paper_content"},
+      {"label": 'two', "action": "llm", "arguments": ("$paper_content", "extract key points"), "result": "$paper_key_points"},
+      {"label": 'three', "action": "tell", "arguments": "$paper_key_points", "result":"$Trash"},
+      {"label": 'four', "action": "question", "arguments": "Do you want to know more about Q-Learning or other methods?", "result": "$user_choice"},
+      {"label": 'five', "action": "web", "arguments": "$user_choice in large language models", "result": "$chosen_method_info"},
+      {"label": 'six', "action": "tell", "arguments": "$chosen_method_info", "result":"$Trash"},
+      {"label": 'seven', "action": "question", "arguments": "Do you have any other questions?", "result": "$user_question"},
+      {"label": 'eight', "action": "llm", "arguments": ("$user_question", "answer"), "result": "$user_question_answer"},
+      {"label": 'nine', "action": "tell", "arguments": "$user_question_answer", "result":"$Trash"},
+      {"label": 'ten', "action": "none", "arguments": "None", "result": "$Trash"}
    ]
 
    interp.interpret(steps)

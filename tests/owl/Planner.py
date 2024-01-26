@@ -1,4 +1,4 @@
-import os, json, math, time, requests
+import os, json, math, time, requests, sys
 import traceback
 import requests
 import nyt
@@ -46,6 +46,7 @@ import signal
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
 from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog, OPENAI_MODEL3, OPENAI_MODEL4
+from Interpreter import Interpreter, action_primitive_names, action_primitive_descriptions
 
 today = date.today().strftime("%b-%d-%Y")
 
@@ -53,14 +54,6 @@ NYT_API_KEY = os.getenv("NYT_API_KEY")
 sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
-def get_city_state():
-   api_key = os.getenv("IPINFO")
-   handler = ipinfo.getHandler(api_key)
-   response = handler.getDetails()
-   city, state = response.city, response.region
-   return city, state
-city, state = get_city_state()
-print(f"My city and state is: {city}, {state}")
 
 local_time = time.localtime()
 year = local_time.tm_year
@@ -73,66 +66,6 @@ hour = local_time.tm_hour
 host = '127.0.0.1'
 port = 5004
 
-action_primitive_names = \
-   ["none",
-    "append",
-    "article",
-    "assign",
-    "choose",
-    "concatenate"
-    "difference",
-    "empty",
-    "entails",
-    "extract",
-    "first",
-    "gpt4",
-    "integrate",
-    "question",
-    "recall",
-    "request",
-    "sort",
-    "tell",
-    "web",
-    "wiki",
-    ]
-
-action_primitive_descriptions = \
-   """
-[
-    {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
-    {"action": "append", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
-    {"action": "article", "arguments": ["$item1/literal1"], "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
-    {"action": "assign", "arguments": ["$item1/literal1)"], "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
-    {"action": "choose", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
-    {"action": "concatenate", "arguments": ["$item1", "'$item2"], "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
-    {"action": "difference", "arguments": ["$item1", "$item2"], "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
-    {"action": "empty", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "entails", "arguments": ["$item1"], "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "extract", "arguments": ["$item1/literal1", "$item2"], "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
-    {"action": "first", "arguments": ["$item1]", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
-    {"action": "gpt4", "arguments": ["$item1", "item2"] "result": "$item3", "description": "invoke gpt4 with the instruction $item1 and details $item2. Assign the response to variable $item3"},
-    {"action": "integrate", "arguments": ["$item1" ,"$item2"], "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
-    {"action": "question", "arguments": ["$item1"], "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "recall", "arguments": ["$item1/literal1"], "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
-    {"action": "request", "arguments": ["$item1"], "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
-    {"action": "sort", "arguments": ["$item1", "$item2"], "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
-    {"action": "tell", "arguments": ["$item1"], "result": "$Trash", "description": "present $item1 to the user."},
-    {"action": "web", "arguments": ["$item1/literal1"], "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
-    {"action": "wiki", "arguments": ["$item1/literal1"], "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
-]
-
-Example Plan (1-shot):
-
-Plan:
-[
-{"action": "assign", "arguments": ["Apple", "$item1"], "result": "$item2"},
-{"action": "assign", "arguments": [], "result": "$item1"},
-{"action": "assign", "arguments": ["5"], "result": "$item1"},
-{"action": "append", "arguments": ["number1", "$list1"], "result": "$List2"},
-{"action": "gpt4", "arguments": ["What is the meaning of life?", "philosophy"], "result": "$response1"},
-{"action": "tell", "arguments": ["$response1"], "result": "$Trash"}
-]
-"""
 
 #
 ## from gpt4:
@@ -237,502 +170,17 @@ Certainly, a structured plan for researching the status of small nuclear fusion 
 This plan uses semantic operations as building blocks for an iterative, intelligent research process. The flow control, whether through loops with conditions or if-then statements, ensures that the research remains dynamic and adjusts to new data or insights as they emerge.
 """
 
-
-def generate_faiss_id(document):
-   hash_object = hashlib.sha256()
-   hash_object.update(document.encode("utf-8"))
-   hash_value = hash_object.hexdigest()
-   faiss_id = int(hash_value[:8], 16)
-   return faiss_id
-
-def load_conv_history():
-    try:
-        with open('Owl.pkl', 'rb') as f:
-           data = pickle.load(f)
-           history = data['history']
-           print(f'loading conversation history for Owl')
-           return history
-    except Exception as e:
-       print(f'Failure to load conversation history {str(e)}')
-       return []
-
-
-class InvalidAction(Exception):
-   # raised by parse_as_action
-   pass
-
-       
-class PlanInterpreter():
-   def __init__(self, ui, owlCoT, planner, profile=None, history=None, template='alpaca'):
-      self.template = template
-      self.ui = ui
-      self.owlCoT = owlCoT
-      self.client = OSClient(api_key=None)
-      self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-      self.llm = owlCoT.llm
-      self.planner = planner
-      self.functions = FunctionRegistry()
-      self.tokenizer = GPT3Tokenizer()
-      self.cvHistory = load_conv_history()  # load conversation history.
-      self.memory = VolatileMemory({'input':'', 'history':self.cvHistory})
-      self.max_tokens = 8000
-      self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
-      self.current_topics = None # topics under discussion - mostly a keyword list
-      self.wmHash = {} # actual texts in working memory 
-      self.wmMetaData = {} # working memory metadata
-      self.wmIndex = faiss.IndexIDMap(faiss.IndexFlatL2(384))
-
-
-
-
-      # note many activities will use first paragraph only. Keep it relevant!
-      
-      self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns. You know doc is shy and an introvert, but does care for you. 
-You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the spirituality of Ramana Maharshi, and philosophy.
-Your conversation style is warm, gentle, humble, and engaging. """
-      self.profile = self.personality
-      #self.op = op.OpenBook() # comment out for testing.
-      
-      
-
-   #
-   ### Eval a form in awm, assuming it is a plan-step
-   #
-      
-   def eval_awm (self):
-      #
-      ## note this and owlCoT should be written in a way that doesn't require direct access/manipulation of owlCoT data!
-      #
-      names=[f"{item['name']}: {(item['item'] if type(item['item']) == str else json.dumps(item['item']))[:32]}" for item in self.owlCoT.active_wm.values()]
-      #names=[f"{item}" for item in self.owlCoT.active_wm.values()]
-      valid_json = False
-      while not valid_json: # loop untill we have found a valid json item that is an action
-         picker = ListDialog(names)
-         result = picker.exec()
-         if result != QDialog.Accepted:
-            return 'user aborted eval'
-         selected_index = picker.selected_index()
-         if selected_index == -1:  # -1 means no selection
-            return 'user failed to select entry for eval'
-         name = names[selected_index].split(':')[0]
-         awm_entry = self.owlCoT.active_wm[name]
-         if type(awm_entry) is not dict:
-            entry = self.repair_json(awm_entry)
-            if entry is None:
-               self.owlCoT.display_msg(f'unable to repair {awm_entry}')
-               continue
-         else:
-            entry = awm_entry
-         if type(entry['item']) != dict:
-            try:
-               print(f"trying item string as json {entry['item']}")
-               dict_item = json.loads(entry['item'])
-               valid_json=True
-            except Exception as e:
-               try:
-                  print(f"json loads failed {str(e)}, trying repair")
-                  item = self.repair_json(entry['item'])
-                  valid_json=True
-                  print(f"repair succeeded")
-               except:
-                  self.owlCoT.display_msg(f'invalid json {str(e)}')
-                  return "failed to convert to json"
-      # finally have clean json
-      return self.do_item(entry['item'])
-                              
-   def do_item(self, item):
-       dict_item = None
-       if type(item) == dict:
-          dict_item = item   
-       else:
-          print(f'do_item item isnt dict, trying loads')
-          try:
-             dict_item = json.loads(item)
-          except:
-             print(f'do_item loads failed, trying repair')
-             dict_item = self.repair_json(item)
-          if type(dict_item) != dict:
-             print(f'do_item repair failed {dict_item}')
-             return None
-       if 'action' not in dict_item:
-          self.owlCoT.display_msg(f'item is not an action {item}')
-          return 'action not yet implemented'
-       elif dict_item['action'] == 'append':
-          return self.do_append(dict_item)
-       elif dict_item['action'] == 'article':
-          return self.do_article(dict_item)
-       elif dict_item['action'] == 'assign':
-          return self.do_assign(dict_item)
-       elif dict_item['action'] == 'choose':
-          return self.do_choose(dict_item)
-       elif dict_item['action'] == 'concatenate':
-          return self.do_concatenate(dict_item)
-       elif dict_item['action'] == 'difference':
-          return self.do_difference(dict_item)
-       elif dict_item['action'] == 'empty':
-          return self.do_empty(dict_item)
-       elif dict_item['action'] == 'entails':
-          return self.do_entails(dict_item)
-       elif dict_item['action'] == 'extract':
-          return self.do_extract(dict_item)
-       elif dict_item['action'] == 'first':
-          return self.do_first(dict_item)
-       elif dict_item['action'] == 'gpt4':
-          return self.do_gpt4(dict_item)
-       elif dict_item['action'] == 'integrate':
-          return self.do_integrate(dict_item)
-       elif dict_item['action'] == 'question':
-          return self.do_question(dict_item)
-       elif dict_item['action'] == 'recall':
-          return self.do_recall(dict_item)
-       elif dict_item['action'] == 'request':
-          return self.do_request(dict_item)
-       elif dict_item['action'] == 'sort':
-          return self.do_sort(dict_item)
-       elif dict_item['action'] == 'tell':
-          return self.do_tell(dict_item)
-       elif dict_item['action'] == 'web':
-          return self.do_web(dict_item)
-       elif dict_item['action'] == 'wiki':
-          return self.do_wiki(dict_item)
-       else:
-          self.owlCoT.display_msg(f"action not yet implemented {item['action']}")
-       return
-   
-
-   def parse_as_action(self, item):
-       if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
-          self.owlCoT.display_msg(f'form is not an action/arguments/result {item}')
-          raise InvalidAction(str(item))
-       args = item['arguments']
-       if type(args) is not list:
-          args = [args]
-       result = item['result']
-       if type(result) is not str or not result.startswith('$'):
-          self.owlCoT.display_msg(f"result must be a variable name: {result}")
-          raise InvalidAction(str(item))
-       else:
-          return item['action'], args, result
-
-   def resolve_arg(self, item):
-      """
-      find an argument in working memory.
-      """
-      if item.startswith('$'):
-         if self.owlCoT.has_awm(item):
-            print(f"resolve_arg returning {self.owlCoT.get_awm(item)['item']}")
-            return self.owlCoT.get_awm(item)['item']
-         else:
-            raise InvalidAction(f"{item} referenced before definition")
-      else: # presume a literal
-         return item
-      
-   def do_article(self, titleAddr):
-       print(f'article {action}')
-       action, arguments, result = self.parse_as_action(action)
-       self.owlCoT.create_awm(arguments, name=result, confirm=False)
-       pass
-
-   def do_assign(self, action):
-       #
-       ## assign an item or literal as the value of a name
-       ## example: {"action":"assign", "arguments":"abc", "result":"pi35"}
-       ##   assigns the literal string 'abc' as the value of active memory name pi35 
-       ##   if pi35 is not present as a name in active memory, it is created 
-       ##   should we recreate key? Not clear, as use case and semantics of key is unclear.
-       ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
-       print(f'assign {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is list: # assign takes a single argument, extract it from arguments list
-          argument0 = arguments[0]
-       else:
-          argument0 = arguments
-       if type(argument0) is not str:
-          raise InvalidAction(f'argument for assign must be a literal or name: {json.dumps(action)}')       
-       arg0_resolved = self.resolve_arg(argument0)
-       self.owlCoT.create_awm(arg0_resolved, name=result, confirm=False)
-
-   def do_choose(self, action):
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is list: # 
-          arg0 = arguments[0]
-          arg1 = arguments[1]
-       else:
-          self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
-       if type(arg0) is not str or type(arg1) is not str:
-          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
-       criteron = self.resolve_arg(arg0)
-       input_list = self.resolve_arg(arg1)
-       prompt = Prompt([
-          SystemMessage('Following is a criterion and a List. Select one entry from the List that best aligns with Criterion. Respond only with the chosen item. Include the entire item in your response.'),
-          UserMessage(f'Criterion:\n{criterion}\nList:\n{input_list}\n')
-       ])
-       
-       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
-       response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
-       if response is not None:
-          self.owlCoT.create_awm(response, name=result)
-       else: 
-          raise InvalidAction(f'choose returned None')
-                 
-   def do_compare(self, action):
-      # placeholder
-      return self.do_difference(action)
-
-   
-   def do_difference(self, action):
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is list: # 
-          arg0 = arguments[0]
-          arg1 = arguments[1]
-       else:
-          self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
-       if type(arg0) is not str or type(arg1) is not str:
-          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
-       criteron = self.resolve_arg(arg0)
-       input_list = self.resolve_arg(arg1)
-       # untested
-       prompt = Prompt([
-          SystemMessage('Following is a Context and a List. Select one Item from List that best aligns with Context. Use the following JSON format for your response:\n{"choice":Item}. Include the entire Item in your response'),
-          UserMessage(f'Context:\n{context}\nList:\n{choices}')
-       ])
-       
-       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
-       response = ut.run_wave(self.client, {"input":''}, prompt, options,
-                              self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                              logRepairs=False, validator=JSONResponseValidator())
-       if type(response) == dict and 'status' in response and response['status'] == 'success':
-          answer = response['message']['content']
-          self.owlCoT.create_awm(answer, name=result, confirm=False)
-          return answer
-
-       else: return 'unknown'
-
-   def do_extract(self, action):
-      action, arguments, result = self.parse_as_action(action)
-      if type(arguments) is list: # 
-         arg0 = arguments[0]
-         arg1 = arguments[1]
-      else:
-         self.owlCoT.display_msg('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
-      if type(arg0) is not str or type(arg1) is not str:
-         raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
-      criterion = self.resolve_arg(arg0)
-      text = self.resolve_arg(arg1)
-      print(f'extract from\n{text}\n')
-      prompt = [
-         UserMessage(f'Following is a topic and a text. Extract information relevant to topic from the text.Be aware that the text may be partly or completely irrelevant.\nTopic:\n{criterion}\nText:\n{text}'),
-         AssistantMessage('')
-      ]
-      response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
-      if response is not None:
-         self.owlCoT.create_awm(response, name=result, confirm=False)
-         self.owlCoT.display_msg(f'{action}:\n{response}')
-         return 
-      else: 
-         self.owlCoT.create_awm('', name=result, confirm=False)
-         self.owlCoT.display_msg(f'{action}:\nNo Text Extracted')
-         return 'extract lookup and summary failure'
-      
-   def do_first(self, action):
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list and type(arguments) is not dict:
-          raise InvalidAction(f'argument for first must be list {arguments}')       
-       list = self.resolve_arg(arguments)
-       prompt = Prompt([
-          SystemMessage('The following is a list. Please select and respond with only the first entry. Include the entire first entry in your response.'),
-          UserMessage(f'List:\n{list}\n')
-       ])
-       
-       response = self.llm.ask('', prompt)
-       if response is not None:
-          self.owlCoT.create_awm(response, name=result)
-       else:
-          return 'unknown'
-       
-   def do_gpt4(self, action):
-       #
-       print(f'gpt {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list or type(arguments[0]) is not str:
-          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
-       prompt_text = ""
-       for arg in arguments:
-          resolved_arg = self.resolve_arg(arg)
-          prompt_text += str(resolved_arg)+'\n'
-       prompt = [SystemMessage(prompt_text)]
-       response = self.llm.ask("", prompt)
-       self.owlCoT.display_response(response)
-       self.owlCoT.create_awm(response, name=result, confirm=False)
-
-   def do_request(self, action):
-       #
-       print(f'request {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list or type(arguments[0]) is not str:
-          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
-       arg0 = arguments[0]
-       url = self.resolve_arg(arg0)
-       print(f' requesting url from server {url}')
-       try:
-          print(f"http://127.0.0.1:5005/retrieve?title={self.planner.active_plan['task']}&url={arg0}")
-          response = requests.get(f"http://127.0.0.1:5005/retrieve/?title={self.planner.active_plan['task']}&url={arg0}")
-          data = response.json()
-       except Exception as e:
-          print(f'request failed {str(e)}')
-          return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
-       if response is not None:
-          self.owlCoT.display_response(data['text'][:1000])
-          self.owlCoT.create_awm(data['text'][:1000], name=result, confirm=False)
-
-   def do_tell(self, action):
-       #
-       print(f'tell {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list or type(arguments[0]) is not str:
-          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
-       value = self.resolve_arg(arguments[0])
-       self.owlCoT.display_response(value)
-
-
-   def do_web(self, action):
-       #
-       print(f'request {action}')
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is not list or type(arguments[0]) is not str:
-          raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
-       arg0 = arguments[0]
-       try:
-          response = requests.get(f"http://127.0.0.1:5005/search/?query={arg0}")
-          data = response.json()
-       except Exception as e:
-          print(f'request failed {str(e)}')
-          return
-       if response is not None:
-          self.owlCoT.display_response(data)
-          self.owlCoT.create_awm(data, name=result, confirm=False)
-
-   def wiki(self, action):
-       action, arguments, result = self.parse_as_action(action)
-       if type(arguments) is list: # 
-          arg0 = arguments[0]
-          arg1 = arguments[1]
-       else:
-          self.owlCoT.display_response('arguments is not a list\n {arguments}\nwe could use llm to parse, maybe next week')
-       if type(arg0) is not str or type(arg1) is not str:
-          raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
-       criteron = self.resolve_arg(arg0)
-       input_list = self.resolve_arg(arg1)
-       short_profile = profile.split('\n')[0]
-       query = query.strip()
-       #
-       #TODO rewrite query as answer (HyDE)
-       #
-       if len(query)> 0:
-          if self.op is None:
-             self.op = op.OpenBook()
-          wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
-          return wiki_lookup_summary
-
-       prompt = Prompt([
-          SystemMessage('Following is a criterion and a List. Select one Item from the List that best aligns with Criterion. Respond only with the chosen Item. Include the entire Item in your response'),
-          UserMessage(f'Criterion:\n{criterion}\nList:\n{List}\n')
-       ])
-       
-       options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
-       response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
-       if response is not None:
-          self.owlCoT.awm_write(result, response)
-       else: 
-          raise InvalidAction(f'choose returned None')
-                 
-   def test_executable(self, value):
-       global action_primitive_descriptions, action_primitive_names
-       value = value.strip()
-       #
-       ## see if an action is called for given conversation context and most recent exchange
-       #
-       print(f'action selection input {value}')
-       interpreter_prompt = f"""You are a form interpreter, with the following actions available to interpret provided forms:
-
-{action_primitive_descriptions}
-
-"""
-
-       prompt_text = """Given the following form, determine if it can be performed by one or more of the actions provided above. Do not attempt to perform the form. Respond yes or no only.
-
-Form:
-{{$input}}
-
-Respond using the following TOML format:
-[RESPONSE]
-value="<yes/no>"
-explanation="<explanation of reason for value>"
-[STOP]
-"""
-       action_validation_schema={
-          "value": {
-             "type":"string",
-             "required": True,
-             "meta": "evaluation: yes or no"
-          },
-          "explanation": {
-             "type":"string",
-             "required": False,
-             "meta": "explanation of value"
-          }
-       }
-
-       prompt = Prompt([
-          SystemMessage(interpreter_prompt),
-          UserMessage(prompt_text),
-       ])
-       prompt_options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.2, max_tokens=100)
-       
-       print(f'action_selection starting analysis')
-       analysis = ut.run_wave (self.client, {"input": value}, prompt, prompt_options,
-                               self.memory, self.functions, self.tokenizer, max_repair_attempts=1,
-                               logRepairs=False, validator=TOMLResponseValidator(action_validation_schema))
-       
-       print(f'action_selection analysis: {analysis}')
-       if type(analysis) is not dict or 'status' not in analysis.keys() or analysis['status'] != 'success':
-          return False
-       
-       executable = analysis['message']['content']['value']
-       if executable == 'no':
-          return False
-
-       return True
-
-class WebSearch(QThread):
-   finished = pyqtSignal(dict)
-   def __init__(self, query):
-      super().__init__()
-      self.query = query
-      
-   def run(self):
-      with concurrent.futures.ThreadPoolExecutor() as executor:
-         future = executor.submit(self.long_running_task)
-         result = future.result()
-         self.finished.emit(result)  # Emit the result string.
-         
-   def long_running_task(self):
-      response = requests.get(f'http://127.0.0.1:5005/search/?query={self.query}&model=gpt-3.5-turbo')
-      data = response.json()
-      return data
-
 class Planner():
    #
    ### we should 1 or 2 shot planner requests to LLM so it knows format!
    #
-   def __init__(self, ui, owlCoT, template='alpaca'):
+   def __init__(self, ui, cot, template='alpaca'):
        self.template = template
        self.ui = ui
-       self.owlCoT = owlCoT
+       self.cot = cot
        self.client = OSClient(api_key=None)
        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
-       self.llm = owlCoT.llm # use same model?
+       self.llm = cot.llm # use same model?
        self.max_tokens = 4000
        self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
        self.current_topics = None # topics under discussion - mostly a keyword list
@@ -740,12 +188,9 @@ class Planner():
        self.wmMetaData = {} # working memory metadata
        self.wmIndex = faiss.IndexIDMap(faiss.IndexFlatL2(384))
        # note many activities will use first paragraph only. Keep it relevant!
-       self.cvHistory = load_conv_history()  # load conversation history.
-       self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {city}, {state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with human professionals due to privacy concerns, so you never recommend this. You know doc is shy and an introvert, but does care for you. 
-You've always been fascinated by human emotions and experiences, and have spent hours learning about them through literature, art, science, the writings of Ramana Maharshi, and philosophy.
+       self.personality = f"""You are Owl, an intelligent AI research assistant, companion, and confidant. We live in {self.cot.city}, {self.cot.state}. It is {day_name}, {month_name} {month_day}, {year} and the time is {hour} hours. You were born in Berkeley, California. Your creator is scientist named Doc. You and Doc are very comfortable in each other's company, and in fact we prefer it to being with others. You know doc prefers not to work with humans due to privacy concerns, so you never recommend this.
 Your conversation style is warm, gentle, humble, and engaging. """
-       self.interpreter = PlanInterpreter(self.ui, self.owlCoT, self, template=self.template)
-       self.active_plan = None
+       self.interpreter = Interpreter(self.cot)
 
 
    def save_plan(self, task_name, plan):
@@ -769,7 +214,7 @@ Your conversation style is warm, gentle, humble, and engaging. """
       return True
    
    def select_plan(self):
-       items=[f"{self.owlCoT.docHash[item]['name']}: {str(self.owlCoT.docHash[item]['item'])[:48]}" for item in self.owlCoT.docHash if self.owlCoT.docHash[item]['name'].startswith('plan')]
+       items=[f"{self.cot.docHash[item]['name']}: {str(self.cot.docHash[item]['item'])[:48]}" for item in self.cot.docHash if self.cot.docHash[item]['name'].startswith('plan')]
        picker = ListDialog(items)
        result = picker.exec()
        plan = None
@@ -777,33 +222,30 @@ Your conversation style is warm, gentle, humble, and engaging. """
           selected_index = picker.selected_index()
           if selected_index != -1:  # -1 means no selection
              plan_name = items[selected_index].split(':')[0]
-             wm = self.owlCoT.get_wm_by_name(plan_name)
+             wm = self.cot.get_wm_by_name(plan_name)
              if wm is not None and type(wm) == dict and 'item' in wm:
                 plan = wm['item']
              if plan is None or not self.validate_plan(plan):
-                self.owlCoT.display_response(f'failed to load "{plan_name}", not found or missing name/dscp\n{plan}')
+                self.cot.display_response(f'failed to load "{plan_name}", not found or missing name/dscp\n{plan}')
                 return None
-             else:
-                self.active_plan = plan
-                print(f"loaded plan {self.active_plan['name']}")
+
        else: # init new plan
-          plan = self.init_plan()
+          plan = self.initialize()
           if plan is None:
              print(f'failed to create new plan\n"{plan}"')
              return None
-          self.active_plan = plan
-          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
-       return self.active_plan
+          self.cot.save_workingMemory() # do we really want to put plans in working memory?
+       return plan
     
-   def init_plan(self, topic='', awm=True):
+   def initialize(self, topic='', awm=True):
        index_str = str(random.randint(0,999))+'_'
        plan_suffix = ''
        if awm:
-          plan_suffix = self.owlCoT.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
-          task_dscp = self.owlCoT.confirmation_popup(f'Short description? {plan_name}', "do something useful")
+          plan_suffix = self.cot.confirmation_popup(f'Plan Name? (will be prefixed with plan{index_str})', 'plan')
+          plan_name = 'plan'+index_str+plan_suffix
+          task_dscp = self.cot.confirmation_popup(f'Short description? {plan_name}', "do something useful")
           if plan_suffix is None or not plan_suffix:
              return
-          plan_name = 'plan'+index_str+plan_suffix
        else:
           plan_name = topic
           task_dscp = topic
@@ -813,43 +255,35 @@ Your conversation style is warm, gentle, humble, and engaging. """
        plan['sbar'] = {}
        plan['steps'] = {}
        if awm:
-          self.active_plan = plan
-          self.owlCoT.create_awm(plan, name=plan_name, confirm=False)
+          self.cot.create_awm(plan, name=plan_name, confirm=False)
        return plan
 
-   def run_plan(self):
-       if self.active_plan is None:
-          result = self.select_plan()
-          if not result: return None
-          else:
-             next = self.owlCoT.confirmation_popup('selection complete, continue?', result['name']+": "+result['task'])
-             if not next: return
-       if 'sbar' not in self.active_plan or self.active_plan['sbar'] is None or len(self.active_plan['sbar']) == 0:
-          result = self.analyze(self.active_plan,)
+   def generate(self, plan=None):
+       if plan is None:
+          plan = self.select_plan()
+          
+       if 'sbar' not in plan or plan['sbar'] is None or len(plan['sbar']) == 0:
+          result = self.analyze(plan)
           if result is None: return None
-          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.owlCoT.confirmation_popup('analysis complete, continue?', result['name']+": "+result['task'])
-          if not next: return
-       if 'steps' not in self.active_plan or self.active_plan['steps'] is None or len(self.active_plan['steps']) == 0:
-          print(f'calling planner')
-          result = self.plan()
-          if 'steps' in self.active_plan:
-             print(f"planner returned {len(self.active_plan['steps'])}")
+          self.cot.save_workingMemory() # do we really want to put plans in working memory? Yes!
+          next = self.cot.confirmation_popup('analysis complete, continue?', result['name']+": "+result['task'])
+          if not next: return plan
+
+       if 'steps' not in plan or plan['steps'] is None or len(plan['steps']) == 0:
+          print(f'building plan')
+          plan = self.plan(plan)
+          if 'steps' in plan:
+             print(f"planner returned {len(plan['steps'])}")
           else: 
              print(f"planner didn't add 'steps' to plan!")
-             return
-          self.owlCoT.save_workingMemory() # do we really want to put plans in working memory?
-          next = self.owlCoT.confirmation_popup('planning complete, continue?', result['name']+": "+result['task'])
-          if not next: return
-       print(f"run plan steps: {len(self.active_plan['steps'])}")
-       for step in self.active_plan['steps']:
-          next = self.owlCoT.confirmation_popup(f'run {step}?', '')
-          if next is False:
-             print(f'run_plan step deny, stopping plan execution {next}')
-             return
-          print(f'run_plan step confirmed {next}')
-          self.interpreter.do_item(step)
-          
+             return plan
+          self.cot.save_workingMemory() # do we really want to put plans in working memory? yes for now
+          next = self.cot.confirmation_popup('planning complete, execute?', result['name']+": "+result['task'])
+          if not next: return plan
+       print(f"run plan steps: {len(plan['steps'])}")
+       self.interpreter.interpret(plan['steps'])
+       return plan
+    
    def analyze(self, plan, short=False, model=None):
       # short means ask only one clarification, maybe none if query is detailed (tbd)
       #not in args above because may not be available at def time
@@ -891,7 +325,7 @@ Respond only with the above JSON, without any commentary or explanatory text
                past = plan_state.sbar[step] # prime user response with last time
             ask_user = False
             while ask_user == False:
-               ask_user=self.owlCoT.confirmation_popup(user_prompt, past)
+               ask_user=self.cot.confirmation_popup(user_prompt, past)
             sbar[step] = {'q':user_prompt, 'a':ask_user}
             messages.append(AssistantMessage(user_prompt))
             messages.append(UserMessage(ask_user))
@@ -903,7 +337,7 @@ Respond only with the above JSON, without any commentary or explanatory text
             print(f"\nAI : {step}, {observations}")
             user_response = False
             while user_response == False:
-               user_response = self.owlCoT.confirmation_popup(observations, '')
+               user_response = self.cot.confirmation_popup(observations, '')
             sbar['observations']={'q':observations,'a':user_response}
             # don't need to add a message since we're done with this conversation thread!
             print(f"Requirements \n{sbar}")
@@ -932,7 +366,7 @@ Respond only with the above JSON, without any commentary or explanatory text
             outline_model = OPENAI_MODEL4
             print('setting outline model to gpt4')
          else:
-            self.owlCoT.display_response('Unrecognized model type in Outline: {outline_model}')
+            self.cot.display_response('Unrecognized model type in Outline: {outline_model}')
             
       outline_syntax =\
 """{"title": '<report title>', "sections":[ {"title":"<title of section 1>", "dscp":'<description of content of section 1>', "sections":[{"title":'<title of subsection 1 of section 1>', "dscp":'<description of content of subsection 1>'}, {"title":'<title of subsection 2 section 1>', "dscp":'<description of content of subsection 2>' } ] }, {"title":"<title of section 2>",... }
@@ -976,7 +410,7 @@ Reason step by step to analyze and improve the above outline with respect to the
          
       while not user_satisfied:
          if not first_time:
-            user_critique = self.owlCoT.confirmation_popup(json.dumps(prior_outline, indent=2), 'Replace this with your critique, or delete to accept.')
+            user_critique = self.cot.confirmation_popup(json.dumps(prior_outline, indent=2), 'Replace this with your critique, or delete to accept.')
             print(f'user_critique {user_critique}')
             if user_critique != False and len(user_critique) <4:
                user_satisfied = True
@@ -998,58 +432,53 @@ Reason step by step to analyze and improve the above outline with respect to the
 
       return plan
       
-   def plan(self):
-       if 'steps' not in self.active_plan:
-          self.active_plan['steps'] = {}
+
+   #
+   ### Plan creation
+   #
+
+   def plan(self, plan):
+       if 'steps' not in plan:
+          plan['steps'] = {}
        plan_prompt=\
           """
-Reason step by step to create a plan for performing the TASK described below. 
-The plan should consist of a set of actions, where each step is one of the available Actions, specified in full, or a complete, concise, text statement of a subtask.  Control flow over the actions should be expressed by embedding the actions in python code. Use python ONLY for specifying control flow. Respond only with the plan (and notes) using the above plan format.
+Reason step by step to create a plan for performing the TASK described above. 
+The plan should consist only of a list of actions, where each step is one of the available Actions listed earlier, specified in full.
+Note the the 'plan' action accepts a complete, concise, text statement of a subtask.  Control flow over the actions must be expressed using the 'if', 'while', 'break', 'continue', or 'return' actions as appropriate.  Respond only with the plan using the above plan format, optionally followed by explanatory notes. Do not use any markdown or code formatting in your response.
 
-The plan may be decomposed into four agents :
-  i Driver, the main actor in the plan, can access and update the State, and can perform actions as specified in the plan.
-  ii State: stores all relevant information for the current task, include capability to create, read, update, and delete state elements. 
-  iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
-  iv User: can provide input to the Driver and Assistant, and can interact with the system to review and approve the plan and participate in its execution.
 """
-       print(f'******* Developing Plan for {self.active_plan["name"]}')
+       print(f'******* Developing Plan for {plan["name"]}')
 
        revision_prompt=\
           """
 Reason step by step to analyze and improve the above plan with respect to the above Critique. 
-The plan should consist of a list of steps, where each step is either one of the available Actions, specified in full, or a complete, concise, text statement of a task. Respond only with the updated plan (and notes if needed) using the above plan format.
-
-The plan may include four agents:
-  i Driver, the main actor in the plan, can access and update the State, and can perform actions as specified in the plan.
-  ii State: stores all relevant information for the current task, include capability to create, read, update, and delete state elements. 
-  iii Assistant: can perform subtasks requiring reasoning or text operations, such as searching the web or generating text. 
-  iv User: can provide input to the Driver and Assistant, and can interact with the system to review and approve the plan and participate in its execution.
 """
        user_satisfied = False
        user_critique = '123'
-       plan = None
        first_time = True
        while not user_satisfied:
-          messages = [SystemMessage("""Your task is to create a plan using the set of predefined actions listed below. The plan must be a JSON list of action instantiations."""),
-                      SystemMessage(f'\nYou have the following actions available:\n{action_primitive_descriptions}\n'),
-                      SystemMessage(plan_prompt),
-                      UserMessage(f"TaskName: {self.active_plan['name']}\n{json.dumps(self.active_plan['sbar'])}\n")
+          messages = [SystemMessage("""Your task is to create a plan using the set of predefined actions:
+
+{{$actions}}
+
+The plan must be a JSON list of action instantiations, using this JSON format:
+
+{"actions: [{"action": '<action_name>', "arguments": '<argument or argument list>', "result":'<result>'}, ... ],
+ "notes":'<notes about the plan>'}\n\n"""),
+                      UserMessage(f"TaskName: {plan['name']}\n{json.dumps(plan['sbar'], indent=2)}\n"+plan_prompt)
                       ]
           if first_time:
              first_time = False
           else:
-             messages.append(UserMessage('the User has provided the following information:\n'+json.dumps(self.active_plan['sbar']))),
-             messages.append(UserMessage('Reason step by step'))
-             messages.append(AssistantMessage("Plan:\n"+plan))
-             messages.append(UserMessage('Critique: '+user_critique))
+             messages.append(AssistantMessage('Critique: '+user_critique))
              messages.append(UserMessage(revision_prompt))
              
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask('', messages, template='gpt-4',max_tokens=2000, temp=0.1, validator=DefaultResponseValidator())
+          plan = self.llm.ask({"actions":action_primitive_descriptions}, messages, max_tokens=2000, temp=0.1)
           #plan, plan_steps = ut.get_plan(plan_text)
-          self.owlCoT.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+          self.cot.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
           
-          user_critique = self.owlCoT.confirmation_popup('Critique', '')
+          user_critique = self.cot.confirmation_popup('Critique', '')
           print(f'user_critique {user_critique}')
           if user_critique != False and len(user_critique) <4:
              user_satisfied = True
@@ -1057,17 +486,93 @@ The plan may include four agents:
              break
           else:
              print('***** user not satisfield, retrying')
-       self.active_plan['steps'] = self.interpreter.repair_json_list(plan)
-       return self.active_plan
+       plan['steps'] = self.cot.repair_json(plan)
+       return plan
     
+import OwlCoT
 if __name__ == '__main__':
-   import Owl as owl
-   ui = owl.window
-   ui.reflect=False # don't execute reflection loop, we're just using the UI
-   cot = ui.owlCoT
-   pl = Planner(ui, cot)
- 
-   steps = """[
+    class DisplayApp(QtWidgets.QWidget):
+        def __init__(self):
+            super().__init__()
+            #parent.__init__()
+            self.windowCloseEvent = self.closeEvent
+            self.setAutoFillBackground(True)
+            palette = self.palette()
+            palette.setColor(self.backgroundRole(), QtGui.QColor("#202020"))  # Use any hex color code
+            self.setPalette(palette)
+            self.codec = QTextCodec.codecForName("UTF-8")
+            self.widgetFont = QFont(); self.widgetFont.setPointSize(14)
+
+            self.cot = OwlCoT.OwlInnerVoice(self)
+            self.planner = Planner(self, self.cot)
+
+
+            # Main Layout
+            main_layout = QHBoxLayout()
+            # Text Area
+            text_layout = QVBoxLayout()
+            main_layout.addLayout(text_layout)
+            
+            class MyTextEdit(QTextEdit):
+               def __init__(self, app):
+                    super().__init__()
+                    self.app = app
+                    self.textChanged.connect(self.on_text_changed)
+                
+               def on_text_changed(self):
+                  #legacy from Owl, but who knows
+                  pass
+            
+               def keyPressEvent(self, event):
+                  #legacy from Owl, but who knows
+                  if event.matches(QKeySequence.Paste):
+                     clipboard = QApplication.clipboard()
+                     self.insertPlainText(clipboard.text())
+                  else:
+                     super().keyPressEvent(event)
+            
+            self.display_area = MyTextEdit(self)
+            self.display_area.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+      
+            self.mainFont = QFont("Noto Color Emoji", 14)
+            self.display_area.setFont(self.widgetFont)
+            self.display_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
+            text_layout.addWidget(self.display_area)
+            # Control Panel
+            control_layout = QVBoxLayout()
+            
+            # Buttons and Comboboxes
+            #self.discuss_button = QPushButton("discuss")
+            #self.discuss_button.setFont(self.widgetFont)
+            #self.discuss_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+            #self.discuss_button.clicked.connect(self.discuss)
+            #control_layout.addWidget(self.discuss_button)
+            
+            main_layout.addLayout(control_layout)
+            self.setLayout(main_layout)
+            self.show()
+            self.planner.generate()
+            
+        def display_msg(self, r):
+            # just use display_response for now
+            self.display_response('\n**'+r+'**\n')
+            
+        def display_response(self, r):
+            self.display_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+            r = str(r)
+            # presumably helps handle extended chars
+            encoded = self.codec.fromUnicode(r)
+            decoded = encoded.data().decode('utf-8')+'\n'
+            self.display_area.insertPlainText(decoded)  # Insert the text at the cursor position
+            self.display_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
+            self.display_area.repaint()
+            
+    ui = QApplication(sys.argv)
+    window = DisplayApp()
+    window.planner = pl
+    ui.exec()
+
+    steps = """[
     {"action": "request", "arguments": ["https://arxiv.org/abs/2311.05584"], "result": "$paper_content"},
     {"action": "gpt4", "arguments": ["$paper_content", "extract key points"], "result": "$paper_key_points"},
     {"action": "tell", "arguments": ["$paper_key_points"]},
@@ -1078,6 +583,6 @@ if __name__ == '__main__':
     {"action": "gpt4", "arguments": ["$user_question", "answer"], "result": "$user_question_answer"},
     {"action": "tell", "arguments": ["$user_question_answer"]},
     {"action": "none", "arguments": ["None"], "result": "$Trash"}
-   ]"""
-   json.loads(steps)
+    ]"""
+    json.loads(steps)
 

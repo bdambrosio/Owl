@@ -55,7 +55,6 @@ import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
-from Planner import Planner
 import rewrite as rw
 import jsonEditWidget as ew
 
@@ -87,7 +86,6 @@ print (cot.template)
 # set cot for rewrite so it can access llm
 rw.cot = cot
 
-pl = Planner(None, cot)
 import semanticScholar2 as s2
 s2.cot = cot
 
@@ -163,7 +161,6 @@ class PWUI(QWidget):
             return yes_no_value, model_value
         else:
             return None
-
 
 import re
 

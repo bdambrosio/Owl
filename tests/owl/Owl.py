@@ -33,7 +33,8 @@ from alphawave import OSClient
 import ipinfo
 import nyt
 from OwlCoT import OwlInnerVoice
-from Planner import Planner, PlanInterpreter
+from Planner import Planner
+from Interpreter import Interpreter
 
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")

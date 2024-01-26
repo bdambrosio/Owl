@@ -16,7 +16,7 @@ def strj(item):
     # convert item to string.
     # if item is dict, use json.dumps
     if type(item) == dict:
-        return json.dumps(item)
+        return json.dumps(item, indent=2)
     else:
         return str(item)
     

@@ -189,21 +189,18 @@ Chain of Thought:
 
       if template is None:
          template = self.template
-      if max_tokens is None:
-          if self.ui is None:
-              max_tokens = 400
-          else:
-              max_tokens= int(self.ui.max_tokens_combo.currentText())
-      if temp is None:
-          if self.ui is None:
-              temp = 0.1
-          else:
-              temp = float(self.ui.temp_combo.currentText())
-      if top_p is None:
-         if self.ui is None:
-             top_p = 1.0
-         else:
-             top_p = float(self.ui.top_p_combo.currentText())
+      if max_tokens is None or not hasattr(self.ui, 'max_tokens_combo'):
+          max_tokens = 400
+      else:
+          max_tokens= int(self.ui.max_tokens_combo.currentText())
+      if temp is None  or not hasattr(self.ui, 'temp_combo'):
+          temp = 0.1
+      else:
+          temp = float(self.ui.temp_combo.currentText())
+      if top_p is None or not hasattr(self.ui, 'top_p_combo'):
+          top_p = 1.0
+      else:
+          top_p = float(self.ui.top_p_combo.currentText())
       if client is None:
           if 'gpt' in self.template:
               client = self.openAIClient
