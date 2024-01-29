@@ -189,17 +189,17 @@ Chain of Thought:
 
       if template is None:
          template = self.template
-      if max_tokens is None or not hasattr(self.ui, 'max_tokens_combo'):
+      if max_tokens is None and not hasattr(self.ui, 'max_tokens_combo'):
           max_tokens = 400
-      else:
+      elif max_tokens is None:
           max_tokens= int(self.ui.max_tokens_combo.currentText())
-      if temp is None  or not hasattr(self.ui, 'temp_combo'):
+      if temp is None and not hasattr(self.ui, 'temp_combo'):
           temp = 0.1
-      else:
+      elif temp is None:
           temp = float(self.ui.temp_combo.currentText())
-      if top_p is None or not hasattr(self.ui, 'top_p_combo'):
+      if top_p is None and not hasattr(self.ui, 'top_p_combo'):
           top_p = 1.0
-      else:
+      elif top_p is None:
           top_p = float(self.ui.top_p_combo.currentText())
       if client is None:
           if 'gpt' in self.template:
@@ -211,10 +211,11 @@ Chain of Thought:
           else:
               client = self.osClient
           
+      # limit context. Some claim longer, but sliding window drops crucial prompt
       if client==self.openAIClient or  'OpenAIClient' in str(type(client)):
           self.context_size=16000
       if client==self.mistralAIClient or  'MistralAIClient' in str(type(client)):
-          self.context_size=16000 # I've read mistral can't really handle 32k
+          self.context_size=16000 # I've read mistral uses sliding 8k window
       if client==self.osClient or  'OSClient' in str(type(client)):
           self.context_size=8000 # tulu default
           try:
@@ -236,7 +237,8 @@ Chain of Thought:
           #print(f'ask prompt {prompt_msgs}')
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
-          response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
+          response = ut.run_prompt(client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
+          #response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
           #print(f'\nask {type(response)}\n{response}')
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
@@ -253,6 +255,7 @@ Chain of Thought:
               try:
                   validation = validator.validate_response(self.memory, self.functions, self.tokenizer, response, 0)
                   if validation is not None and not validation['valid']:
+                      print(f'ask validation failed {validation}')
                       fixed_string = re.sub(r"\\([^\s'""])", r"\\\\\\\\1", response)
                       validation = validator.validate_response(self.memory, self.functions, self.tokenizer, fixed_string, 0)
               except Exception as e:
@@ -890,13 +893,14 @@ Respond in a plain JSON format without any Markdown or code block formatting.
 Available actions include:
 
 <ACTIONS>
-- tell: Provide a direct response to user input. Consider adding insights or explanations, integrating relevant context into your response, reflecting on broader implications. Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input. Example: {"action":"tell","argument":"Doc, that sounds intriguing. What do you think about adding ...", "reasoning":'reasons for choosing tell'}
-- question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?", "reasoning":'reasons for choosing ask'}
-- article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites", "reasoning":'reasons for choosing article'}
-- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?", "reasoning":'reasons for choosing gpt4'}
-- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture", "reasoning":'reasons for choosing recall'}
-- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023", "reasoning":'reasons for choosing web'}
-- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?", "reasoning":'reasons for choosing wiki'}
+- tell: Provide a direct response to user input. Consider adding insights or explanations, integrating relevant context into your response, reflecting on broader implications. Limit your response to approximately {max_tokens} tokens, focusing on enriching the content to respond directly to the user input. Example: {"action":"tell","argument":"Doc, that sounds intriguing. What do you think about adding ...", "reasoning":"reasons for choosing tell"}
+- question: Ask Doc a question. Example: {"action":"question","argument": "How are you feeling today, Doc?", "reasoning":"reasons for choosing ask"}
+- article: Retrieve a NYTimes article. Example: {"action":"article","argument":"To Combat the Opioid Epidemic, Cities Ponder Safe Injection Sites", "reasoning":"reasons for choosing article"}
+- gpt4: Pose a complex question to GPT-4 for which an answer is not available from known fact or reasoning. GPT-4 does not contain ephemeral, timely, or transient information. Example: {"action":"gpt4","argument":"In Python on Linux, how can I list all subdirectories in a directory?", "reasoning":"reasons for choosing gpt4"}
+- library: Search the local research library for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for library search. Example: {"action":"library","argument":"what might overexpression of miR-21 indicate?", "reasoning":"this is a detailed biomedical, computer science, or AI question. library excells at these"}
+- recall: Bring an item into active memory from working memory using a query string. Example: {"action":"recall","argument":"Cognitive Architecture", "reasoning":"reasons for choosing recall"}
+- web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023", "reasoning":"reasons for choosing web"}
+- wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?", "reasoning":"this is a general information question for which I do not know sufficient fact or information"}
 
 Respond in a plain JSON format without any Markdown or code block formatting, as shown in the above examples.
 </ACTIONS>
@@ -958,6 +962,11 @@ Input: {{{{$input}}}}
                 "type":"string",
                 "required": True,
                 "meta": "<parameter for action>"
+            },
+            "reasoning": {
+                "type":"string",
+                "required": False,
+                "meta": "<text string explaining action choice>"
             }
         }
 
@@ -1014,29 +1023,23 @@ Input: {{{{$input}}}}
                #return {"tell": full_tell}
                self.add_exchange(input, content['argument'])
                return {"tell":content['argument']}
-            elif type(content) == dict and 'action' in content and content['action']=='web':
-                query = self.confirmation_popup('Web Search', content['argument'])
-                if query:
-                   content = self.web(query, widget, short_profile)
-                   self.add_exchange(query, content)
-                   return {"web":content}
-            elif type(content) == dict and 'action' in content and content['action']=='wiki':
-                query = self.confirmation_popup(content['action'], content['argument'])
-                if query:
-                   found_text = self.wiki(query, short_profile)
-                   self.add_exchange(query, found_text)
-                   return {"wiki":found_text}
-            elif type(content) == dict and 'action' in content and content['action']=='question':
-                query = self.confirmation_popup(content['action'], content['argument'])
-                if query:
-                   self.add_exchange(input, query)
-                   return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
                    text = self.gpt4(query, short_profile)
                    self.add_exchange(query, text)
                    return {"gpt4":text}
+            elif type(content) == dict and 'action' in content and content['action']=='library':
+                query = self.confirmation_popup(content['action'], content['argument'])
+                if query:
+                   text, refs = self.s2_search(query)
+                   self.add_exchange(query, text+'\n\nRefs:\n'+'\n'.join(refs))
+                   return {"gpt4":text}
+            elif type(content) == dict and 'action' in content and content['action']=='question':
+                query = self.confirmation_popup(content['action'], content['argument'])
+                if query:
+                   self.add_exchange(input, query)
+                   return {"question":query}
             elif type(content) == dict and 'action' in content and content['action']=='recall':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
@@ -1049,6 +1052,18 @@ Input: {{{{$input}}}}
                    result = self.store(value, profile=short_profile)
                    self.add_exchange(input, value)
                    return {"store":result}
+            elif type(content) == dict and 'action' in content and content['action']=='web':
+                query = self.confirmation_popup('Web Search', content['argument'])
+                if query:
+                   content = self.web(query, widget, short_profile)
+                   self.add_exchange(query, content)
+                   return {"web":content}
+            elif type(content) == dict and 'action' in content and content['action']=='wiki':
+                query = self.confirmation_popup(content['action'], content['argument'])
+                if query:
+                   found_text = self.wiki(query, short_profile)
+                   self.add_exchange(query, found_text)
+                   return {"wiki":found_text}
 
         # fallthrough - do a tell
         print(f'tell fallthrough')
@@ -1300,13 +1315,13 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
     def summarize(self, query, response, profile):
       prompt = [
          SystemMessage(profile),
-         UserMessage(f'Following is a Question and a Response from an external processor. Respond to the Question, using the processor Response, well as known fact, logic, and reasoning, guided by the initial prompt. Respond in the context of this conversation. Be aware that the processor Response may be partly or completely irrelevant.\nQuestion:\n{query}\nResponse:\n{response}'),
+         UserMessage(f'Following is a Task and background information from an external processor. Respond to the Task, using the external processor Response as well as known fact, logic, and reasoning. Be aware that the external processor Response may be partly or completely irrelevant. Respond in a professional tone.\nTask:\n{query}\nResponse:\n{response}'),
          AssistantMessage('')
       ]
       response = self.llm.ask(response, prompt, template = self.template, temp=.1)
       if response is not None:
-         return '\nWiki Summary:\n'+response+'\n'
-      else: return 'wiki lookup and summary failure'
+         return '\n'+response+'\n'
+      else: return 'summarize failure'
 
     def wiki(self, query, profile):
        short_profile = self.short_prompt()

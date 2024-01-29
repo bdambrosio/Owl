@@ -97,23 +97,27 @@ class JSONResponseValidator(PromptResponseValidator):
             template_suffix = f' Respond using this template:\n{template}\n'
         
         raw_text = message if isinstance(message, str) else message.get('content', '')
-        #print(f'***** JSONResponseValidator input {raw_text}')
+        print(f'***** JSONResponseValidator input {type(raw_text)}, {raw_text}')
         # Parse the response text
         text = re.sub('\n+', '\n', raw_text)
         cleaned_text = ""
         for char in text:
             if ord(char) >= 10:
                 cleaned_text += char
-        text = cleaned_text
+        text = cleaned_text.strip()
+        start = text.find('{')
+        end = text.rfind('}')
+        if start >= 0 and end > 0 and  end > start:
+            text = text[start:end+1]
         parsed=[]
-        #print(f'***** JSONResponseValidator cleaned \n{text}\n')
+        print(f'***** JSONResponseValidator cleaned \n{text}\n')
         try:
             parsed = Response.parse_all_objects(text)
-            #print(f'***** JSONResponseValidator Response parse \n{parsed}\n')
+            print(f'***** JSONResponseValidator Response parse \n{parsed}\n')
         except Exception as e:
             raise e
         if len(parsed) == 0:
-            #print(f'***** JSONResponseValidator failure len(parsed) == 0')
+            print(f'***** JSONResponseValidator failure len(parsed) == 0')
             return {
                 'type': 'Validation',
                 'valid': False,
@@ -129,7 +133,7 @@ class JSONResponseValidator(PromptResponseValidator):
                 try:
                     #print(f'***** JSONResponseValidator before parse_dict {type(obj)}\n{obj}\n')
                     obj = self.parse_dict(obj) if type(obj) == str else obj
-                    #print(f'***** JSONResponseValidator after parse_dict {type(obj)} \n{parsed}\n')
+                    print(f'***** JSONResponseValidator after parse_dict {type(obj)} \n{parsed}\n')
                 except Exception as e:
                     pass
                 if self.schema is not None:
@@ -154,14 +158,14 @@ class JSONResponseValidator(PromptResponseValidator):
                 path = str(list(e.relative_schema_path)[1:-1]).replace('[','').replace(']',"").replace(', ', ':')
                 if not errors:
                     errors = e
-                    #print(f'***** JSONResponseValidator ValidationError exception {str(e)}\n{self.schema}\n')
+                    print(f'***** JSONResponseValidator ValidationError exception {str(e)}\n{self.schema}\n')
                     return {
                         'type': 'Validation',
                         'valid': False,
                         'feedback': f'The JSON returned had errors. Apply these fixes:\n{self.get_error_fix(errors)}.'+template_suffix
                     }
             except Exception as e:
-                #print(f'***** JSONResponseValidator validator generic exception {str(e)}\n{self.schema}')
+                print(f'***** JSONResponseValidator validator generic exception {str(e)}\n{self.schema}')
                 return {
                     'type': 'Validation',
                     'valid': False,

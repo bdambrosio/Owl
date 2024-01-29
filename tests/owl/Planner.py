@@ -465,7 +465,7 @@ The plan must be a JSON list of action instantiations, using this JSON format:
 
 {"actions: [{"action": '<action_name>', "arguments": '<argument or argument list>', "result":'<result>'}, ... ],
  "notes":'<notes about the plan>'}\n\n"""),
-                      UserMessage(f"TaskName: {plan['name']}\n{json.dumps(plan['sbar'], indent=2)}\n"+plan_prompt)
+                      UserMessage(f"Task: {plan['name']}\n{json.dumps(plan['sbar'], indent=2)}\n"+plan_prompt)
                       ]
           if first_time:
              first_time = False
@@ -474,9 +474,8 @@ The plan must be a JSON list of action instantiations, using this JSON format:
              messages.append(UserMessage(revision_prompt))
              
           #print(f'******* task state prompt:\n {gpt_message}')
-          plan = self.llm.ask({"actions":action_primitive_descriptions}, messages, max_tokens=2000, temp=0.1)
-          #plan, plan_steps = ut.get_plan(plan_text)
-          self.cot.display_response(f'***** Plan *****\n{plan}\n\nPlease review and critique or <Enter> when satisfied')
+          steps = self.llm.ask({"actions":action_primitive_descriptions}, messages, max_tokens=2000, temp=0.1)
+          self.cot.display_response(f'***** Plan *****\n{steps}\n\nPlease review and critique or <Enter> when satisfied')
           
           user_critique = self.cot.confirmation_popup('Critique', '')
           print(f'user_critique {user_critique}')
@@ -486,7 +485,7 @@ The plan must be a JSON list of action instantiations, using this JSON format:
              break
           else:
              print('***** user not satisfield, retrying')
-       plan['steps'] = self.cot.repair_json(plan)
+       plan['steps'] = steps
        return plan
     
 import OwlCoT

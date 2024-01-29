@@ -77,6 +77,7 @@ action_primitive_names = \
     "entails",
     "extract",
     "first",
+    "for",
     "if",
     "integrate",
     "llm",
@@ -93,62 +94,73 @@ action_primitive_names = \
     ]
 
 action_primitive_descriptions = \
-   """This plan language has 6 datatypes: int, str, list, dict, action, and plan.
+"""This plan language has 6 primitive datatypes: int, str, list, dict, action, and plan. It also includes variables. 
 int corresponds to python int type
-str corresponds to python str type
+str corresponds to python str type and must be surrounded by single quote marks (is "'")
 list corresponds to python list type
 dict corresponds to python dict type
-action is a subtype of dict as shown below
-plan is a list of actions.
+action is a python dict containing the keys 'action', 'arguments', 'result', 'description'
+ - 'action' value is one of the 'action' values listed below
+ - 'arguments' is either a single item or a tuple of items, where an item is either a literal of one of the six datatypes or a variable. If an item is a variable, its current value is used for execution of the action, as per normal python evaluation.  
+ - 'result' is always variable name, whose value is set to the result of the action on execution.
+ - 'description' is an optional key containing a textual description of the action
+plan is a python dict containing the keys 'name', 'body', and (optionally) 'notes':
+ - 'name' is an str
+ - 'body' is either: (1) a python list of items of type 'action' or 'plan'; or (2) an str specifying a task for which further planning is needed.
+ - 'notes' is a text string containing additional information about the plan
+variable is an alphanumeric string prefixed with $ and must be surrounded by single quote marks (ie "'"). It contains a value in one of the six datatypes.
 
-Following is a complete list of all valid actions:
+Following is a complete list of all actions, with example 'arguments', 'result', and 'description' values. The example key values are illustrative only:
 
     {"action": "none", "arguments": "None", "result": "$Trash", "description": "no action is needed."},
-    {"action": "append", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "append $item1 to $item2, and assign the resulting list to variable $item3"},
-    {"action": "article", "arguments": "$item1", "result": "$item2", "description": "access the article title $item1, use it to retrieve the article body, and assign it to variable $item2."},
-    {"action": "assign", "arguments": "$item1/literal1", "result": "$item2", "description": "assign the value of ($item1/literal1) to variable $item2"},
-    {"action": "calc", "arguments": "$item1", "result": "$item2", "description": "evaluate $item1 using python, and assign the result to variable $item2. This action is for evaluating simple arithmetic expressions. ""},
-    {"action": "choose", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "choose an item from the list $item1, according to the criteria in $item2, and assign it to variable $item3"},
-    {"action": "concatenate", "arguments": ("$item1", "'$item2"), "result": "$item3", "description": "append the list $item2 to the list $item1 and assign the resulting list to variable item3"},
-    {"action": "difference", "arguments": ("$item1", "$item2"), "result": "$item3", "description": "identify content in $item1 and not in $item2 and assign it to variable $item3"},
-    {"action": "empty", "arguments": "$item1", "result": "$item2", "description": "test if $item1 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "entails", "arguments": "$item1", "result": "$item2", "description": "test if $item1 content entails (implies, necessarily $item2 is an empty list and assign the boolean True/False accordingly to $item2."},
-    {"action": "extract", "arguments": ("$item1/literal1", "$item2"), "result": "$item3", "description": "extract content related to ($item1/literal1) from $item2 and assign it to variable $item3"},
-    {"action": "first", "arguments": "$item1", "result": "$item2", "description": "select the first item in $item1 and assign it to variable $item2."},
-    {"action": "if", "arguments": ("$item1" ,"$item2"), "result": "$test_result", "description": "Step1: interpret $item1 and assign the result to $test_result. Step2: If $test_result is not False, interpret $item2. $item1 must be type action, $item2 can be type of action or plan"},
-    {"action": "integrate", "arguments": ("$item1" ,"$item2"), "result": "$item3", "description": "combine $item1 and $item2 into a single consolidated text and assign it to variable $item3."},
-    {"action": "library_research", "arguments": "$item1", "result": "$item2", "description": "search the library for information about the subject in $item1 and assign the resulting information to the variable $item2."},
-    {"action": "llm", "arguments": ("$item1", "item2") "result": "$item3", "description": "invoke llm with the instruction $item1 and details $item2. Assign the response to variable $item3"},
-    {"action": "question", "arguments": "$item1", "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "question", "arguments": "$item1", "result": "$item2", "description": "access $item1, present it to the user, and assign user response to variable $item2."},
-    {"action": "recall", "arguments": "$item1/literal1", "result": "$item2", "description": "retrieve $item1 from working memory and assign it to variable $item2."},
-    {"action": "request", "arguments": "$item1", "result": "$item2", "description": "request a specific web resource with url $item1 and assign the result to variable $item2."},
-    {"action": "rest", "arguments": "$item1", "result": "$item2", "description": "return $item1[1:], that is, the remainder of the input list after the first element."},
-    {"action": "return", "arguments": "$item1", "result": "$item2", "description": "return from nested plan, assigning value of $item1 in this plan to the value of $item2 in the name-space of the enclosing plan."},
-    {"action": "sort", "arguments": ("$item1", "$item2"), "result": "$item2", "description": "rank the items in $item1 by criteria in $item2 and assign the sorted list to variable $item2. Returns a list in ranked order, best first."},
-    {"action": "tell", "arguments": "$item1", "result": "$Trash", "description": "present $item1 to the user."},
-    {"action": "web", "arguments": "$item1/literal1", "result": "$item2", "description": "perform a web search, using ($item1/literal1) as the query, and assign the result to variable $item2."},
-    {"action": "wiki", "arguments": "$item1/literal1", "result": "$item2", "description": "wiki search the local wikipedia database using ($item1/literal1) as the search string, and assign the result to $item2."}
+    {"action": "append", "arguments": (arg1, arg2), "result": '$resultVar', "description": "append arg1 to arg2, and assign the result to variable $resultVar. arg1 and arg2 must be or hold values of the same type, both either str or list"},
+    {"action": "article", "arguments": arg1, "result": '$resultVar', "description": "retrieve the article with title arg1 and assign the article body to $resultVar."},
+    {"action": "assign", "arguments": arg1, "result": '$resultVar', "description": "assign the value of arg1 to variable $resultVar"},
+    {"action": "calc", "arguments": arg1, "result": '$resultVar', "description": "evaluate arg1 using python, and assign the result to variable $resultVar. This action is for evaluating simple arithmetic expressions. ""},
+    {"action": "choose", "arguments": (arg1, arg2), "result": '$resultVar', "description": "choose an item from the list arg1, according to the criteria in arg2, and assign it to variable $resultVar"},
+    {"action": "concatenate", "arguments": (arg1, arg2), "result": '$resultVar', "description": "append the list arg2 to the list arg2 and assign the resulting list to variable $resultVar"},
+    {"action": "difference", "arguments": (arg1, arg2), "result": '$resultVar', "description": "identify information in arg1 and not in arg2 and assign it to variable $resultVar"},
+    {"action": "empty", "arguments": arg1, "result": '$resultVar', "description": "test if arg1 is an empty str or list and assign the boolean True/False accordingly to $resultVar."},
+    {"action": "entails", "arguments": arg1, "result": '$resultVar', "description": "test if arg1 information entails (implies, requires-that) the information in arg2 and assign the boolean True/False accordingly to $resultVar."},
+    {"action": "extract", "arguments": (arg1, arg2), "result": '$resultVar', "description": "extract content related to arg1 from arg2 and assign it to $resultVar"},
+    {"action": "first", "arguments": arg1, "result": '$resultVar', "description": "select the first item in arg1 (an str or list) and assign it to $resultVar."},
+    {"action": "for", "arguments": (arg1, arg2, arg3), "result": '$resultVar', "description": "for each element in arg2, assign it as the value of arg1, then run the action or plan arg3."},
+    {"action": "if", "arguments": (arg1, arg2), "result": '$resultVar', "description": "Step1: execute the action arg1 and assign the result to $resultVar. Step2: If $resultVar is not False, execute the action arg2. arg1 must be type action, arg2 can be type of action or plan"},
+    {"action": "integrate", "arguments": (arg1, arg2), "result": '$resultVar', "description": "combine arg1 and arg2 into a single consolidated text and assign it to variable $resultVar."},
+    {"action": "library_research", "arguments": (arg1, arg2), "result": '$resultVar', "description": "search the library for information about the subject in arg1, expanded with the context in arg2), and assign the resulting information to the variable $resultVar."},
+    {"action": "llm", "arguments": (arg1, arg2) "result": '$resultVar', "description": "invoke llm with the instruction arg1 and details arg2. Assign the response to variable $resultVar"},
+    {"action": "question", "arguments": arg1, "result": '$resultVar', "description": "present arg1 to the user, and assign user response to variable $resultVar."},
+    {"action": "recall", "arguments": arg1, "result": '$resultVar', "description": "retrieve arg1 from working memory and assign it to variable $resultVar."},
+    {"action": "request", "arguments": arg1, "result": ;$resultVar', "description": "arg1 value must be an str. request a specific web resource with url arg1 and assign the result to variable $resultVar."},
+    {"action": "rest", "arguments": arg1, "result": '$resultVar', "description": "arg1 must be a list or an str. return the remainder of the input list after the first element."},
+    {"action": "return", "arguments": arg1 "result": '$resultVar', "description": "return from nested plan, assigning value of arg1 in this plan to the value of $resultVar in the name-space of the enclosing plan."},
+    {"action": "sort", "arguments": (arg1, arg2), "result": '$resultVar', "description": "arg1 must be a list. rank the items in arg1 by criteria arg2 and assign the sorted list to variable $resultVar. Returns a list in ranked order, best first."},
+    {"action": "tell", "arguments": arg1, "result": "$Trash", "description": "present arg1 to the user."},
+    {"action": "web", "arguments": arg1, "result": '$resultVar', "description": "perform a web search, using arg1 as the query, and assign the result to variable $resultVar."},
+    {"action": "wiki", "arguments": arg1, "result": '$resultVar', "description": "wiki search the local wikipedia database using arg1 as the search string, and assign the result to $resultVar."}
 
 
 Example Plan (1-shot):
 
 Plan:
-[
-{"action": "assign", "arguments": "Apple", "result": "$item1"},
-{"action": "tell", "arguments": "$item1", "result": "$Trash"},
-{"action": "assign", "arguments": 5, "result": "$item1"},
-{"action": "tell", "arguments": "$item1", "result": "$Trash"},
-{"action": "assign", "arguments": [], "result": "$item1"},
-{"action": "tell", "arguments": "$item1", "result": "$Trash"},
-{"action": "assign", "arguments": {"key":"value"}, "result": "$item1"},
-{"action": "tell", "arguments": "$item1", "result": "$Trash"},
-{"action": "append", "arguments": "number1", "$list1", "result": "$List2"},
-{"action": "llm", "arguments": "What is the meaning of life?", "result": "$response1"},
-{"action": "tell", "arguments": "$response1", "result": "$Trash"}
-]
+{"name": 'Sample Plan,
+ "body: 
+  [{"action": "assign", "arguments": 'Python-like planning languages', "result": '$topic1'},
+   {"action": "assign", "arguments": 'PDDL', "result": '$topic2'},
+   {"action": "assign", "arguments": 'GP-PL', result": '$topic3'},
+   {"action": "library_research", "arguments": '$topic1', "result": '$overview1'},
+   {"action": "library_research", "arguments": '$topic2', "result": '$overview2'},
+   {"action": "library_research", "arguments": '$topic3', "result": '$overview3'},
+   {"action": "integrate", "arguments": ('$overview1', '$overview2'), "result": '$comparison1'},
+   {"action": "integrate", "arguments": "('$comparison1', '$overview3'), "result": '$comparison2'},
+   {"action": "assign", "arguments": 'simple plans where dependencies are expressed as conditional control flow', "result": '$focus'},
+   {"action": "library_research", "arguments": '$focus', "result": '$focused_research'},
+   {"action": "integrate", "arguments": ('$comparison2', '$focused_research'), "result": '$final_report'},
+   {"action": "tell", "arguments": '$final_report', "result": '$Trash'}
+  ],
+ "notes": 'This plan first assigns the three topics of interest to variables. Then, it performs library research on each topic to gather overviews. These overviews are then integrated into a comparison. The plan then assigns the specific focus of the report to a variable and performs focused research on this topic. This focused research is then integrated into the final report, which is presented to the user.'
+}
 """
-
 
 class InvalidAction(Exception):
    # raised by parse_as_action
@@ -208,10 +220,12 @@ Your conversation style is warm, gentle, humble, and engaging."""
             return self.do_extract(dict_item)
         elif dict_item['action'] == 'first':
             return self.do_first(dict_item)
-        elif dict_item['action'] == 'llm':
-            return self.do_llm(dict_item)
         elif dict_item['action'] == 'integrate':
             return self.do_integrate(dict_item)
+        elif dict_item['action'] == 'library':
+            return self.do_library(dict_item)
+        elif dict_item['action'] == 'llm':
+            return self.do_llm(dict_item)
         elif dict_item['action'] == 'question':
             return self.do_question(dict_item)
         elif dict_item['action'] == 'recall':
@@ -240,7 +254,7 @@ Your conversation style is warm, gentle, humble, and engaging."""
         args = item['arguments'] # 
         result = item['result']
         if type(result) is not str or not result.startswith('$'):
-            self.cot.display_msg(f"result must be a variable name: {result}")
+            self.cot.display_msg(f"result must be a variable name: <{result}")
             raise InvalidAction(str(item))
         else:
             return item['action'], args, result
@@ -391,6 +405,19 @@ Your conversation style is warm, gentle, humble, and engaging."""
         else:
             return 'unknown'
        
+    def do_library(self, action):
+        # library_research
+        print(f'gpt {action}')
+        action, arguments, result = self.parse_as_action(action)
+        if type(arguments) is not str:
+            raise InvalidAction(f'argument for llm must be a literal or name: {str(arguments)}')       
+        prompt_text = self.resolve_arg(arguments)
+        substituted_prompt_text = self.substitute(prompt_text)
+        prompt = [SystemMessage(prompt_text)]
+        response = self.llm.ask("", prompt)
+        #self.cot.display_response(response)
+        self.wm.assign(result, response)
+
     def do_llm(self, action):
         # llm takes a single arg, the prompt
         print(f'gpt {action}')

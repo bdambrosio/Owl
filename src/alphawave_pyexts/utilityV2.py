@@ -103,6 +103,23 @@ def part_of_keyword(word, keywords):
     return False
 
 
+def run_prompt(client, input, prompt, prompt_options, memory, functions, tokenizer):
+    # Create a wave for the prompt
+    fork = MemoryFork(memory)
+    for key, value in input.items():
+        print(f'setting input {key}: {value}')
+        fork.set(key, value)
+    try:
+        response = client.completePrompt(fork, functions, tokenizer, prompt, prompt_options)
+    except Exception as e:
+        traceback.print_exc()
+    print(f'***** utility ask_llm {response}')
+    if response['status'] != 'success':
+        return response
+    if not isinstance(response['message'], dict):
+        response['message'] = {'role': 'assistant', 'content': response['message'] or ''}
+    return response
+
 def run_wave (client, input, prompt, prompt_options, memory, functions, tokenizer, max_repair_attempts=1, logRepairs=False, validator=DefaultResponseValidator()):
     # Create a wave for the prompt
     fork = MemoryFork(memory)

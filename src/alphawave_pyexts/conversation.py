@@ -436,6 +436,20 @@ register_conv_template(
     )
 )
 
+# Phi-2 default template
+register_conv_template(
+    Conversation(
+        name="phi-2",
+        system="",
+        roles=("Instruct", "Output"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_COLON_SPACE_SINGLE,
+        sep="\n",
+        response_prime=True,
+    )
+)
+
 # OpenLLama default template (copy of alpaca)
 register_conv_template(
     Conversation(

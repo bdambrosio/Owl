@@ -19,27 +19,55 @@ class PersistentQueue(asyncio.Queue):
         super().__init__(*args, **kwargs)
         self.persistence_file = "indexing_service_queue.json"
         self._items_list = []  # Mirror list for serialization
-
+        self.lock = asyncio.Lock()
+        self.serialize_lock = asyncio.Lock()
+        
     async def put(self, item):
-        await super().put(item)
-        self._items_list.append(item)  # Keep the list in sync
-
+        print(f'put acquiring lock')
+        await self.lock.acquire()
+        try:
+            await super().put(item)
+            self._items_list.append(item)  # Keep the list in sync
+        finally:
+            print(f'put releasing lock')
+            self.lock.release()
+            
     async def get(self):
+        item=None
         item = await super().get()
-        self._items_list.remove(item)  # Keep the list in sync
+        try:
+            print(f'get acquiring lock')
+            await self.lock.acquire()
+            self._items_list.remove(item)  # Keep the list in sync
+        finally:
+            print(f'get releasing lock')
+            self.lock.release()
         return item
 
     async def serialize(self):
-        entries = [json.dumps(item) for item in self._items_list]
-        with open(self.persistence_file, "w") as f:
-            json.dump(entries, f)
+        print(f'serialize acquiring lock')
+        await self.serialize_lock.acquire()
+        try:
+            entries = [json.dumps(item) for item in self._items_list]
+            with open(self.persistence_file, "w") as f:
+                json.dump(entries, f)
+        finally:
+            print(f'serialize releasing lock')
+            self.serialize_lock.release()
 
     async def deserialize(self):
-        with open(self.persistence_file, "r") as f:
-            entries = json.load(f)
-            for item in entries:
-                await self.put(json.loads(item))  # Use put to keep the list in sync
+        print(f'serialize acquiring lock')
+        await self.serialize_lock.acquire()
+        try:
+            with open(self.persistence_file, "r") as f:
+                entries = json.load(f)
+                for item in entries:
+                    await self.put(json.loads(item))  # Use put to keep the list in sync
+        finally:
+            print(f'serialize releasing lock')
+            self.serialize_lock.release()
 
+            
 task_queue = PersistentQueue()
 
 @app.on_event("startup")

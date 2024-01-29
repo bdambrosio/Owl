@@ -608,10 +608,11 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          print(f'cursor has selected {len(selectedText)} chars')
       start = selectedText.find('http')
       if start < 0:
-         self.display_msg(f'not url: {selectedText}')
-         return
-      if start > 0:
-         selectedText = selectedText[start:]
+         start = selectedText.find('file:')
+         if start < 0:
+            self.display_msg(f'not uri: {selectedText}')
+            return
+      selectedText = selectedText[start:]
       self.s2.queue_url_for_indexing(selectedText)
       self.display_msg("Indexing request submitted.")
 
@@ -624,7 +625,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       elif PREV_LEN < len(self.input_area.toPlainText())+2:
          selectedText = self.input_area.toPlainText()[PREV_LEN:]
          selectedText = selectedText.strip()
-      rr = subprocess.Popen(['python3', 'paper_writer.py', '-report', 't'])
+      rr = subprocess.Popen(['python3', 'paper_writer.py', '-report', selectedText, '-template', f"'{self.owlCoT.llm.template}'"])
       self.display_msg("report writer spawned.")
          
    def workingMem(self): # lauching working memory editor

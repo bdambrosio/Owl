@@ -81,13 +81,13 @@ memory = VolatileMemory()
 
 import OwlCoT as oiv
 cot = oiv.OwlInnerVoice(None)
-print (type(cot), type(cot.llm))
 print (cot.template)
 # set cot for rewrite so it can access llm
 rw.cot = cot
 
 import semanticScholar2 as s2
 s2.cot = cot
+
 
 class PWUI(QWidget):
     def __init__(self, rows, config_json):
@@ -336,11 +336,10 @@ def plan_search():
                 plan = plans[plan_name]
                 print(json.dumps(plan, indent=4))
                 plans[plan['name']] = plan
-                pl.active_plan = plan
 
     if plan is None:
         # new plan, didn't select any existing
-        plan = pl.init_plan()
+        plan = pl.initialize()
         plan = pl.analyze(plan)
         # store new plan in list of search plans
         plans[plan['name']] = plan
@@ -679,7 +678,7 @@ End the section as follows:
     return section, subsection_refs
 
 class DisplayApp(QtWidgets.QWidget):
-    def __init__(self, query, sections, dscp, template):
+    def __init__(self, query, sections='', dscp='', template=''):
         super().__init__()
         self.query = query
         self.sections = sections
@@ -802,6 +801,7 @@ Respond only with the instruction, in plain JSON as above, with no markdown or c
         if query is None or not query:
             return report, refs 
     
+from Planner import Planner
 if __name__ == '__main__':
     def parse_arguments():
         """Parses command-line arguments using the argparse library."""
@@ -810,6 +810,7 @@ if __name__ == '__main__':
         
         parser.add_argument("-discuss", type=str, help="discuss a provided set of resources")
         parser.add_argument("-report", type=str, help="discuss a provided set of resources")
+        parser.add_argument("-template", type=str, help="llm prompt template")
         args = parser.parse_args()
         return args
     try:
@@ -825,6 +826,8 @@ if __name__ == '__main__':
             app.exec()
             sys.exit(0)
         if hasattr(args, 'report') and args.report is not None:
+            pl = Planner(None, cot, args.template)
+            app = QApplication(sys.argv)
             write_report(app, args.report)
             sys.exit(0)
         else:

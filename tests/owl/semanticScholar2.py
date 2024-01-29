@@ -128,11 +128,11 @@ def get_semantic_scholar_meta(doi):
         return 0,0,''
 
 def paper_library_df_fixup():
-    paper_library_df['inflCitations'] = paper_library_df['inflCitations'].replace('', 0).astype(int)
-    paper_library_df['citationCount'] = paper_library_df['citationCount'].replace('', 0).astype(int)
+    paper_library_df['citation'] = ''
+    paper_library_df.to_parquet(paper_library_filepath)
     return
 
-paper_library_columns = ["faiss_id", "title", "authors", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
+paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
 
 # s2FieldsOfStudy
 s2FieldsOfStudy=["Computer Science","Medicine","Chemistry","Biology","Materials Science","Physics",
@@ -146,7 +146,7 @@ if not os.path.exists(paper_library_filepath):
     print('paper_library_df.to_parquet initialization complete')
 else:
     paper_library_df = pd.read_parquet(paper_library_filepath)
-    #paper_library_df_fixup()
+    paper_library_df_fixup()
     print('loaded paper_library_df')
     
 if not os.path.exists(paper_index_filepath):
@@ -510,7 +510,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
     try:
         # Set up your search query
         #query='Direct Preference Optimization for large language model fine tuning'
-        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&offset={next_offset}&fields=url,title,year,abstract,authors,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr,embedding.specter_v2"
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&offset={next_offset}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr,embedding.specter_v2"
         headers = {'x-api-key':ssKey, }
         
         response = requests.get(url, headers = headers)
@@ -550,6 +550,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                     continue
             abstract = paper['abstract'] if type(paper['abstract']) is str else str(paper['abstract'])
             authors = paper['authors']
+            citationStyles = paper['citationStyles']
             citationCount = paper['citationCount']
             s2FieldsOfStudy = paper['s2FieldsOfStudy']
             tldr= paper['tldr']
@@ -568,6 +569,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
             result_dict["summary"] = abstract 
             result_dict["citationCount"]= int(citationCount)
+            result_dict["citationStyles"]= str(citationStyles)
             result_dict["inflCitations"] = int(influentialCitationCount)
             result_dict["evaluation"] = ''
             result_dict["pdf_url"] = openAccessPdf
@@ -661,6 +663,7 @@ def index_paper(paper_dict, paper_index=None):
         paper_library_df.loc[paper_index] = paper_dict
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
+    paper_citation = paper_dict['citationStyles'] 
     paper_abstract = paper_dict['summary']
     pdf_filepath = paper_dict['pdf_filepath']
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)

@@ -21,15 +21,16 @@ warnings.filterwarnings("ignore")
 
 class OpenBook():
     def __init__(self,top_k_articles:int=3,
-                top_k_matches:int=3,
-                model_name:str="BAAI/bge-small-en", 
-                device:str='cuda',
-                max_length:int=512, 
-                batch_size:int=16,
-                wikipedia_data_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212",
-                wikipedia_index_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212/index.parquet",
-                wikipedia_faiss_index_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212_ivf256_sq8.index",
-                nprobe:int=8):
+                 top_k_matches:int=3,
+                 model_name:str="BAAI/bge-small-en", 
+                 #model_name:str="BAAI/bge-base-en-v1.5", 
+                 device:str='cuda',
+                 max_length:int=512, 
+                 batch_size:int=16,
+                 wikipedia_data_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212",
+                 wikipedia_index_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212/index.parquet",
+                 wikipedia_faiss_index_path:str="/home/bruce/Downloads/enwiki/en_wiki_202212_ivf256_sq8.index",
+                 nprobe:int=8):
         self.top_k_articles=top_k_articles
         self.top_k_matches=top_k_matches
         self.model_name=model_name
