@@ -165,6 +165,8 @@ async def retrieve(title: str, url: str, doc_type='str', max_chars: int = 4000):
           filename = convert_title_to_unix_filename(title)
           print(f'reading pdf {download_dir+downloaded_file}')
           pdf_info, pdf_text = read_pdf(download_dir+downloaded_file)
+          # getting lots of fancy chars, bard suggests this:
+          #encoded = pdf_text.encode("utf-16", "surrogatepass").decode("utf-8")
           return {"result": pdf_text, "info": pdf_info, "filepath":download_dir+downloaded_file}
 
       print(f'\nchat processing non-pdf\n')

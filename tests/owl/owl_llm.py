@@ -35,6 +35,8 @@ templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
              "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
              "miqu-70B":"llama-2",
+             "miqu-1-70b-sf-4.25bpw-h6-exl2":"llama-2",
+             "miqu-1-70b-sf-5.0bpw-h6-exl2":"llama-2",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mistral-7b-instruct": "llama-2",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "llama-2",
@@ -113,9 +115,11 @@ else:
         model.load([20, 23])
     elif 'tulu' in model_name:
         model.load([20, 23])
+    elif 'miqu-1-70b' in model_name:
+        model.load([21, 23])
     elif 'ixtral' in model_name:
         print(f' mixtral load')
-        model.load([18, 23])
+        model.load([20, 23])
     elif 'UNA' in model_name:
         print(f' UNA load')
         model.load([16, 23])
@@ -134,16 +138,22 @@ try:
     with open(models_dir+models[i]+'/config.json', 'r') as j:
         json_config = json.load(j)
         context_size = json_config["max_position_embeddings"]
-        print(f'loaded json.config, setting context to {min(32768, context_size)}')
 except Exception as e:
     print(f'failure to load config.json {str(e)}\n setting context to 4096')
+
+if model_name.startswith('miqu-1-70b'):
+    context_size=8192
+elif model_name == 'miqu-70B':
+    context_size=10000
     
+print(f'loaded json.config, setting context to {min(16384, context_size)}')
 if model_name == 'phi-2':
     pass
 elif model_name == 'miqu-70B':
-    context_size=10000
+    pass
 else:
-    cache = ExLlamaV2Cache(model, max_seq_len=min(32768, context_size))
+    print(f'loaded json.config, setting context to {min(16384, context_size)}')
+    cache = ExLlamaV2Cache(model, max_seq_len=min(16384, context_size))
     # Initialize generator
     generator = ExLlamaV2StreamingGenerator(model, cache, tokenizer)
 

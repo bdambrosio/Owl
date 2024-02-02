@@ -77,14 +77,15 @@ except openai.error.OpenAIError as e:
     print(e)
 
 # find out where we are
-
+city = 'Berkeley'
+state = 'CA'
 def get_city_state():
    api_key = os.getenv("IPINFO")
    handler = ipinfo.getHandler(api_key)
    response = handler.getDetails()
    city, state = response.city, response.region
    return city, state
-city, state = get_city_state()
+#city, state = get_city_state()
 
 print(f"My city and state is: {city}, {state}")
 local_time = time.localtime()
@@ -98,8 +99,8 @@ hour = local_time.tm_hour
 host = '127.0.0.1'
 port = 5004
 
-GPT4='gpt-4-1106-preview'
-GPT3='gpt-3.5-turbo-1106'
+GPT4='gpt-4-turbo'
+GPT3='gpt-3.5-turbo'
 
 
 #parser.add_argument('model', type=str, default='wizardLM', choices=['guanaco', 'wizardLM', 'zero_shot', 'vicuna_v1.1', 'dolly', 'oasst_pythia', 'stablelm', 'baize', 'rwkv', 'openbuddy', 'phoenix', 'claude', 'mpt', 'bard', 'billa', 'h2ogpt', 'snoozy', 'manticore', 'falcon_instruct', 'gpt_35', 'gpt_4'],help='select prompting based on modelto load')
@@ -134,13 +135,14 @@ class LLM():
         self.tokenizer = GPT3Tokenizer()
         self.context_size=8000 # available variable for clients, updated at every ask
         
-   def repair_json (self, item):
+   def repair_json (self, item, validation):
       #
       ## this asks gpt-4 to repair text that doesn't parse as json
       #
 
+      print(f'repair {validation}')
       prompt_text=\
-         """You are a JSON expert. The following TextString does not parse using the python json.loads function.
+         """You are a JSON expert. The following TextString does not parse using the python json.loads(textString) function.
 Please repair the text string so that the python JSON library loads method can parse it and return a valid dict.
 This may include removing any special characters that will cause loads to fail.
 This repair should be performed recursively, including all field values.
@@ -149,11 +151,14 @@ If so, the repair should include adding any necessary JSON termination.
 Return only the repaired JSON without any Markdown or code block formatting.
 
 Problem 1: {"action": 'tell', "statement":'xyz
-Chain of Thought: the value for the statement field is not terminated. I should add a closing '. the overall JSON form does not have a close brace. I should add a close brace.
+Chain of Thought: 
+ - the value for the "statement" field is not terminated. I should add a closing '  
+ - the overall JSON form does not have a close brace. I should add a close brace.
 Response: {"action": 'tell', "statement":'xyz'}
 
-Problem 2: ```json\n{"action": 'tell', "statement":'xyz'}```
-Chain of Thought: the JSON form is surrounded by markdown. I should remove the markdown
+Problem 2: ```json\n{"action": 'tell', "statement":'xyz'}\n```
+Chain of Thought: 
+ - the JSON form is surrounded by markdown. I should remove the markdown
 Response: {"action": 'tell', "statement":'xyz'}
 
 New Problem:{{$input}}
@@ -257,7 +262,7 @@ Chain of Thought:
                   if validation is not None and not validation['valid']:
                       print(f'ask validation failed {validation}')
                       fixed_string = re.sub(r"\\([^\s'""])", r"\\\\\\\\1", response)
-                      validation = validator.validate_response(self.memory, self.functions, self.tokenizer, fixed_string, 0)
+                      validation2 = validator.validate_response(self.memory, self.functions, self.tokenizer, fixed_string, 0)
               except Exception as e:
                   print (f'ask validation fail {str(e)}')
               if validation is not None and validation['valid']:
@@ -268,12 +273,12 @@ Chain of Thought:
                       return validation['value']
               # check if validator is JSON, we have a repair option if so
               if type(validator) is JSONResponseValidator:
-                  print(f' validation attempt failed, calling repair')
-                  json = self.repair_json(response['message']['content'])
-                  #print(f'\nrepair response\n {str(response)}')
+                  print(f' validation attempt failed, calling repair {validation}')
+                  json = self.repair_json(response['message']['content'], validation)
+                  #print(f'\nrepair response {validation}\n {str(response)}')
                   if type(json) is not dict:
                       print(f'ask fail, not json\n {str(response)}')
-                      return None
+                      return response # return original response
                   else: # yay! we repaired it!
                       return json
 
@@ -953,21 +958,9 @@ Input: {{{{$input}}}}
         self.action_selection_occurred = True
         short_profile = self.short_prompt()
         action_validation_schema={
-            "action": {
-                "type":"string",
-                "required": True,
-                "meta": "<action to perform>"
-            },
-            "argument": {
-                "type":"string",
-                "required": True,
-                "meta": "<parameter for action>"
-            },
-            "reasoning": {
-                "type":"string",
-                "required": False,
-                "meta": "<text string explaining action choice>"
-            }
+            "action": {"type":"string", "required": True, "meta": "<action to perform>" },
+            "argument": {"type":"string","required": True, "meta": "<parameter for action>" },
+            "reasoning": {"type":"string", "required": False, "meta": "<text string explaining action choice>"}
         }
 
         #print(f'action_selection {input}\n{response}')
@@ -979,9 +972,10 @@ Input: {{{{$input}}}}
         ]
         print(f'action_selection starting analysis')
         analysis = self.llm.ask(input, prompt_msgs, stop_on_json=True, validator=JSONResponseValidator(action_validation_schema))
-        #print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
+        print(f'action_selection analysis returned: {type(analysis)}, {analysis}')
 
         if analysis is not None and type(analysis) != dict and ('{' in analysis):
+            print(f'!!!!!!!!!!!action_selection calling repair!!!!!!!!!!!!!!!')
             analysis = self.llm.repair_json(analysis)
         if analysis is not None and type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis

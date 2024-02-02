@@ -472,6 +472,7 @@ def write_report(app, topic):
             #print(f'outline: {updated_json}')
             if updated_json is not None:
                 plan['outline'] = updated_json
+            outline = plan['outline']
         else:
             # make outline
             plan = pl.outline(outline_config, plan)
@@ -532,6 +533,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
         subsection_token_length = int(length/len(section_outline['sections']))
         section = ''
         n=0
+        refs = []
         for subsection in section_outline['sections']:
             if depth == 0:
                 heading_1_title = subsection['title']

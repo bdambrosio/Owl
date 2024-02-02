@@ -216,12 +216,13 @@ def convert_title_to_unix_filename(title):
     filename = title.replace(' ', '_')
     # Remove or replace special characters
     filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
-    filename = filename[:64]
+    filename = filename[:128]
     return filename
 
 def download_pdf(url, title):
-    request = urllib.request.Request(url)
+    print(f'download_pdf {url}')
     try:
+        request = urllib.request.Request(url)
         with urllib.request.urlopen(request) as response:
             pdf_data = response.read()
             filename = convert_title_to_unix_filename(title)
@@ -235,7 +236,8 @@ def download_pdf(url, title):
     try:
         filepath=download_pdf_5005(url, title)
         print(f' download got paper, wrote to {filepath}')
-        return filepath
+        if filepath is not None:
+            return filepath
     except Exception as e:
         print(f'\n download 5005 fail {str(e)}')
     try:
@@ -309,7 +311,11 @@ def download_pdf_5005(url, title):
     #print(f' fetching url {url}')
     
     pdf_data = None
-    response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=10)
+    try:
+        response = requests.get(f'http://127.0.0.1:5005/retrieve/?title={title}&url={url}&doc_type=pdf', timeout=10)
+    except Exception as e:
+        print(f'download_pdf_5005 fail {str(e)}')
+        return None
     if response.status_code == 200:
         info = response.json()
         #print(f'\nretrieve response {info};')
@@ -405,10 +411,10 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     #if status is None:
     #    continue
     #print(f' new article:\n{json.dumps(result_dict, indent=2)}')
-    paper_index = len(paper_library_df)
-    paper_library_df.loc[paper_index] = result_dict
     # section and index paper
-    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict, paper_index)
+    indexed = index_paper(result_dict)
+    if not indexed:
+        return False
     save_synopsis_data()
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
@@ -420,7 +426,7 @@ def index_file(filepath):
     result_dict = {key: '' for key in paper_library_columns}
     id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     result_dict["faiss_id"] = id
-    result_dict["title"] = filepath[filepath.rfind('/')+1:]
+    result_dict["title"] = filepath[filepath.rfind('/')+1:] # will be replaced by grobid result
     result_dict["authors"] = ''
     result_dict["publisher"] = ''
     result_dict["summary"] = ''
@@ -428,22 +434,13 @@ def index_file(filepath):
     result_dict["inflCitations"] = 0
     result_dict["evaluation"] = ''
     result_dict["pdf_filepath"]= filepath
-    if len(paper_library_df) > 0:
-        dup = (paper_library_df['title'] == result_dict["title"]).any()
-        if dup:
-            print(f"\nalready indexed {result_dict['title']}\n")
-            return
-        else:
-            print(f"new title {result_dict['title']}\n")
-            
-
-    print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
     result_dict['synopsis'] = ""
     result_dict['section_ids'] = [] # to be filled in after we get paper id
-    paper_index = len(paper_library_df)
-    paper_library_df.loc[paper_index] = result_dict
     # section and index paper
-    paper_synopsis, paper_id, section_synopses, section_ids = index_paper(result_dict, paper_index)
+    result = index_paper(result_dict)
+    if not result:
+        return False
+    print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
     save_synopsis_data()
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
@@ -657,43 +654,37 @@ def index_section_synopsis(paper_dict, synopsis):
     return faiss_id
 
 
-def index_paper(paper_dict, paper_index=None):
-    if paper_index == None:
-        paper_index = len(paper_library_df)
-        paper_library_df.loc[paper_index] = paper_dict
-    paper_title = paper_dict['title']
-    paper_authors = paper_dict['authors'] 
-    paper_citation = paper_dict['citationStyles'] 
-    paper_abstract = paper_dict['summary']
+def index_paper(paper_dict):
+    # main path for papers from index_url and / or index_file, where we know nothing other than pdf
     pdf_filepath = paper_dict['pdf_filepath']
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     if pdf_filepath is None:
         print(f'pdf filepath is None!')
-        return paper_abstract, paper_faiss_id, [],[]
+        return False
     try:
         extract = create_chunks_grobid(pdf_filepath)
         if extract is None:
             print('grobid extract is None')
-            return paper_abstract, paper_faiss_id, [],[]
+            return False
+        print(f'index_paper grobid keys {extract.keys()}')
+        title = extract['title']
+        abstract = extract['abstract']
+        if len(paper_library_df) > 0:
+            dup = (paper_library_df['title'] == title).any()
+            if dup:
+                print(f' already indexed {title}')
+                return False
+        paper_index = len(paper_library_df)
+        paper_dict['title'] = extract['title']
+        paper_dict['authors'] = extract['authors']
+        paper_dict['summary'] = extract['abstract']
+        paper_library_df.loc[paper_index] = paper_dict
+        
     except Exception as e:
         print(f'\ngrobid fail {str(e)}')
-        return paper_abstract, paper_faiss_id, [],[]
+        return False
     print(f"grobid extract keys {extract.keys()}")
-
-    for item in ['authors', 'title']:
-        if item in paper_dict and item in extract and len(paper_dict[item]) < len(extract[item]):
-            #print(f'correcting {item}')
-            paper_dict[item] = extract[item]
-    if 'summary' in paper_dict and 'abstract' in extract and len(paper_dict['summary']) < len(extract['abstract']):
-        paper_dict['summary'] = extract['abstract']
-    paper_title = paper_dict['title']
-    paper_authors = paper_dict['authors'] 
-    paper_abstract = paper_dict['summary']
-            
-    paper_library_df.loc[paper_index, 'title'] = paper_title
-    paper_library_df.loc[paper_index, 'authors'] = paper_authors
-    paper_library_df.loc[paper_index, 'summary'] = paper_abstract
-    text_chunks = [paper_abstract]+extract['sections']
+    text_chunks = [abstract]+extract['sections']
     #print(f"Summarizing each chunk of text {len(text_chunks)}")
 
     section_prompt = """Given this abstract of a paper:
@@ -729,10 +720,6 @@ List of all key points in the paper, including all significant statements, metho
 {{$abstract}}
 </ABSTRACT>
 
-<PARTIAL_PAPER_SYNOPSIS>
-{{$paper_synopsis}}
-</PARTIAL_PAPER_SYNOPSIS>
-
 <SECTION SYNOPSIS>
 {{$section}}
 </SECTION SYNOPSIS>
@@ -743,7 +730,6 @@ End your synopsis response as follows:
 </UPDATED_SYNOPSIS>
 """
     section_synopses = []; section_ids = []
-    paper_synopsis = ''
     index_text = ''
     text_chunks = combine_strings(text_chunks) # combine shorter chunks
     with tqdm(total=len(text_chunks)) as pbar:
@@ -755,14 +741,13 @@ End your synopsis response as follows:
 
             print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
             rw.cot = cot #just to be sure...
-            entities = rw.extract_entities(text_chunk, title=paper_title)
+            entities = rw.extract_entities(text_chunk, title=title)
             #print(f'entities: {entities}')
             prompt = [SystemMessage(section_prompt),
                       AssistantMessage('<SYNOPSIS>\n')
                       ]
             max_tokens=max(440,int(len(text_chunk)/12)) # let len grow for big chunks
-            response = cot.llm.ask({"abstract":paper_abstract,
-                                "paper_synopsis":paper_synopsis,
+            response = cot.llm.ask({"abstract":abstract,
                                 "entities":', '.join(entities),
                                 "text":text_chunk},
                                prompt,
@@ -779,13 +764,11 @@ End your synopsis response as follows:
             # 'entities' is a single, newline delimited string for ease in llm processing
             print(f'max_tokens {max_tokens}')
             rw.cot = cot #just to be sure...
-            draft2 = rw.depth_rewrite(paper_title, paper_title, response, text_chunk, entities, paper_title, int(1.2*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            draft2 = rw.depth_rewrite(title, title, response, text_chunk, entities, title, int(1.2*max_tokens), title, title, '', cot.llm.template)
             print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
-            rw.cot = cot #just to be sure...
-            draft3 = rw.add_pp_rewrite(paper_title, paper_title, draft2, text_chunk, entities, paper_title, int(1.4*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            draft3 = rw.add_pp_rewrite(title, title, draft2, text_chunk, entities, title, int(1.4*max_tokens), title, title, '', cot.llm.template)
             print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
-            rw.cot = cot #just to be sure...
-            #draft4 = rw.depth_rewrite(paper_title, paper_title, draft3, text_chunk, entities, paper_title, int(1.6*max_tokens), paper_title, paper_title, '', cot.llm.template)
+            #draft4 = rw.depth_rewrite(title, title, draft3, text_chunk, entities, title, int(1.6*max_tokens), title, title, '', cot.llm.template)
             #print(f'\nRewrite 3 len: {len(draft4)}\n{draft4}\n')
             id = index_section_synopsis(paper_dict, draft3)
             section_synopses.append(draft3)
@@ -800,9 +783,9 @@ End your synopsis response as follows:
                               AssistantMessage('<UPDATED_SYNOPSIS>')
                               ]
             # note 1200 tokens is too big to embed, isn't it? check this.. maybe index halves and average?
-            paper_response = llm.ask({"title":paper_title,
-                                      "abstract":paper_abstract,
-                                      "paper_synopsis":paper_synopsis,
+            paper_response = llm.ask({"title":title,
+                                      "abstract":abstract,
+                                      "paper_synopsis":synopsis,
                                       "section":section_synopses[-1]},
                                      paper_messages,
                                      #template=GPT3,
@@ -812,16 +795,13 @@ End your synopsis response as follows:
             end_idx = response.rfind('/UPDATED_SYNOPSIS')
             if end_idx < 0:
                 end_idx = len(response)
-                paper_synopsis = response[:end_idx-1]
+                synopsis = response[:end_idx-1]
             """
-    index_paper_synopsis(paper_dict, paper_abstract, paper_index)
+    index_paper_synopsis(paper_dict, abstract, paper_index)
     # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
     #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
     #paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'section_ids'] = section_ids
-    save_synopsis_data()
-    print(f'indexed {paper_title}, {len(section_synopses)} sections')
-    return paper_abstract, paper_faiss_id, section_synopses, section_ids
-
+    return True
 
 def strings_ranked_by_relatedness(
     query: str,
@@ -846,7 +826,11 @@ def create_chunks_grobid(pdf_filepath):
     print(f'create_chunks_grobid pdf: {pdf_filepath}')
     pdf_file= {'input': open(pdf_filepath, 'rb')}
     extract = {"title":'', "authors":'', "abstract":'', "sections":[]}
-    response = requests.post(url, files=pdf_file)
+    try:
+        response = requests.post(url, files=pdf_file)
+    except Exception as e:
+        print(f'grobid fail {str(e)}')
+        traceback.print_exc()
     if response.status_code == 200:
         with open('test.tei.xml', 'w') as t:
             t.write(response.text)
@@ -1052,6 +1036,7 @@ class PaperSelect(QWidget):
         self.dscp = search_terms
         self.title_rows = []
         self.select_rows = []
+        self.show_rows = []
         layout = QVBoxLayout()
         self.setAutoFillBackground(True)
         palette = self.palette()
@@ -1064,8 +1049,12 @@ class PaperSelect(QWidget):
             row_layout = QHBoxLayout()
             select = QCheckBox(paper, self)
             row_layout.addWidget(select)
+            show = QPushButton('Show', self)
+            show.clicked.connect(lambda _, p=paper: self.show_paper(p))
+            row_layout.addWidget(show)
             self.title_rows.append(paper)
             self.select_rows.append(select)
+            self.show_rows.append(show)
             layout.addLayout(row_layout)
 
         # Search Button
@@ -1082,12 +1071,43 @@ class PaperSelect(QWidget):
         self.setGeometry(300, 300, 400, 250)
         self.show()
 
+    def show_paper(self, paper):
+        print(f'show paper {paper}')
+        search_result = paper_library_df[paper_library_df['title'].str.contains(paper)]
+        if search_result is not None and len(search_result) > 0:
+            # first display orig ppr
+            filepath = str(search_result.iloc[0]["pdf_filepath"])
+            if filepath is not None and len(filepath) > 0:
+                if filepath.startswith('/home'):
+                    pass
+                elif filepath.startswith('./arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[2:]
+                elif filepath.startswith('/arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[1:]
+                elif filepath.startswith('arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl/'+filepath
+                uri= 'file://'+filepath # assumes filepath is an absolute path starting /home
+            else:
+                uri = str(search_result.iloc[0]["pdf_url"])
+            if uri is not None and len(uri) > 0:
+                webbrowser.open_new(uri)
+            #now display excerpt sections
+            paper_id = str(search_result.iloc[0]["faiss_id"])
+            print(f'paper_id {paper_id}')
+            sections = section_library_df[section_library_df['paper_id'].astype(str) == paper_id]
+            if sections is not None and len(sections) > 0:
+                for s, section in sections.iterrows():
+                    print(f'\nSection {s}')
+                    print(f"{section['synopsis']}")
+            else:
+                print(f'\nNo sections found for paper\n')
+        
     def collect_checked_resources(self):
         # 'resources' must match return from search, that is: [[section_id, ...], [[paper_title, section_excerpt],...]
         resources = []
         section_ids = [] # a list of all section ids (in this case, all for every paper selected!)
         excerpts = [] # a list of [paper_title, section_synopsis] for every section of every paper
-        for title_row, select_row in zip(self.title_rows, self.select_rows):
+        for title_row, select_row, show_row in zip(self.title_rows, self.select_rows, self.show_rows):
             if not select_row.isChecked():
                 continue
             title=title_row
@@ -1208,6 +1228,14 @@ class BrowseUI(QWidget):
             search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
             if len(search_result) > 0:
                 filepath = search_result.iloc[0]["pdf_filepath"]
+                if filepath.startswith('/home'):
+                    pass
+                elif filepath.startswith('./arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[2:]
+                elif filepath.startswith('/arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[1:]
+                elif filepath.startswith('arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl/'+filepath
                 #pubdate = search_result.iloc[0]["year"]
                 filepaths.append(filepath)
                 print(f"   Found file: {filepath}")
@@ -1262,7 +1290,7 @@ if __name__ == '__main__':
         #print("No argument provided, running default main code.")
         #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
         #search("miRNA and DNA Methylation assay cancer detection", web=True)
-        #index_url("https://arxiv.org/pdf/2306.08302.pdf")
+        #index_url("https://www.mdpi.com/1999-4915/13/3/382/pdf?version=1615448249&doc_type=pdf")
         #print(get_arxiv_preprint_url("QLoRA Efficient Finetuning of Quantized LLMs"))
         pass
 

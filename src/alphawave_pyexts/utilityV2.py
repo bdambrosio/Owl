@@ -113,10 +113,12 @@ def run_prompt(client, input, prompt, prompt_options, memory, functions, tokeniz
         response = client.completePrompt(fork, functions, tokenizer, prompt, prompt_options)
     except Exception as e:
         traceback.print_exc()
-    print(f'***** utility ask_llm {response}')
+        return None
+    #print(f'***** utility ask_llm {response}')
     if response['status'] != 'success':
         return response
     if not isinstance(response['message'], dict):
+        #print(f"***** utility run_prompt attempting format repair {type(response['message'])}\n {response['message']}")
         response['message'] = {'role': 'assistant', 'content': response['message'] or ''}
     return response
 

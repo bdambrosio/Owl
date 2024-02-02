@@ -8,6 +8,19 @@ import ast
 import traceback
 import re
 
+def preprocess_json_string(s):
+    # Regular expression to find unescaped quotes
+    pattern = r'(?<!\\)"'
+    
+    # Split the string on unescaped quotes and process in pairs
+    parts = re.split(pattern, s)
+    for i in range(1, len(parts), 2):
+        # Escape backslashes and other special characters in the string value
+        parts[i] = parts[i].replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t').replace('\b', '\\b').replace('\f', '\\f')
+    
+    # Join the parts back together
+    return '"'.join(parts)
+
 def extract_json_template(schema, p=True):
     template = {}
     if schema is not None and "properties" in schema:
@@ -96,10 +109,10 @@ class JSONResponseValidator(PromptResponseValidator):
         if len(str(template)) > 4:
             template_suffix = f' Respond using this template:\n{template}\n'
         
-        raw_text = message if isinstance(message, str) else message.get('content', '')
-        print(f'***** JSONResponseValidator input {type(raw_text)}, {raw_text}')
+        text = message if isinstance(message, str) else message.get('content', '')
+        print(f'***** JSONResponseValidator input {type(text)}, {text}')
         # Parse the response text
-        text = re.sub('\n+', '\n', raw_text)
+        #text = re.sub('\n+', '\n', text)
         cleaned_text = ""
         for char in text:
             if ord(char) >= 10:
@@ -112,6 +125,8 @@ class JSONResponseValidator(PromptResponseValidator):
         parsed=[]
         print(f'***** JSONResponseValidator cleaned \n{text}\n')
         try:
+            text = preprocess_json_string(text)
+            print(f'***** JSONResponseValidator preprocessed \n{text}\n')
             parsed = Response.parse_all_objects(text)
             print(f'***** JSONResponseValidator Response parse \n{parsed}\n')
         except Exception as e:
@@ -129,9 +144,10 @@ class JSONResponseValidator(PromptResponseValidator):
         errors = None
         for i in range(len(parsed)):  # return first one that passes
             obj = parsed[i]
+            #print(f'***** JSONResponseValidator obj {type(obj)} \n{obj}\n')
             try:
                 try:
-                    #print(f'***** JSONResponseValidator before parse_dict {type(obj)}\n{obj}\n')
+                    print(f'***** JSONResponseValidator before parse_dict {type(obj)}\n{obj}\n')
                     obj = self.parse_dict(obj) if type(obj) == str else obj
                     print(f'***** JSONResponseValidator after parse_dict {type(obj)} \n{parsed}\n')
                 except Exception as e:
