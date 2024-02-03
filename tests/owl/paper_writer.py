@@ -362,7 +362,7 @@ From this outline generate 3 SemanticScholar search queries for the section:
 {{$target_section}}
 
 A query can contain no more than 100 characters, Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
-{"query1":'query 1 text',"query2": 'query 2 text', "query3": query 3 text'}
+{"query0":'query 0 text',"query1": 'query 1 text', "query2": query 2 text'}
 
 Respond ONLY with the JSON above, do not include any commentary or explanatory text.
 """
@@ -401,11 +401,10 @@ def s2_search (config, outline, section_outline, sbar=None):
             query = queries['query'+str(i)]
             for bad in bads:
                 query = query.replace(bad, '')
-                result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
-                print(f's2_search found {len(result_list)} new papers')
-                while len(result_list) == 0 and next_offset < total_papers\
-                      and cot.confirmation_popup('Continue?', ''):
-                    s2.get_articles(query, next_offset, confirm=True)
+            result_list, total_papers, next_offset = s2.get_articles(query, confirm=True)
+            print(f's2_search found {len(result_list)} new papers')
+            while next_offset < total_papers and cot.confirmation_popup('Continue?', query):
+                result_list, total_papers, next_offset = s2.get_articles(query, next_offset, confirm=True)
                 
 # global passed into jsonEditor widget
 updated_json = None

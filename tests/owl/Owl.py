@@ -12,6 +12,7 @@ import pickle
 import random
 import json
 import socket
+import re
 import os
 import traceback
 import time
@@ -595,6 +596,21 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       self.display_response('\n'+response)
       self.display_msg('\nRefs:\n'+'\n'.join(titles))
       
+
+   def is_valid_uri(self, uri):
+      # Improved regex pattern for matching most URIs
+      pattern = re.compile(
+         r'^https?://'  # http:// or https://
+         r'(?:(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,6}'  # Domain name
+         r'|'  # or
+         r'localhost'  # localhost
+         r'|'  # or
+         r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP address
+         r'(?::\d+)?'  # Optional port
+         r'(?:/?|[/?]\S+)$', re.IGNORECASE)  # Optional path and query
+      return re.match(pattern, uri) is not None
+   
+
    def index_url(self): # index a url in S2 faiss
       global PREV_LEN, op#, vmem, vmem_clock
       selectedText = ''
@@ -607,8 +623,10 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
          selectedText = selectedText.strip()
          print(f'cursor has selected {len(selectedText)} chars')
       start = selectedText.find('http')
-      if start < 0:
-         start = selectedText.find('file:')
+      if start >= 0 and self.is_valid_uri(selectedText[start:]):
+         selectedText = selectedText[start:]
+      elif start < 0:
+         start = selectedText.find('file:///')
          if start < 0:
             self.display_msg(f'not uri: {selectedText}')
             return

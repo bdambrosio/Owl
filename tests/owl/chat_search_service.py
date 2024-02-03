@@ -155,18 +155,18 @@ async def retrieve(title: str, url: str, doc_type='str', max_chars: int = 4000):
         dr.get(url)
         if url.endswith('pdf') or doc_type=='pdf':
           downloaded_file = wait_for_download(download_dir)
-          print("Downloaded file:", downloaded_file)
+          print("5005 retrieve downloaded file:", downloaded_file)
 
         response = dr.page_source
         dr.close()
 
         if url.endswith('pdf') or doc_type=='pdf':
-          print(f'\nchat processing pdf\n')
+          print(f'\n5005 retrieve processing pdf\n')
           filename = convert_title_to_unix_filename(title)
-          print(f'reading pdf {download_dir+downloaded_file}')
+          print(f'5005 retrieve reading pdf {download_dir+downloaded_file}')
           pdf_info, pdf_text = read_pdf(download_dir+downloaded_file)
           # getting lots of fancy chars, bard suggests this:
-          #encoded = pdf_text.encode("utf-16", "surrogatepass").decode("utf-8")
+          pdf_text = pdf_text.encode('utf-8', 'replace').decode('utf-8', 'replace')
           return {"result": pdf_text, "info": pdf_info, "filepath":download_dir+downloaded_file}
 
       print(f'\nchat processing non-pdf\n')

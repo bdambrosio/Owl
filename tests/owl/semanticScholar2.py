@@ -111,25 +111,21 @@ else:
         print(f"Directory '{papers_dir}' exists.")
         
 
-def get_semantic_scholar_meta(doi):
-    url = f"https://api.semanticscholar.org/v1/paper/doi:{doi}"
-    #url = f"https://api.semanticscholar.org/v1/paper/{s2_id}"
+def get_semantic_scholar_meta(s2_id):
+    #url = f"https://api.semanticscholar.org/v1/paper/doi:{doi}"
+    url = f"https://api.semanticscholar.org/v1/paper/{s2_id}?fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,publisher,citationStyles"
     headers = {'x-api-key':ssKey}
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         data = response.json()
-        #print(data.keys())
-        citations = int(data.get("citationVelocity"))
-        influential = int(data.get("influentialCitationCount"))
-        publisher = data.get("publicationVenue")
-        return citations, influential, publisher
+        return data
     else:
         print("Failed to retrieve data for arXiv ID:", arxiv_id)
-        return 0,0,''
+        return None
 
 def paper_library_df_fixup():
-    paper_library_df['citation'] = ''
-    paper_library_df.to_parquet(paper_library_filepath)
+    #paper_library_df['citation'] = ''
+    #paper_library_df.to_parquet(paper_library_filepath)
     return
 
 paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
@@ -219,8 +215,10 @@ def convert_title_to_unix_filename(title):
     filename = filename[:128]
     return filename
 
-def download_pdf(url, title):
+def download_pdf(url, title=None):
     print(f'download_pdf {url}')
+    if not title:
+        title = url
     try:
         request = urllib.request.Request(url)
         with urllib.request.urlopen(request) as response:
@@ -234,6 +232,7 @@ def download_pdf(url, title):
     except Exception as e:
         print(f'\n download 1 fail {str(e)}')
     try:
+        print(f'\n download_pdf trying 5005 retrieve')
         filepath=download_pdf_5005(url, title)
         print(f' download got paper, wrote to {filepath}')
         if filepath is not None:
@@ -241,6 +240,7 @@ def download_pdf(url, title):
     except Exception as e:
         print(f'\n download 5005 fail {str(e)}')
     try:
+        print(f'\n download_pdf trying wbb')
         filepath = download_pdf_wbb(url, title)
         print(f' download got paper, wrote to {filepath}')
         return filepath
@@ -391,6 +391,7 @@ def extract_words_from_json(json_data):
 
 def index_url(page_url, title='', authors='', publisher='', abstract='', citationCount=0, influentialCitationCount=0,
               pdf_url = None):
+    print(f'\nIndex URL {page_url}\n')
     result_dict = {key: '' for key in paper_library_columns}
     id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     result_dict["faiss_id"] = id
@@ -489,7 +490,35 @@ def get_arxiv_preprint_url(query, top_k=10):
             return [x.href for x in best_ppr.links][1]
         return None
 
-    
+def get_title(title):
+    title = title.strip()
+    try:
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={title}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy"
+        headers = {'x-api-key':ssKey, }
+        response = requests.get(url, headers = headers)
+        if response.status_code != 200:
+            print(f'SemanticsSearch fail code {response.status_code}')
+            return None
+        results = response.json()
+        #print(f' s2 response keys {results.keys()}')
+        total_papers = results["total"]
+        if total_papers == 0:
+            return None
+        papers = results["data"]
+        #print(f'get article search returned first {len(papers)} papers of {total_papers}')
+        for paper in papers:
+            paper_title = paper["title"].strip()
+            print(f'considering {paper_title}')
+            if paper_title.startswith(title):
+                #data = get_semantic_scholar_meta(paper['paperId'])
+                print(f'title meta-data {paper.keys()}')
+                return paper
+    except Exception as e:
+        traceback.print_exc()
+
+
+get_title("Can Large Language Models Understand Context")
+
 def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=10, confirm=True):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
@@ -668,6 +697,18 @@ def index_paper(paper_dict):
             return False
         print(f'index_paper grobid keys {extract.keys()}')
         title = extract['title']
+        paper_dict['title'] = extract['title']
+        paper_dict['authors'] = extract['authors']
+        paper_dict['summary'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
+        meta_data = get_title(title)
+        if meta_data is not None:
+            paper_dict["summary"] = str(meta_data['abstract'])
+            #paper_dict["year"] = meta_data['year'])
+            paper_dict["article_url"] = str(meta_data['url'])
+            paper_dict["summary"] = str(meta_data['abstract'])
+            paper_dict["citationCount"]= int(meta_data['citationCount'])
+            paper_dict["citationStyles"]= str(meta_data['citationStyles'])
+            paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
         abstract = extract['abstract']
         if len(paper_library_df) > 0:
             dup = (paper_library_df['title'] == title).any()
@@ -675,9 +716,6 @@ def index_paper(paper_dict):
                 print(f' already indexed {title}')
                 return False
         paper_index = len(paper_library_df)
-        paper_dict['title'] = extract['title']
-        paper_dict['authors'] = extract['authors']
-        paper_dict['summary'] = extract['abstract']
         paper_library_df.loc[paper_index] = paper_dict
         
     except Exception as e:
