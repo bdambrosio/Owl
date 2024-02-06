@@ -96,7 +96,7 @@ async def submit_url(url: str, background_tasks: BackgroundTasks):
     return {"message": "Job submitted", "job_id": job_id}
 
 @app.post("/submit_file/")
-async def submit_url(filepath: str, background_tasks: BackgroundTasks):
+async def submit_file(filepath: str, background_tasks: BackgroundTasks):
     global task_queue, job_id
     job_id = job_id + 1
     await task_queue.put({"id": job_id, "type": "file", "filepath": filepath})
@@ -121,7 +121,7 @@ async def process_tasks():
             if spec['type'] == 'dict':
                 try:
                     paper_json = json.loads(spec['paper'])
-                    await run_in_threadpool(s2.index_paper, paper_json)
+                    await run_in_threadpool(s2.index_dict, paper_json)
                 except Exception as e:
                     print(f"fail to parse paper descriptor as json {spec['paper']}\n{str(e)}")
                     traceback.print_exc()

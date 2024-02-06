@@ -632,6 +632,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
             return
       selectedText = selectedText[start:]
       self.s2.queue_url_for_indexing(selectedText)
+      self.display_response("\n")
       self.display_msg("Indexing request submitted.")
 
    def generate_report(self): # index a url in S2 faiss

@@ -11,6 +11,7 @@ import re
 import random
 import openai
 import traceback
+from pathlib import Path
 import arxiv
 from arxiv import Client, Search, SortCriterion, SortOrder
 import ast
@@ -54,6 +55,10 @@ from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
 import rewrite as rw
+# used for title matching
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 tokenizer = GPT3Tokenizer()
 ui = None
@@ -172,6 +177,7 @@ else:
     print(f"loaded '{section_library_filepath}'\n  keys: {section_library_df.keys()}")
 
 def save_synopsis_data():
+    paper_library_df.to_parquet(paper_library_filepath)
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
@@ -212,7 +218,7 @@ def convert_title_to_unix_filename(title):
     filename = title.replace(' ', '_')
     # Remove or replace special characters
     filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
-    filename = filename[:128]
+    filename = filename
     return filename
 
 def download_pdf(url, title=None):
@@ -389,6 +395,15 @@ def extract_words_from_json(json_data):
     words = re.findall(r'\b\w+\b', text)
     return words
 
+
+def index_dict(paper_dict):
+    # called from index_service for search enqueued dict
+    result = index_paper(paper_dict)
+    if not result:
+        return False
+    save_synopsis_data()
+
+
 def index_url(page_url, title='', authors='', publisher='', abstract='', citationCount=0, influentialCitationCount=0,
               pdf_url = None):
     print(f'\nIndex URL {page_url}\n')
@@ -417,10 +432,6 @@ def index_url(page_url, title='', authors='', publisher='', abstract='', citatio
     if not indexed:
         return False
     save_synopsis_data()
-    faiss.write_index(paper_indexIDMap, paper_index_filepath)
-    faiss.write_index(section_indexIDMap, section_index_filepath)
-    section_library_df.to_parquet(section_library_filepath)
-    paper_library_df.to_parquet(paper_library_filepath)
 
 
 def index_file(filepath):
@@ -443,10 +454,6 @@ def index_file(filepath):
         return False
     print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
     save_synopsis_data()
-    faiss.write_index(paper_indexIDMap, paper_index_filepath)
-    faiss.write_index(section_indexIDMap, section_index_filepath)
-    section_library_df.to_parquet(section_library_filepath)
-    paper_library_df.to_parquet(paper_library_filepath)
 
 
 def get_arxiv_preprint_url(query, top_k=10):
@@ -660,8 +667,7 @@ def index_paper_synopsis(paper_dict, synopsis, paper_index):
     embeds_np = np.array([embedding], dtype=np.float32)
     paper_indexIDMap.add_with_ids(embeds_np, ids_np)
     paper_library_df.loc[paper_index, 'synopsis'] = synopsis
-    paper_library_df.to_parquet(paper_library_filepath)
-
+    return True
 
 def index_section_synopsis(paper_dict, synopsis):
     global section_indexIDMap
@@ -673,7 +679,7 @@ def index_section_synopsis(paper_dict, synopsis):
     embedding = embedding_request(synopsis)
     ids_np = np.array([faiss_id], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
-    #print(f'section synopsis length {len(synopsis)}')
+    print(f'section synopsis length {len(synopsis)} paper_id {paper_dict["faiss_id"]}')
     section_indexIDMap.add_with_ids(embeds_np, ids_np)
     synopsis_dict = {"faiss_id":faiss_id,
                      "paper_id": paper_dict["faiss_id"],
@@ -683,10 +689,10 @@ def index_section_synopsis(paper_dict, synopsis):
     return faiss_id
 
 
+
 def index_paper(paper_dict):
     # main path for papers from index_url and / or index_file, where we know nothing other than pdf
     pdf_filepath = paper_dict['pdf_filepath']
-    paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     if pdf_filepath is None:
         print(f'pdf filepath is None!')
         return False
@@ -715,6 +721,8 @@ def index_paper(paper_dict):
             if dup:
                 print(f' already indexed {title}')
                 return False
+        paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+        paper_dict['faiss_id'] = paper_faiss_id
         paper_index = len(paper_library_df)
         paper_library_df.loc[paper_index] = paper_dict
         
@@ -835,10 +843,7 @@ End your synopsis response as follows:
                 end_idx = len(response)
                 synopsis = response[:end_idx-1]
             """
-    index_paper_synopsis(paper_dict, abstract, paper_index)
-    # forget this for now, we can always retrieve sections by matching on paper_id in the section_library
-    #row = paper_library_df[paper_library_df['faiss_id'] == paper_dict['faiss_id']]
-    #paper_library_df.loc[paper_library_df['faiss_id'] == paper_dict['faiss_id'], 'section_ids'] = section_ids
+    result = index_paper_synopsis(paper_dict, abstract, paper_index)
     return True
 
 def strings_ranked_by_relatedness(
@@ -978,10 +983,11 @@ Respond using this JSON template. Return only JSON without any Markdown or code 
             return True
     return False
 
-def search(query, dscp='', top_k=20, web=False, whole_papers=False):
+def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_title=False):
     
     """Query is a *list* of keywords or phrases
     - 'dscp' is an expansion that can be used for reranking using llm
+    - if query_is_title then whole_papers == True!
     - Finds the closest n faiss IDs to the user's query
     - returns the section synopses and section_library and paper_library entries for the found items
         -- or just one section for each paper if whole_papers=True"""
@@ -1008,36 +1014,54 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False):
 
     hyde_query = hyde(query+'. '+dscp)
     print(f'hyde query: {hyde_query}')
-    query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k/2))
-    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k/2))
-    hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k/2))
-    reranked = reverse_reciprocal_ranking(query_ids, kwd_ids, hyde_ids)
-    #print(f'search found:\n{query_ids}\n{kwd_ids},\n{hyde_ids}')
-    #print(f'rerank:\n{reranked}\n')
-    all_ids = query_ids+kwd_ids+hyde_ids
-    all_summaries = query_summaries+kwd_summaries+hyde_summaries
-    selected_summaries = []
-    selected_ids = []
-    n=0
-    relevant_titles = []
-    for id in reranked:
-        if n > top_k:
-            return selected_ids, selected_summaries
-        try:
-            idx = all_ids.index(id)
-        except:
-            print(f"\n**ERROR** S2 search can't find {id} in {all_ids}\n")
-            continue
-        if (whole_papers and all_summaries[idx][0] in relevant_titles):
-            continue
-        if relevant(all_summaries[idx][0]+'\n'+all_summaries[idx][1], query, dscp):
-            # if we already know this paper is relevant, then all sections are (hmm)
-            selected_ids.append(idx)
-            selected_summaries.append(all_summaries[idx])
-            n += 1
-            relevant_titles.append(all_summaries[idx][0])
+    query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k))
+    print(f'search ids {query_ids}')
+    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k))
+    print(f'kwd ids {kwd_ids}')
+    hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k))
+    print(f'hyde ids {hyde_ids}')
+    if query_is_title:
+        # use scikit Tfidf on titles
+        vectorizer = TfidfVectorizer()
+        titles = paper_library_df['title'].tolist()
+        tfidf_matrix = vectorizer.fit_transform(titles + [query])
+        cosine_similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])
+        tdidf_ids = []
+        for loc, value in enumerate(cosine_similarities[0]):
+            if value > 0.0:
+                print(loc, paper_library_df.iloc[loc]['title'])
+            tdidf_ids.append((value, paper_library_df.iloc[loc]['faiss_id']))
+        #print(f'title similarities {query}\n{cosine_similarities}')
+        sorted_tuples = sorted(tdidf_ids, key=lambda x: x[0], reverse=True)
+        sorted_tdidf_ids = [item[1] for item in sorted_tuples]
+        print(f'tdidfs {sorted_tdidf_ids}')
 
-    return selected_ids, selected_summaries
+        id_mapping = dict(zip(section_library_df['faiss_id'], section_library_df['paper_id']))
+        query_ids_mapped = [id_mapping[query_id] for query_id in query_ids if query_id in id_mapping]
+        kwd_ids_mapped = [id_mapping[kwd_id] for kwd_id in kwd_ids if kwd_id in id_mapping]
+        hyde_ids_mapped = [id_mapping[hyde_id] for hyde_id in hyde_ids if hyde_id in id_mapping]
+        print(f'query ppr ids {query_ids_mapped}')
+        print(f'kwd ppr ids {kwd_ids_mapped}')
+        print(f'hyde ppr ids {hyde_ids_mapped}')
+
+        reranked_ids = reverse_reciprocal_ranking(query_ids_mapped, kwd_ids_mapped, hyde_ids_mapped, sorted_tdidf_ids[:int(top_k)])[:int(top_k)]
+        print(f'reranked paper ids {reranked_ids}')
+        return reranked_ids, []
+    else:
+        reranked_ids = reverse_reciprocal_ranking(query_ids, kwd_ids, hyde_ids)[:int(top_k)]
+        excerpts = []
+        for section_id in reranked_ids:
+            if section_id in query_ids:
+                index = query_ids.index(section_id)
+                excerpts.append(query_summaries[index])
+            elif section_id in kwd_ids:
+                index = kwd_ids.index(section_id)
+                excerpts.append(kwd_summaries[index])
+            elif section_id in hyde_ids:
+                index = hyde_ids.index(section_id)
+                excerpts.append(hyde_summaries[index])
+                
+    return reranked_ids, excerpts
 
 def parse_arguments():
     """Parses command-line arguments using the argparse library."""
@@ -1111,28 +1135,29 @@ class PaperSelect(QWidget):
 
     def show_paper(self, paper):
         print(f'show paper {paper}')
-        search_result = paper_library_df[paper_library_df['title'].str.contains(paper)]
+        search_result = paper_library_df[paper_library_df['title'].str.contains(paper, na=False)]
         if search_result is not None and len(search_result) > 0:
             # first display orig ppr
             filepath = str(search_result.iloc[0]["pdf_filepath"])
             if filepath is not None and len(filepath) > 0:
+                print(f'filepath: {filepath}')
                 if filepath.startswith('/home'):
                     pass
                 elif filepath.startswith('./arxiv'):
-                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[2:]
-                elif filepath.startswith('/arxiv'):
                     filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[1:]
+                elif filepath.startswith('/arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath
                 elif filepath.startswith('arxiv'):
                     filepath = '/home/bruce/Downloads/owl/tests/owl/'+filepath
                 uri= 'file://'+filepath # assumes filepath is an absolute path starting /home
-            else:
-                uri = str(search_result.iloc[0]["pdf_url"])
+                if not Path(uri).exists():
+                    uri = str(search_result.iloc[0]["pdf_url"])
             if uri is not None and len(uri) > 0:
                 webbrowser.open_new(uri)
             #now display excerpt sections
             paper_id = str(search_result.iloc[0]["faiss_id"])
             print(f'paper_id {paper_id}')
-            sections = section_library_df[section_library_df['paper_id'].astype(str) == paper_id]
+            sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_id)]
             if sections is not None and len(sections) > 0:
                 for s, section in sections.iterrows():
                     print(f'\nSection {s}')
@@ -1149,7 +1174,7 @@ class PaperSelect(QWidget):
             if not select_row.isChecked():
                 continue
             title=title_row
-            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+            search_result = paper_library_df[paper_library_df['title'].str.contains(title, na=False)]
             if len(search_result) > 0: # found paper, gather all sections
                 paper_id = str(search_result.iloc[0]["faiss_id"])
                 sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_id)]
@@ -1166,7 +1191,7 @@ class PaperSelect(QWidget):
             if not select_row.isChecked():
                 continue
             title=title_row
-            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+            search_result = paper_library_df[paper_library_df['title'].str.contains(title, na=False)]
             if len(search_result) > 0:
                 paper_id = str(search_result.iloc[0]["faiss_id"])
                 filepath = str(search_result.iloc[0]["pdf_filepath"])
@@ -1249,37 +1274,35 @@ class BrowseUI(QWidget):
 
         # browse is about papers, not sections
         # 'whole_papers=True' only returns one section for each paper
-        finds = search(query, dscp, whole_papers=True) 
+        finds = search(query, dscp, whole_papers=True, query_is_title=True) 
         # finds is a list: [[section_id,...], [[paper_title, section_text],...]]
-        section_ids = finds[0]
+        paper_ids = finds[0]
         excerpts = finds[1] # so note excerpts is a list of [paper_title, section_excerpt]
         #
         ### filter out duplicates at paper level and display list of found titles.
         #
-        paper_titles = []
-        for excerpt in excerpts:
-            if excerpt[0] not in paper_titles: # shouldn't be necessary anymore with whole_papers=True, but doesn't hurt
-                paper_titles.append(excerpt[0])
         filepaths = []
-        for title in paper_titles:
-            print(f'title: {title}')
-            search_result = paper_library_df[paper_library_df['title'].str.contains(title)]
+        paper_titles = []
+        for paper_id in paper_ids:
+            search_result = paper_library_df[paper_library_df['faiss_id']==paper_id]
             if len(search_result) > 0:
+                paper_titles.append(search_result.iloc[0]['title'])
                 filepath = search_result.iloc[0]["pdf_filepath"]
+                print(f'filepath: {filepath}')
                 if filepath.startswith('/home'):
                     pass
                 elif filepath.startswith('./arxiv'):
-                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[2:]
-                elif filepath.startswith('/arxiv'):
                     filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[1:]
+                elif filepath.startswith('/arxiv'):
+                    filepath = '/home/bruce/Downloads/owl/tests/owl'+filepath[0:]
                 elif filepath.startswith('arxiv'):
                     filepath = '/home/bruce/Downloads/owl/tests/owl/'+filepath
                 #pubdate = search_result.iloc[0]["year"]
                 filepaths.append(filepath)
-                print(f"   Found file: {filepath}")
+                #print(f"   Found file: {filepath}")
             else:
                 filepaths.append(None)
-                print("    No matching rows found.")
+                #print("    No matching rows found.")
         self.parent_papers['titles'] = paper_titles
         self.parent_papers['filepaths'] = filepaths
         self.parent_papers['years'] = filepaths

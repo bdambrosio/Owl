@@ -493,8 +493,8 @@ def write_report(app, topic):
             length = int(config['length'])
         else:
             length = 1200
-    # write report! pbly should add # rewrites
-    write_report_aux(config, paper_outline=outline, section_outline=outline, length=length)
+        # write report! pbly should add # rewrites
+        write_report_aux(config, paper_outline=outline, section_outline=outline, length=length)
         
     rewrite_config = config['ReWrite'] # not sure, is this just for rewrite of existing?
     if rewrite_config['exec'] == True:
@@ -633,6 +633,8 @@ End the section as follows:
               AssistantMessage("<DRAFT>\n")
               ]
         response = cot.llm.ask('', messages, template=template, max_tokens=int(subsection_token_length), temp=0.1, eos='</DRAFT>')
+        if response is None:
+            return '',''
         end_idx = response.rfind('</DRAFT>')
         if end_idx < 0:
             end_idx = len(response)
@@ -751,6 +753,7 @@ class DisplayApp(QtWidgets.QWidget):
         self.display_area.repaint()
 
     def discuss(self):
+        print(f'calling discuss query{self.query} sections {len(self.sections)}, dscp {self.dscp}')
         discuss_resources(self, self.query, self.sections, self.dscp, self.template)
 
 def discuss_resources(display, query, sections, dscp='', template=None):
@@ -822,7 +825,7 @@ if __name__ == '__main__':
                 resources = pickle.load(f)
             print(f'\nResources:\n{json.dumps(resources, indent=2)}')
             app = QApplication(sys.argv)
-            window = DisplayApp(input('?'), resources['sections'], resources['dscp'], resources['template'])
+            window = DisplayApp('Question?', resources['sections'], resources['dscp'], resources['template'])
             #window.show()
             app.exec()
             sys.exit(0)

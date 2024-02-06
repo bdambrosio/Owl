@@ -110,7 +110,7 @@ class JSONResponseValidator(PromptResponseValidator):
             template_suffix = f' Respond using this template:\n{template}\n'
         
         text = message if isinstance(message, str) else message.get('content', '')
-        print(f'***** JSONResponseValidator input {type(text)}, {text}')
+        #print(f'***** JSONResponseValidator input {type(text)}, {text}')
         # Parse the response text
         #text = re.sub('\n+', '\n', text)
         cleaned_text = ""
@@ -123,12 +123,12 @@ class JSONResponseValidator(PromptResponseValidator):
         if start >= 0 and end > 0 and  end > start:
             text = text[start:end+1]
         parsed=[]
-        print(f'***** JSONResponseValidator cleaned \n{text}\n')
+        #print(f'***** JSONResponseValidator cleaned \n{text}\n')
         try:
             text = preprocess_json_string(text)
-            print(f'***** JSONResponseValidator preprocessed \n{text}\n')
+            #print(f'***** JSONResponseValidator preprocessed \n{text}\n')
             parsed = Response.parse_all_objects(text)
-            print(f'***** JSONResponseValidator Response parse \n{parsed}\n')
+            #print(f'***** JSONResponseValidator Response parse \n{parsed}\n')
         except Exception as e:
             raise e
         if len(parsed) == 0:
@@ -147,9 +147,9 @@ class JSONResponseValidator(PromptResponseValidator):
             #print(f'***** JSONResponseValidator obj {type(obj)} \n{obj}\n')
             try:
                 try:
-                    print(f'***** JSONResponseValidator before parse_dict {type(obj)}\n{obj}\n')
+                    #print(f'***** JSONResponseValidator before parse_dict {type(obj)}\n{obj}\n')
                     obj = self.parse_dict(obj) if type(obj) == str else obj
-                    print(f'***** JSONResponseValidator after parse_dict {type(obj)} \n{parsed}\n')
+                    #print(f'***** JSONResponseValidator after parse_dict {type(obj)} \n{parsed}\n')
                 except Exception as e:
                     pass
                 if self.schema is not None:

@@ -993,7 +993,7 @@ Input: {{{{$input}}}}
                    data = response.json()
                 except Exception as e:
                    return {"article": f"\nretrieval failure, {str(e)}"}
-                article_prompt_text = f"""In up to 400 words, provide a detailed synopsis of the following news article. Do not include commentary on the content or your process.
+                article_prompt_text = f"""In up to 600 words, provide a detailed synopsis of the following news article. Do not include commentary on the content or your process.
 """
                 if len(data['result']) < 16:
                     return {"article": f"\n retrieval failure, NYTimes timeout\n"}

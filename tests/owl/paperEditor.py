@@ -4,6 +4,7 @@ import pandas as pd
 import faiss
 from PyQt5.QtWidgets import QApplication, QTableView, QVBoxLayout, QPushButton, QWidget
 from PyQt5.QtCore import QAbstractTableModel, Qt, QModelIndex
+from PyQt5.QtGui import QColor
 
 class PandasModel(QAbstractTableModel):
     def __init__(self, data, table_view):
@@ -19,11 +20,21 @@ class PandasModel(QAbstractTableModel):
         return self._data.shape[1]-len(self.hidden_columns)
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
+        if not index.isValid():
             return None
+            
         # Adjust column index to account for hidden columns
         column = self.visibleColumn(index.column())
-        return str(self._data.iloc[index.row(), column])
+        
+        if role == Qt.DisplayRole:
+            return str(self._data.iloc[index.row(), column])
+        
+        # Add condition for background color
+        if role == Qt.BackgroundRole:
+            if not self.test_for_sections(index.row()):
+                return QColor(Qt.red)
+        
+        return None
 
     def headerData(self, section, orientation, role):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
@@ -40,6 +51,13 @@ class PandasModel(QAbstractTableModel):
                 section += 1
         return section
 
+    def test_for_sections(self, row_num):
+        sections = section_library_df[section_library_df['paper_id'].astype(str) == str(paper_library_df.iloc[row_num]['faiss_id'])]
+        if sections is not None and len(sections) > 0:
+            return True
+        else:
+            return False
+        
     def removeRow(self, row, parent=None):
         global paper_indexIDMap, section_library_df, section_indexIDMap
         self.beginRemoveRows(QModelIndex(), row, row)
@@ -117,9 +135,7 @@ remove_row_button.clicked.connect(remove_selected_row)
 main_layout.addWidget(remove_row_button)
 
 save_button = QPushButton("Save DataFrame")
-def save_dataframe():
-    model._data.to_parquet(paper_library_filepath)
-save_button.clicked.connect(save_dataframe)
+save_button.clicked.connect(save_library)
 main_layout.addWidget(save_button)
 
 main_widget.setLayout(main_layout)
