@@ -169,7 +169,84 @@ def select_top_n_texts(texts, keyphrases, n):
     return sorted_texts[:n]
 
 
-def rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
+def format_outline(json_data, indent=0):
+    """
+    Formats a research paper outline given in JSON into an indented list as a string.
+
+    Parameters:
+    json_data (dict): The research paper outline in JSON format.
+    indent (int): The current level of indentation.
+
+    Returns:
+    str: A formatted string representing the research paper outline.
+    """
+    formatted_str = ""
+    indent_str = " -" * indent
+
+    if "title" in json_data:
+        formatted_str += indent_str + ' '+json_data["title"] + "\n"
+
+    if "sections" in json_data:
+        for section in json_data["sections"]:
+            formatted_str += format_outline(section, indent + 1)
+
+    return formatted_str
+
+
+def write(paper_title, paper_outline, section_title, paper_summaries, section_topic, section_token_length,
+          parent_section_title, heading_1_title, heading_1_draft, template):
+    #
+    ### Write initial content
+    #
+        
+    messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
+You are writing a paper titled:
+{paper_title}
+The outline for the full paper is:
+{format_outline(paper_outline)}
+
+"""),
+              UserMessage(f"""Your current task is to write the part titled: '{section_title}'
+
+<RESEARCH EXCERPTS>
+{paper_summaries}
+</RESEARCH EXCERPTS>
+
+
+The {heading_1_title} section content up to this point is:
+
+<{heading_1_title}_SECTION_CONTENT>
+{heading_1_draft}
+</{heading_1_title}_SECTION_CONTENT>
+
+Again, your current task is to write the next part, titled: '{section_title}'
+
+1. First reason step by step to determine the role of the part you are generating within the overall paper, 
+2. Then generate the appropriate text, subject to the following guidelines:
+
+ - Output ONLY the text, do NOT output your reasoning.
+ - Write a dense, detailed text using known fact and the above research excepts, of about {section_token_length} words in length.
+ - This section should cover the specific topic: {parent_section_title}: {section_topic}
+ - You may refer to, but should not repeat, prior subsection content in text you produce.
+ - Present an integrated view of the assigned topic, noting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
+ - Ensure the section provides depth while removing redundant or superflous detail, ensuring that every critical aspect of the source argument, observations, methods, findings, or conclusions is included.
+End the section as follows:
+
+</DRAFT>
+"""),
+              AssistantMessage("<DRAFT>\n")
+              ]
+    response = cot.llm.ask('', messages, template=template, max_tokens=int(section_token_length), temp=0.1, eos='</DRAFT>')
+    if response is None:
+        return '',''
+    end_idx = response.rfind('</DRAFT>')
+    if end_idx < 0:
+        end_idx = len(response)
+    draft = response[:end_idx]
+    return draft
+
+def rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title,
+            heading_1, heading_1_draft, template):
     missing_entities = literal_missing_entities(entities, draft)
     sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone.
 You are writing a paper titled:
