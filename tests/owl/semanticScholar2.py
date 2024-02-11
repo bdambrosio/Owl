@@ -55,6 +55,7 @@ from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
 import rewrite as rw
+import grobid
 # used for title matching
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -75,8 +76,8 @@ embedding_tokenizer = AutoTokenizer.from_pretrained('/home/bruce/Downloads/model
 #embedding_model.load_adapter('/home/bruce/Downloads/models/Specter-2')
 from adapters import AutoAdapterModel
 
-embedding_model = AutoAdapterModel.from_pretrained("allenai/specter2_aug2023refresh_base")
-embedding_adapter_name = embedding_model.load_adapter("allenai/specter2_aug2023refresh", source="hf", set_active=True)
+embedding_model = AutoAdapterModel.from_pretrained("/home/bruce/Downloads/models/Specter-2-base")
+embedding_adapter_name = embedding_model.load_adapter("/home/bruce/Downloads/models/Specter-2", set_active=True)
 
 
 GPT3 = "gpt-3.5-turbo-16k"
@@ -543,7 +544,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
     try:
         # Set up your search query
         #query='Direct Preference Optimization for large language model fine tuning'
-        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&offset={next_offset}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr,embedding.specter_v2"
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={query}&offset={next_offset}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy,tldr"
         headers = {'x-api-key':ssKey, }
         
         response = requests.get(url, headers = headers)
@@ -868,7 +869,7 @@ def create_chunks_grobid(pdf_filepath):
     url = "http://192.168.1.160:8070/api/processFulltextDocument"
     print(f'create_chunks_grobid pdf: {pdf_filepath}')
     pdf_file= {'input': open(pdf_filepath, 'rb')}
-    extract = {"title":'', "authors":'', "abstract":'', "sections":[]}
+    extract = {"title":'', "authors":'', "abstract":'', "sections":[], "date":'', "refs":'', "figure_texts":{}, "table_texts":{}}
     try:
         response = requests.post(url, files=pdf_file)
     except Exception as e:
@@ -881,44 +882,7 @@ def create_chunks_grobid(pdf_filepath):
         print(f'grobid error {response.status_code}')
         return None
     xml_content = response.text
-    # Parse the XML
-    ns = {'tei': 'http://www.tei-c.org/ns/1.0'}
-    tree = etree.fromstring(xml_content.encode('utf-8'))
-    # Extract title
-    title = tree.xpath('.//tei:titleStmt/tei:title[@type="main"]', namespaces=ns)
-    title_text = title[0].text if title else 'Title not found'
-    
-    # Extract authors
-    authors = tree.xpath('.//tei:teiHeader//tei:fileDesc//tei:sourceDesc/tei:biblStruct/tei:analytic/tei:author/tei:persName', namespaces=ns)
-    authors_list = [' '.join([name.text for name in author.xpath('.//tei:forename | .//tei:surname', namespaces=ns)]) for author in authors]
-    
-    # Extract abstract
-    abstract = tree.xpath('.//tei:profileDesc/tei:abstract//text()', namespaces=ns)
-    abstract_text = ''.join(abstract).strip()
-    
-    # Extract major section titles
-    # Note: Adjust the XPath based on the actual TEI structure of your document
-    section_titles = tree.xpath('./tei:text/tei:body/tei:div/tei:head', namespaces=ns)
-    titles_list = [title.text for title in section_titles]
-    body_divs = tree.xpath('./tei:text/tei:body/tei:div', namespaces=ns)
-    # Print extracted information
-    extract["title"]=title_text
-    print("Title:", title_text)
-    extract["authors"]=', '.join(authors_list)
-    print("Authors:", extract["authors"])
-    extract["abstract"]=abstract_text
-    print("Abstract:", len(abstract_text))
-    #print("Section titles:", len(titles_list))
-    #print("body divs:", len(titles_list))
-    sections = []
-    for element in body_divs:
-        all_text = element.xpath('.//text()')
-        # Combine text nodes into a single string
-        combined_text = ''.join(all_text)
-        #print("Section text:", len(combined_text))
-        if len(combined_text) > 7:
-            sections.append(combined_text)
-    extract["sections"] = sections
+    extract = grobid.parse_pdf('text.tei.xml')
     return extract
 
 

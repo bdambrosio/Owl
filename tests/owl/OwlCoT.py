@@ -292,7 +292,7 @@ Chain of Thought:
        
 
 class TextEditDialog(QDialog):
-    def __init__(self, static_text, editable_text, parent=None):
+    def __init__(self, static_text, editable_text, parent=None, modal=True):
         super(TextEditDialog, self).__init__(parent)
         
         layout = QVBoxLayout(self)
@@ -311,6 +311,8 @@ class TextEditDialog(QDialog):
         self.no_button = QPushButton('No', self)
         self.no_button.clicked.connect(self.reject)
         layout.addWidget(self.no_button)
+        if not modal:
+            self.setModal(False)
         
 class ListDialog(QDialog):
     def __init__(self, items, parent=None):
@@ -566,8 +568,8 @@ class OwlInnerVoice():
         #print(f'format_topics {text}')
         return text
     
-    def confirmation_popup(self, action, argument):
-       dialog = TextEditDialog(action, argument)
+    def confirmation_popup(self, action, argument, modal=True):
+       dialog = TextEditDialog(action, argument, modal=modal)
        result = dialog.exec_()
        if result == QDialog.Accepted:
           return dialog.text_edit.toPlainText()
@@ -976,7 +978,7 @@ Input: {{{{$input}}}}
 
         if analysis is not None and type(analysis) != dict and ('{' in analysis):
             print(f'!!!!!!!!!!!action_selection calling repair!!!!!!!!!!!!!!!')
-            analysis = self.llm.repair_json(analysis)
+            analysis = self.llm.repair_json(analysis, analysis)
         if analysis is not None and type(analysis) == dict and 'action' in analysis and 'argument' in analysis:
             content = analysis
             print(f'OwlCoT content {content}')
@@ -1334,12 +1336,12 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
        short_profile = self.short_prompt()
        query = query.strip()
        ids, summaries = self.ui.s2.search(query)
-       print(f' s2_search query {query}, result {type(ids)}, {type(summaries[0])}')
-       print(f' s2_search summaries\n{summaries}')
+       #print(f' s2_search query {query}, result {type(ids)}, {type(summaries[0])}')
+       #print(f' s2_search summaries\n{summaries}')
        titles = [item[0] for item in summaries]
        titles = list(set(titles))
        texts = [item[1] for item in summaries]
-       summary=self.summarize(query, '\n'.join(texts)[:16000], short_profile)
+       summary=self.summarize(query, '\n'.join(texts)[:24000], short_profile)
        return summary, titles
 
     def gpt4(self, query, profile):

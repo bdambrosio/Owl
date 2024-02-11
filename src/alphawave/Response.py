@@ -31,10 +31,10 @@ class Response:
     @staticmethod
     def parse_json(text):
         text = ''.join(c for c in text if c.isprintable())
-        #text = text.replace('{\n', '{')
+        text = text.replace('\n', '')
         #text = text.replace('}\n', '}')
         #text = re.sub(r"'([^\"']+)'", r'"\1"', text) # all pairs as doublequote
-        text = re.sub(r"'([^\"']+)':", r'"\1":', text) # keys as doublequote
+        #text = re.sub(r"'([^\"']+)':", r'"\1":', text) # keys as doublequote
         #text = re.sub(r'"([^\'"]+)":', r"'\1':", text) # keys as singlequote
         #text = text.replace("'", '"')
         #text = text.replace("\'", '"')
@@ -109,3 +109,5 @@ class Response:
                 return cleaned
         else:
             return None
+
+        

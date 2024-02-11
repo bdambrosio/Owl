@@ -50,7 +50,9 @@ from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 from PyQt5.QtCore import pyqtSignal
 import signal
+import OwlCoT as oiv
 from OwlCoT import LLM, ListDialog, generate_faiss_id,OPENAI_MODEL3,OPENAI_MODEL4
+import semanticScholar2 as s2
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
@@ -183,30 +185,6 @@ def get_template(row, config):
             return cot.template
     print(f'get_template fail {row}\n{json.dumps(config, indent=2)}')
         
-def format_outline(json_data, indent=0):
-    """
-    Formats a research paper outline given in JSON into an indented list as a string.
-
-    Parameters:
-    json_data (dict): The research paper outline in JSON format.
-    indent (int): The current level of indentation.
-
-    Returns:
-    str: A formatted string representing the research paper outline.
-    """
-    formatted_str = ""
-    indent_str = " -" * indent
-
-    if "title" in json_data:
-        formatted_str += indent_str + ' '+json_data["title"] + "\n"
-
-    if "sections" in json_data:
-        for section in json_data["sections"]:
-            formatted_str += format_outline(section, indent + 1)
-
-    return formatted_str
-
-
 entity_cache = {}
 entity_cache_filepath = 'paper_writer_entity_cache.json'
 if not os.path.exists(entity_cache_filepath):
@@ -334,7 +312,7 @@ def plan_search():
             if selected_index != -1:  # -1 means no selection
                 plan_name = plan_names[selected_index]
                 plan = plans[plan_name]
-                print(json.dumps(plan, indent=4))
+                ##print(json.dumps(plan, indent=4))
                 plans[plan['name']] = plan
 
     if plan is None:
@@ -411,7 +389,7 @@ updated_json = None
 
 def handle_json_editor_closed(result):
     global updated_json
-    print(f'got result {result}')
+    #print(f'got result {result}')
     updated_json = result
 
 config = {}
@@ -442,7 +420,7 @@ def write_report(app, topic):
     sbar_config = config['SBAR']
     if sbar_config['exec'] == 'Yes':
         # pass in query to sbar!
-        print(f'sbar input plan\n{plan}')
+        #print(f'sbar input plan\n{plan}')
         if 'sbar' in plan and type(plan['sbar']) is dict and cot.confirmation_popup('Edit existing sbar?', json.dumps(plan['sbar'], indent=2)):
             # we already have an sbar, edit it
             app = QApplication(sys.argv)
@@ -589,57 +567,9 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
             if ref not in subsection_refs:
                 subsection_refs.append(ref)
         subsection_token_length = max(500,length) # no less than a paragraph
-        
-        #
-        ### Write initial content
-        #
-        
-        print(f"\nWriting:{section_outline['title']} length {length}\n covering {subsection_topic}")
-        messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
-You are writing a paper titled:
-{paper_title}
-The outline for the full paper is:
-{format_outline(paper_outline)}
 
-"""),
-                  UserMessage(f"""Your current task is to write the part titled: '{section_outline["title"]}'
-
-<RESEARCH EXCERPTS>
-{paper_summaries}
-</RESEARCH EXCERPTS>
-
-
-The {heading_1_title} section content up to this point is:
-
-<{heading_1_title}_SECTION_CONTENT>
-{heading_1_draft}
-</{heading_1_title}_SECTION_CONTENT>
-
-Again, your current task is to write the next part, titled: '{section_outline["title"]}'
-
-1. First reason step by step to determine the role of the part you are generating within the overall paper, 
-2. Then generate the appropriate text, subject to the following guidelines:
-
- - Output ONLY the text, do NOT output your reasoning.
- - Write a dense, detailed text using known fact and the above research excepts, of about {subsection_token_length} words in length.
- - This section should cover the specific topic: {parent_section_title}: {subsection_topic}
- - You may refer to, but not repeat, prior section content in any text you produce.
- - Present an integrated view of the assigned topic, noting controversy where present, and capturing the overall state of knowledge along with essential statements, methods, observations, inferences, hypotheses, and conclusions. This must be done in light of the place of this section or subsection within the overall paper.
- - Ensure the section provides depth while removing redundant or superflous detail, ensuring that every critical aspect of the source argument, observations, methods, findings, or conclusions is included.
-End the section as follows:
-
-</DRAFT>
-"""),
-              AssistantMessage("<DRAFT>\n")
-              ]
-        response = cot.llm.ask('', messages, template=template, max_tokens=int(subsection_token_length), temp=0.1, eos='</DRAFT>')
-        if response is None:
-            return '',''
-        end_idx = response.rfind('</DRAFT>')
-        if end_idx < 0:
-            end_idx = len(response)
-        draft = response[:end_idx]
-
+        print(f"\nWriting: {section_outline['title']} length {length}")
+        draft = rw.write(paper_title, paper_outline, section_outline['title'], paper_summaries, subsection_topic, int(subsection_token_length), parent_section_title, heading_1_title, heading_1_draft, template)
         #print(f'\nFirst Draft:\n{draft}\n')
         if num_rewrites < 1:
             return draft, subsection_refs
@@ -674,10 +604,6 @@ End the section as follows:
                 pf.write(draft)
             n += 1
 
-    if depth == 0:
-        print(f'\nSection:\n{section}\n')
-        print(f'Refs:\n{subsection_refs}\n')
-        
     return section, subsection_refs
 
 class DisplayApp(QtWidgets.QWidget):
@@ -721,26 +647,30 @@ class DisplayApp(QtWidgets.QWidget):
                 else:
                     super().keyPressEvent(event)
             
+        self.mainFont = QFont("Noto Color Emoji", 14)
+
         self.display_area = MyTextEdit(self)
         self.display_area.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-      
-        self.mainFont = QFont("Noto Color Emoji", 14)
         self.display_area.setFont(self.widgetFont)
         self.display_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
         text_layout.addWidget(self.display_area)
-        # Control Panel
-        control_layout = QVBoxLayout()
+
+        self.input_area = MyTextEdit(self)
+        self.input_area.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
+        self.input_area.setFont(self.widgetFont)
+        self.input_area.setStyleSheet("QTextEdit { background-color: #101820; color: #FAEBD7; }")
+        text_layout.addWidget(self.input_area)
       
         # Buttons and Comboboxes
         self.discuss_button = QPushButton("discuss")
         self.discuss_button.setFont(self.widgetFont)
         self.discuss_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
         self.discuss_button.clicked.connect(self.discuss)
-        control_layout.addWidget(self.discuss_button)
+        text_layout.addWidget(self.discuss_button)
       
-        main_layout.addLayout(control_layout)
         self.setLayout(main_layout)
         self.show()
+        
         
     def display_msg(self, r):
         self.display_area.moveCursor(QtGui.QTextCursor.End)  # Move the cursor to the end of the text
@@ -753,8 +683,11 @@ class DisplayApp(QtWidgets.QWidget):
         self.display_area.repaint()
 
     def discuss(self):
+        input_text = self.input_area.toPlainText()
+        self.input_area.clear()
         print(f'calling discuss query{self.query} sections {len(self.sections)}, dscp {self.dscp}')
-        discuss_resources(self, self.query, self.sections, self.dscp, self.template)
+        discuss_resources(self, input_text, self.sections, self.query+', '+self.dscp, self.template)
+         
 
 def discuss_resources(display, query, sections, dscp='', template=None):
     """ resources is [[section_ids], [[title, section_synopsis], ...]]"""
@@ -771,10 +704,9 @@ def discuss_resources(display, query, sections, dscp='', template=None):
 
     
     # now enter conversation loop.
-    while query is not None:
-        length = 600 # default response - should pick up from ui max_tokens if run from ui, tbd
-        #create detail instruction for response from task, sbar, query
-        instruction_prompt = """Generate a concise instruction for a research assistant on what to extract from a set of research papers to answer the Query below, given the Topic and Background information provided.
+    length = 600 # default response - should pick up from ui max_tokens if run from ui, tbd
+    #create detail instruction for response from task, sbar, query
+    instruction_prompt = """Generate a concise instruction for a research assistant on what to extract from a set of research papers to answer the Query below, given the Topic and Background information provided.
 Respond using this JSON format:
 {"instruction": '<instruction>'}
 
@@ -784,26 +716,24 @@ Query: {{$query}}
 
 Respond only with the instruction, in plain JSON as above, with no markdown or code formatting.
 """
-        messages = [SystemMessage(cot.v_short_prompt()),
-                    UserMessage(instruction_prompt),
-                    AssistantMessage('')
-                    ]
-        instruction = cot.llm.ask({"topic":dscp, "query":query, "dscp": dscp},
-                                  messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
-        outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
-        display.display_msg(json.dumps(outline, indent=2))
-        
-        if len(excerpts) > 10: 
-            # s2_search_resources(outline, resources)
-            pass
-
-        report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=resources)
-
-        display.display_msg(report)
-        display.display_msg(refs)
-        query = cot.confirmation_popup('Query?', '')
-        if query is None or not query:
-            return report, refs 
+    messages = [SystemMessage(cot.v_short_prompt()),
+                UserMessage(instruction_prompt),
+                AssistantMessage('')
+                ]
+    instruction = cot.llm.ask({"topic":dscp, "query":query, "dscp": dscp},
+                              messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
+    outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
+    display.display_msg(json.dumps(outline, indent=2))
+    
+    if len(excerpts) > 10: 
+        # s2_search_resources(outline, resources)
+        pass
+    
+    report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=resources)
+    
+    display.display_msg(report)
+    display.display_msg(refs)
+    return report, refs 
     
 from Planner import Planner
 if __name__ == '__main__':
@@ -825,11 +755,25 @@ if __name__ == '__main__':
                 resources = pickle.load(f)
             print(f'\nResources:\n{json.dumps(resources, indent=2)}')
             app = QApplication(sys.argv)
+            cot = oiv.OwlInnerVoice(None, resources['template'])
+            # set cot for rewrite so it can access llm
+            rw.cot = cot
+            s2.cot = cot
+
             window = DisplayApp('Question?', resources['sections'], resources['dscp'], resources['template'])
             #window.show()
             app.exec()
             sys.exit(0)
+
         if hasattr(args, 'report') and args.report is not None:
+            if hasattr(args, 'template'):
+                cot = oiv.OwlInnerVoice(None, args.template)
+            else:
+                cot = oiv.OwlInnerVoice(None)
+            # set cot for rewrite so it can access llm
+            rw.cot = cot
+            s2.cot = cot
+
             pl = Planner(None, cot, args.template)
             app = QApplication(sys.argv)
             write_report(app, args.report)
