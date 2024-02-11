@@ -17,6 +17,9 @@ import hashlib
 import nltk
 from datetime import datetime, date, timedelta
 import openai
+from openai import OpenAI
+
+client = OpenAI()
 from promptrix.VolatileMemory import VolatileMemory
 from promptrix.FunctionRegistry import FunctionRegistry
 from promptrix.GPT3Tokenizer import GPT3Tokenizer
@@ -69,11 +72,11 @@ ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
 
 # List all available models
 try:
-    models = openai.Model.list()
+    models = client.models.list()
     for model in models.data:
         if model.id.startswith('gpt'):
             print(model.id)
-except openai.error.OpenAIError as e:
+except openai.OpenAIError as e:
     print(e)
 
 # find out where we are
