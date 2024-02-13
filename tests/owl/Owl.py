@@ -696,7 +696,7 @@ window = ChatApp()
 window.show()
 
 if __name__== '__main__':
-   import semanticScholar2 as s2
+   import semanticScholar3 as s2
    window.s2=s2
    s2.ui=window
    s2.cot=window.owlCoT

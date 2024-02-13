@@ -32,24 +32,22 @@ models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'phi-2' i
 print(models)
 
 templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
-             "CodeLlama-34B-instruct-exl2":"chatml",
              "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
-             "miqu-70B":"llama-2",
              "miqu-1-70b-sf-4.25bpw-h6-exl2":"llama-2",
              "miqu-1-70b-sf-5.0bpw-h6-exl2":"llama-2",
+             "miqu-1-70b-sf-6.0bpw-h6-exl2":"llama-2",
              "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mistral-7b-instruct": "llama-2",
              "Mixtral-8x7b-Instruct-6.0b-exl2": "llama-2",
+             "Mixtral-8x7B-instruct-8.0bpw-exl2": "llama-2",
              "Mixtral-8x7B-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
              "Nous-Hermes-2-Mixtral-8x7B-DPO-6.0bpw-h6-exl2":"chatml",
              "phi-2":"phi-2",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
-             "Sakura-SOLAR-Instruct-DPO-v2":"freewilly",
-             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr",
-             "xDAN-L1-Chat-RL-v1-8.0bpw-h8-exl2":"alpaca",
-             "zephyr-7b-beta":"zephyr"
+             "Senku-70B-Full-6.0bpw-h6-exl2": "chatml",
+             "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr"
 }
 
 model_number = -1
@@ -60,7 +58,6 @@ while model_number < 0 or model_number > len(models) -1:
         try:
             with open(models_dir+models[i]+'/config.json', 'r') as j:
                 json_config = json.load(j)
-                #print(f'config {json_config}')
                 context_size = json_config["max_position_embeddings"]
         except Exception as e:
             print(f'failure to load json.config {str(e)}\n setting context to 4096')
@@ -112,19 +109,22 @@ else:
 
     if 'bagel' in model_name.lower():
         print(f' bagel load')
-        model.load([20, 23])
+        model.load([20, 23, 23])
     elif 'tulu' in model_name:
-        model.load([20, 23])
+        model.load([20, 23, 23])
     elif 'miqu-1-70b' in model_name:
-        model.load([21, 23])
+        model.load([20, 20, 20])
     elif 'ixtral' in model_name:
         print(f' mixtral load')
-        model.load([20, 23])
+        model.load([20, 22, 22])  # leave room on gpu 0 for other stuff, eg embed
+    elif 'Senku' in model_name:
+        print(f' Senku load')
+        model.load([20, 20, 20])
     elif 'UNA' in model_name:
         print(f' UNA load')
         model.load([16, 23])
     else:
-        model.load([22, 22])
+        model.load([22, 22, 22])
     
     tokenizer = ExLlamaV2Tokenizer(config)
 
@@ -135,24 +135,23 @@ max_new_tokens = 250
 
 # get context size from model config
 try:
-    with open(models_dir+models[i]+'/config.json', 'r') as j:
+    with open(models_dir+models[model_number]+'/config.json', 'r') as j:
         json_config = json.load(j)
         context_size = json_config["max_position_embeddings"]
+        print(f'loaded json.config, found context {context_size}')
 except Exception as e:
     print(f'failure to load config.json {str(e)}\n setting context to 4096')
 
 if model_name.startswith('miqu-1-70b'):
-    context_size=8192
+    context_size=16384
 elif model_name == 'miqu-70B':
-    context_size=10000
+    context_size=16384
     
-print(f'loaded json.config, setting context to {min(16384, context_size)}')
 if model_name == 'phi-2':
     pass
 elif model_name == 'miqu-70B':
     pass
 else:
-    print(f'loaded json.config, setting context to {min(16384, context_size)}')
     cache = ExLlamaV2Cache(model, max_seq_len=min(16384, context_size))
     # Initialize generator
     generator = ExLlamaV2StreamingGenerator(model, cache, tokenizer)
@@ -168,7 +167,8 @@ else:
     # Make sure CUDA is initialized so we can measure performance
     generator.warmup()
 
-
+print(f'loaded json.config, setting context to {min(16384, context_size)}')
+context_size = min(16384, context_size)
 
 async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False):
     generated_tokens = 0
@@ -248,7 +248,8 @@ app = FastAPI()
 print(f"starting server")
 @app.post("/template")
 async def template(request: Request):
-    global model_prompt_template
+    
+    global model_prompt_template, context_size
     print(f'template: {model_prompt_template}, context: {context_size}')
     return {"template":model_prompt_template, "context_size":context_size}
     

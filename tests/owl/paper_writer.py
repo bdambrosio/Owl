@@ -52,7 +52,7 @@ from PyQt5.QtCore import pyqtSignal
 import signal
 import OwlCoT as oiv
 from OwlCoT import LLM, ListDialog, generate_faiss_id,OPENAI_MODEL3,OPENAI_MODEL4
-import semanticScholar2 as s2
+import semanticScholar3 as s2
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
@@ -86,8 +86,6 @@ cot = oiv.OwlInnerVoice(None)
 print (cot.template)
 # set cot for rewrite so it can access llm
 rw.cot = cot
-
-import semanticScholar2 as s2
 s2.cot = cot
 
 

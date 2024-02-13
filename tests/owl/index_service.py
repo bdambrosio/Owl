@@ -73,7 +73,8 @@ task_queue = PersistentQueue()
 @app.on_event("startup")
 async def startup_event():
     global task_queue
-    config = Config(".env")  # Load configuration from a .env file
+    #config = Config(".env")  # Load configuration from a .env file
+    config = Config()  # Load configuration from a .env file
     # make sure we only run 1 job at a time
     max_threads = config("MAX_THREADS", cast=int, default=1)
     await task_queue.deserialize()
@@ -141,7 +142,7 @@ asyncio.create_task(process_tasks())
 import OwlCoT as cot
 cot = cot.OwlInnerVoice(None)
 # set cot for rewrite so it can access llm
-import semanticScholar2 as s2
+import semanticScholar3 as s2
 s2.cot = cot
 s2.rw.cot = cot
 

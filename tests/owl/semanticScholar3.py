@@ -51,6 +51,8 @@ from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListW
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem, QLineEdit
 from OwlCoT import LLM, ListDialog, generate_faiss_id
 import wordfreq as wf
+import torch
+import torch.nn.functional as F
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
@@ -67,24 +69,17 @@ cot = None
 
 # startup AI resources
 
-# load embedding model and tokenizer
-embedding_tokenizer = AutoTokenizer.from_pretrained('/home/bruce/Downloads/models/Specter-2-base')
-#load base model
-#embedding_model = AutoModel.from_pretrained('/home/bruce/Downloads/models/Specter-2-base')
-#load the adapter(s) as per the required task, provide an identifier for the adapter in load_as argument and activate it
-#embedding_model.load_adapter('/home/bruce/Downloads/models/Specter-2', source="hf", set_active=True)
-#embedding_model.load_adapter('/home/bruce/Downloads/models/Specter-2')
-from adapters import AutoAdapterModel
-
-embedding_model = AutoAdapterModel.from_pretrained("/home/bruce/Downloads/models/Specter-2-base")
-embedding_adapter_name = embedding_model.load_adapter("/home/bruce/Downloads/models/Specter-2", set_active=True)
+#from adapters import AutoAdapterModel
+#embedding_model = AutoAdapterModel.from_pretrained("/home/bruce/Downloads/models/Specter-2-base")
+#embedding_adapter_name = embedding_model.load_adapter("/home/bruce/Downloads/models/Specter-2", set_active=True)
+embedding_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+embedding_model = AutoModel.from_pretrained('nomic-ai/nomic-embed-text-v1', trust_remote_code=True)
+embedding_model.eval()
 
 
-GPT3 = "gpt-3.5-turbo-16k"
-GPT4 = "gpt-4-1106-preview"
-#EMBEDDING_MODEL = "text-embedding-ada-002"
+GPT3 = "gpt-3.5-turbo"
+GPT4 = "gpt-4"
 ssKey = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
-
 #logging.basicConfig(level=logging.DEBUG)
 directory = './arxiv/'
 # Set a directory to store downloaded papers
@@ -188,7 +183,7 @@ def save_synopsis_data():
 def search_sections(query, top_k=20):
     #print(section_library_df)
     # get embed
-    query_embed = embedding_request(query)
+    query_embed = embedding_request(query, 'search_query: ')
     # faiss_search
     embeds_np = np.array([query_embed], dtype=np.float32)
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
@@ -360,17 +355,21 @@ def combine_strings(strings, min_length=32, max_length=2048):
     return combined_strings
     
 #@retry(wait=wait_random_exponential(min=2, max=40), eos=stop_after_attempt(3))
-def embedding_request(text):
+def embedding_request(text, request_type='search_document: '):
+    global embedding_tokenizer, embedding_model
     if type(text) != str:
         print(f'\nError - type of embedding text is not str {text}')
-    text_batch = [text]
+    text_batch = [request_type+' '+text]
     # preprocess the input
-    inputs = embedding_tokenizer(text_batch, padding=True, truncation=True,
-                       return_tensors="pt", return_token_type_ids=False, max_length=512)
-    output = embedding_model(**inputs)
-    # take the first token in the batch as the embedding
-    embedding = output.last_hidden_state[0, 0, :]
-    #print(f'embedding_request response shape{embedding.shape}')
+    encoded_input = embedding_tokenizer(text_batch, padding=True, truncation=True, return_tensors='pt')
+    with torch.no_grad():
+        model_output = embedding_model(**encoded_input)
+    embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
+    embeddings = F.normalize(embeddings, p=2, dim=1)
+    print(f'embedding_request response shape{embeddings.shape}')
+
+    embedding = embeddings[0]
+    print(f'embedding_request response[0] shape{embedding.shape}')
     return embedding.detach().numpy()
 
 # Function to recursively extract string values from nested JSON
@@ -463,7 +462,7 @@ def get_arxiv_preprint_url(query, top_k=10):
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
     """
 
-    title_embed = embedding_request(query)
+    title_embed = embedding_request(query, 'search_query: ')
     result_list = []
     # Set up your search query
     print(f'arxiv search for {query}')
@@ -484,7 +483,7 @@ def get_arxiv_preprint_url(query, top_k=10):
             dup = (paper_library_df['title']== result.title).any()
             if dup:
                 continue
-        candidate_embed = embedding_request(result.title)
+        candidate_embed = embedding_request(result.title, 'search_document: ')
         cosine_similarity = np.dot(title_embed, candidate_embed) / (np.linalg.norm(title_embed) * np.linalg.norm(candidate_embed))
         #print(f' score {cosine_similarity}, title {result.title}')
         if cosine_similarity > best_score:
@@ -663,7 +662,7 @@ def index_paper_synopsis(paper_dict, synopsis, paper_index):
     if 'embedding' in paper_dict and paper_dict['embedding'] is not None:
         embedding = paper_dict['embedding']
     else:
-        embedding = embedding_request(synopsis)
+        embedding = embedding_request(synopsis, 'search_document: ')
     ids_np = np.array([paper_dict['faiss_id']], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
     paper_indexIDMap.add_with_ids(embeds_np, ids_np)
@@ -677,7 +676,7 @@ def index_section_synopsis(paper_dict, synopsis):
     paper_authors = paper_dict['authors'] 
     paper_abstract = paper_dict['summary']
     pdf_filepath = paper_dict['pdf_filepath']
-    embedding = embedding_request(synopsis)
+    embedding = embedding_request(synopsis, 'search_document: ')
     ids_np = np.array([faiss_id], dtype=np.int64)
     embeds_np = np.array([embedding], dtype=np.float32)
     print(f'section synopsis length {len(synopsis)} paper_id {paper_dict["faiss_id"]}')
@@ -689,16 +688,15 @@ def index_section_synopsis(paper_dict, synopsis):
     section_library_df.loc[len(section_library_df)]=synopsis_dict
     return faiss_id
 
-
+def mean_pooling(model_output, attention_mask):
+    token_embeddings = model_output[0]
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
 
 def index_paper(paper_dict):
     # main path for papers from index_url and / or index_file, where we know nothing other than pdf
-    pdf_filepath = paper_dict['pdf_filepath']
-    if pdf_filepath is None:
-        print(f'pdf filepath is None!')
-        return False
     try:
-        extract = create_chunks_grobid(pdf_filepath)
+        extract = grobid.parse_pdf(paper_dict['pdf_filepath'])
         if extract is None:
             print('grobid extract is None')
             return False
@@ -730,120 +728,23 @@ def index_paper(paper_dict):
     except Exception as e:
         print(f'\ngrobid fail {str(e)}')
         return False
+
     print(f"grobid extract keys {extract.keys()}")
     text_chunks = [abstract]+extract['sections']
-    #print(f"Summarizing each chunk of text {len(text_chunks)}")
+    rw_count = 0
+    for idx, text_chunk in enumerate(text_chunks):
+        if len(text_chunk) < 32:
+            continue
+        rw_count += 1
+        sentences = [text_chunk]
+        encoded_input = embedding_tokenizer(sentences, padding=True, truncation=True, return_tensors='pt')
+        with torch.no_grad():
+            model_output = embedding_model(**encoded_input)
+        embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
+        embeddings = F.normalize(embeddings, p=2, dim=1)
 
-    section_prompt = """Given this abstract of a paper:
-    
-<ABSTRACT>
-{{$abstract}}
-</ABSTRACT>
-
-and this list of important entities (key phrases, acronyms, and named-entities) mentioned in this section:
-
-<ENTITIES>
-{{$entities}}
-</ENTITIES>
-
-Generate a synposis of this section of text from the paper. The section synopsis should include the central argument of the section as it relates to the abstract and previous sections, together with all key points supporting that central argument. A key point might be any observation, statement, fact, inference, question, hypothesis, conclusion, or decision relevant to the central argument of the text. The section synopsis should be 'entity-dense', that is, it should include all relevant ENTITIES to the central argument of the text and the paper abstract.
-
-<TEXT>
-{{$text}}
-</TEXT>
-
-End your synopsis with:
-</SYNOPSIS>
-"""
-
-    paper_prompt = """Your task is to create a detailed and comprehensive synopsis of the paper so far given the title, abstract, partial paper synopsis generated from previous sections, (if present) and the next section synopsis. The new version of the paper synopsis should be up to  1800 words in length. The goal is to represent the overall paper accurately and in-depth, capturing the overall argument along with essential statements, methods, observations, inferences, hypotheses, and conclusions. 
-List of all key points in the paper, including all significant statements, methods, observations, inferences, hypotheses, and conclusions that support the core argument. 
-
-<TITLE>
-{{$title}}
-<TITLE>
-
-<ABSTRACT>
-{{$abstract}}
-</ABSTRACT>
-
-<SECTION SYNOPSIS>
-{{$section}}
-</SECTION SYNOPSIS>
-
-Please ensure the synopsis provides depth while removing redundant or superflous detail, ensuring that all important aspects of the paper's information about important entities, central argument, observations, methods, findings, or conclusions is included in the list of key points.
-End your synopsis response as follows:
-
-</UPDATED_SYNOPSIS>
-"""
-    section_synopses = []; section_ids = []
-    index_text = ''
-    text_chunks = combine_strings(text_chunks) # combine shorter chunks
-    with tqdm(total=len(text_chunks)) as pbar:
-        for idx, text_chunk in enumerate(text_chunks):
-            if len(text_chunk) < 32:
-                continue
-            if len(text_chunk) < 384 and len(index_text) < 1440:
-                index_text += '\n'+text_chunk
-
-            print(f'index_paper extracting synopsis from chunk of length {len(text_chunk)}')
-            rw.cot = cot #just to be sure...
-            entities = rw.extract_entities(text_chunk, title=title)
-            #print(f'entities: {entities}')
-            prompt = [SystemMessage(section_prompt),
-                      AssistantMessage('<SYNOPSIS>\n')
-                      ]
-            max_tokens=max(440,int(len(text_chunk)/12)) # let len grow for big chunks
-            response = cot.llm.ask({"abstract":abstract,
-                                "entities":', '.join(entities),
-                                "text":text_chunk},
-                               prompt,
-                               max_tokens=max_tokens,
-                               temp=0.05,
-                               eos='</SYNOPSIS')
-            pbar.update(1)
-            if response is None:
-                print(f'\n\nFAILURE CREATING EXCERPT!\n\n')
-                continue
-            if '</SYNOPSIS>' in response:
-                response = response[:response.find('</SYNOPSIS>')]
-            print(f'\nInitial Draft len: {len(response)}\n{response}\n')
-            # 'entities' is a single, newline delimited string for ease in llm processing
-            print(f'max_tokens {max_tokens}')
-            rw.cot = cot #just to be sure...
-            draft2 = rw.depth_rewrite(title, title, response, text_chunk, entities, title, int(1.2*max_tokens), title, title, '', cot.llm.template)
-            print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
-            draft3 = rw.add_pp_rewrite(title, title, draft2, text_chunk, entities, title, int(1.4*max_tokens), title, title, '', cot.llm.template)
-            print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
-            #draft4 = rw.depth_rewrite(title, title, draft3, text_chunk, entities, title, int(1.6*max_tokens), title, title, '', cot.llm.template)
-            #print(f'\nRewrite 3 len: {len(draft4)}\n{draft4}\n')
-            id = index_section_synopsis(paper_dict, draft3)
-            section_synopses.append(draft3)
-            section_ids.append(id)
+        id = index_section_synopsis(paper_dict, text_chunk)
             
-            """
-            #
-            ### now update paper synopsis with latest section synopsis
-            ###   why not with entire section?
-            ### do we really need to do this EVERY TIME? 
-            paper_messages = [SystemMessage(paper_prompt),
-                              AssistantMessage('<UPDATED_SYNOPSIS>')
-                              ]
-            # note 1200 tokens is too big to embed, isn't it? check this.. maybe index halves and average?
-            paper_response = llm.ask({"title":title,
-                                      "abstract":abstract,
-                                      "paper_synopsis":synopsis,
-                                      "section":section_synopses[-1]},
-                                     paper_messages,
-                                     #template=GPT3,
-                                     max_tokens=1200,
-                                     temp=0.1,
-                                     eos='</UPDATED_SYNOPSIS')
-            end_idx = response.rfind('/UPDATED_SYNOPSIS')
-            if end_idx < 0:
-                end_idx = len(response)
-                synopsis = response[:end_idx-1]
-            """
     result = index_paper_synopsis(paper_dict, abstract, paper_index)
     return True
 
@@ -854,7 +755,7 @@ def strings_ranked_by_relatedness(
     top_n: int = 100,
 ) -> list[str]:
     """Returns a list of strings and relatednesses, sorted from most related to least."""
-    query_embedding = embedding_request(text=str(query))
+    query_embedding = embedding_request(text=str(query), type='search_query: ')
     strings_and_relatednesses = [
         (row, relatedness_fn(query_embedding, row["embedding"]))
         for i, row in df.iterrows()
@@ -863,27 +764,6 @@ def strings_ranked_by_relatedness(
     strings, relatednesses = zip(*strings_and_relatednesses)
     #print(strings[0])
     return strings[:top_n]
-
-def create_chunks_grobid(pdf_filepath):
-    #url = "http://localhost:8070/api/processFulltextDocument"
-    url = "http://192.168.1.160:8070/api/processFulltextDocument"
-    print(f'create_chunks_grobid pdf: {pdf_filepath}')
-    pdf_file= {'input': open(pdf_filepath, 'rb')}
-    extract = {"title":'', "authors":'', "abstract":'', "sections":[], "date":'', "refs":'', "figure_texts":{}, "table_texts":{}}
-    try:
-        response = requests.post(url, files=pdf_file)
-    except Exception as e:
-        print(f'grobid fail {str(e)}')
-        traceback.print_exc()
-    if response.status_code == 200:
-        with open('test.tei.xml', 'w') as t:
-            t.write(response.text)
-    else:
-        print(f'grobid error {response.status_code}')
-        return None
-    xml_content = response.text
-    extract = grobid.parse_pdf('text.tei.xml')
-    return extract
 
 
 def sbar_as_text(sbar):
@@ -1307,7 +1187,7 @@ if __name__ == '__main__':
             index_paper(paper)
         except Exception as e:
             print(str(e))
-    if hasattr(args, 'browse'):
+    if hasattr(args, 'browse') and args.browse == 't':
         app = QApplication(sys.argv)
         browse()
         
