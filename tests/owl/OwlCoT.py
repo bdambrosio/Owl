@@ -129,7 +129,7 @@ class LLM():
         self.memory = memory
         self.openAIClient=openAIClient
         self.osClient= osClient
-        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"], logRequests=True)
+        self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
         print(f'mistral client {self.mistralAIClient}')
         self.template = template # default prompt template.
         print(f'LLM initializing default template to {template}')
@@ -348,7 +348,7 @@ class OwlInnerVoice():
         self.city = city
         self.state = state
         self.osClient = OSClient(api_key=None)
-        self.openAIClient = OpenAIClient(apiKey=openai_api_key, logRequests=True)
+        self.openAIClient = OpenAIClient(apiKey=openai_api_key)#, logRequests=True)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})

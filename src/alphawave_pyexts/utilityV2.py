@@ -107,7 +107,7 @@ def run_prompt(client, input, prompt, prompt_options, memory, functions, tokeniz
     # Create a wave for the prompt
     fork = MemoryFork(memory)
     for key, value in input.items():
-        print(f'setting input {key}: {value}')
+        #print(f'setting input {key}: {value}')
         fork.set(key, value)
     try:
         response = client.completePrompt(fork, functions, tokenizer, prompt, prompt_options)

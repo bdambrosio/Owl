@@ -40,7 +40,7 @@ print(f'\nMistral:\n{chat_response}\n\n')
 
 @dataclass
 class MistralAIClientOptions:
-    def __init__(self, apiKey=None, organization = None, endpoint = None, logRequests = True):
+    def __init__(self, apiKey=None, organization = None, endpoint = None, logRequests = False):
         self.apiKey = apiKey
         self.organization = organization
         self.endpoint = endpoint
@@ -59,7 +59,7 @@ class MistralAIClient(PromptCompletionClient):
         global client
         self.options = {'apiKey':None, 'organization':None, 'endpoint':None, 'logRequests':True}
         self.options.update(kwargs)
-        print(f' MistralAI self.options: {self.options}')
+        #print(f' MistralAI self.options: {self.options}')
         self.mistralai_client = client
         self.model=model
         if not self.options['apiKey']:
@@ -98,7 +98,7 @@ class MistralAIClient(PromptCompletionClient):
         
             #if 'max_tokens' in request:
             #    request['max_tokens'] = int(request['max_tokens'])
-            self.options['logRequests'] = True
+            self.options['logRequests'] = False
             if self.options['logRequests']:
                 print(Colorize.title('CHAT PROMPT:'))
                 for msg in result.output:
@@ -180,7 +180,7 @@ class MistralAIClient(PromptCompletionClient):
                 max_t= int(request[key])
             if key == "model":
                 model =request[key]
-        print(f'\nmistral prompt\n{prompt}\n\n')
+        #print(f'\nmistral prompt\n{prompt}\n\n')
         return self.mistralai_client.chat(model=model, messages = prompt, temperature=temp, max_tokens = max_t)
 
     # mistral prompt use example

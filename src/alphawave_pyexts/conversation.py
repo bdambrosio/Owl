@@ -329,7 +329,10 @@ def register_conv_template(template: Conversation, override: bool = False):
 
 def get_conv_template(name: str) -> Conversation:
     """Get a conversation template."""
-    return conv_templates[name].copy()
+    if name.startswith('gpt'):
+        return conv_templates['gpt-4'].copy()
+    else:
+        return conv_templates[name].copy()
 
 
 # A template with a one-shot conversation example

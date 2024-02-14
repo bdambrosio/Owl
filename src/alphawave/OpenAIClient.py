@@ -10,9 +10,10 @@ from promptrix.AssistantMessage import AssistantMessage
 from alphawave.alphawaveTypes import PromptCompletionClient, PromptCompletionOptions, PromptResponse
 from alphawave.internalTypes import ChatCompletionRequestMessage, CreateChatCompletionRequest, CreateChatCompletionResponse, CreateCompletionRequest, CreateCompletionResponse
 from alphawave.Colorize import Colorize
-import openai
+from openai import OpenAI
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 @dataclass
 class OpenAIClientOptions:
@@ -85,14 +86,14 @@ class OpenAIClient(PromptCompletionClient):
                     print(Colorize.value(key, jsonbody[key]), end=',')
             print()
 
-        result = openai.ChatCompletion.create(**jsonbody)
+        result = client.chat.completions.create(**jsonbody)
 
         if self.options['logRequests']:
             print(Colorize.title('CHAT RESPONSE:'))
             print(Colorize.value('duration', time.time() - startTime, 'ms'))
-            print(Colorize.value('usage', result['usage']))
-            print(Colorize.value('result message', result['choices'][0]['message']))
-        return {'status': 'success', 'message': str(result['choices'][0]['message']['content'])}
+            print(Colorize.value('usage', result.usage))
+            print(Colorize.value('result message', result.choices[0].message))
+        return {'status': 'success', 'message': str(result.choices[0].message.content)}
 
     def addRequestHeaders(self, headers: Dict[str, str], options: OpenAIClientOptions):
         headers['Authorization'] = f"Bearer {options['apiKey']}"
