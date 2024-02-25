@@ -716,6 +716,19 @@ register_conv_template(
     )
 )
 
+# Llama-2 default template
+register_conv_template(
+    Conversation(
+        name="mistral-next",
+        system="",
+        roles=("user", "assistant", "system"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.NO_COLON_SINGLE,
+        sep='</s>',
+    )
+)
+
 # Claude default template
 register_conv_template(
     Conversation(

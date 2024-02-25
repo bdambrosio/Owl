@@ -129,8 +129,35 @@ def paper_library_df_fixup():
     #paper_library_df.to_parquet(paper_library_filepath)
     return
 
-paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "summary", "inflCitations", "citationCount", "evaluation", "article_url", "pdf_url","pdf_filepath", "synopsis", "section_ids"]
+paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "summary", "inflCitations", "citationCount", "article_url", "pdf_url","pdf_filepath", "section_ids"]
+paper_library_init_values = {"faiss_id":0, "title":'', "authors":'', "citationStyles":'', "publisher":'', "summary":'', "inflCitations":0, "citationCount":0, "article_url":'', "pdf_url":'',"pdf_filepath":'', "synopsis":'', "section_ids":[]}
 
+def validate_paper(paper_dict):
+    #print(json.dumps(paper_dict, indent=2))
+    if type(paper_dict) is not dict:
+        print(f'invalid paper_dict: not a dict!')
+        return False
+    for field in paper_library_columns:
+        if field not in paper_dict:
+            print(f'field missing in paper_dict: {field}')
+            return False
+    if paper_dict['faiss_id'] == 0:
+        print(f'invalid faiss_id in paper_dict: {paper_dict["faiss_id"]}')
+        return False
+    if len(paper_dict['title']) < 2:
+        print(f'missing title in paper_dict: {paper_dict["title"]}')
+        return False
+    if len(paper_dict['summary']) < 16:
+        print(f'missing abstract in paper_dict: {paper_dict["summary"]}')
+        return False
+    if len(paper_dict['pdf_url']) < 2 and len(paper_dict['pdf_filepath']) < 2:
+        print(f'missing pdf path in paper_dict: {paper_dict["pdf_url"]}, {paper_dict["pdf_filepath"]}')
+        return False
+    if len(paper_dict['article_url']) < 2:
+        print(f'missing article url in paper_dict: {paper_dict["article_url"]}')
+        return False
+    return True
+        
 # s2FieldsOfStudy
 s2FieldsOfStudy=["Computer Science","Medicine","Chemistry","Biology","Materials Science","Physics",
                  "Geology","Psychology","Art","History","Geography","Sociology","Business","Political Science",
@@ -218,9 +245,11 @@ def convert_title_to_unix_filename(title):
     return filename
 
 def download_pdf(url, title=None):
-    print(f'download_pdf {url}')
+    #print(f'download_pdf {url}')
     if not title:
         title = url
+    if url.startswith('file:///'):
+        return url[len('file://'):]
     try:
         request = urllib.request.Request(url)
         with urllib.request.urlopen(request) as response:
@@ -293,7 +322,7 @@ def download_pdf_wbb(url, title):
         pass
 
     # Send GET request to fetch PDF data
-    print(f' fetching url {url}')
+    # print(f' fetching url {url}')
     webbrowser.open(url)
     temp_filepath = os.path.join(papers_dir,'temp.pdf')
     new_filepath = wait_for_chrome(url, temp_filepath)
@@ -304,7 +333,7 @@ def download_pdf_wbb(url, title):
         os.rename(temp_filepath, arxiv_filepath)
         return arxiv_filepath
     else:
-        print(f'paper download attempt failed ')
+        print(f'download_pdf_wbb download attempt failed ')
     return None
         
 def download_pdf_5005(url, title):
@@ -366,10 +395,10 @@ def embedding_request(text, request_type='search_document: '):
         model_output = embedding_model(**encoded_input)
     embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
     embeddings = F.normalize(embeddings, p=2, dim=1)
-    print(f'embedding_request response shape{embeddings.shape}')
+    #print(f'embedding_request response shape{embeddings.shape}')
 
     embedding = embeddings[0]
-    print(f'embedding_request response[0] shape{embedding.shape}')
+    # print(f'embedding_request response[0] shape{embedding.shape}')
     return embedding.detach().numpy()
 
 # Function to recursively extract string values from nested JSON
@@ -403,57 +432,44 @@ def index_dict(paper_dict):
         return False
     save_synopsis_data()
 
-
-def index_url(page_url, title='', authors='', publisher='', abstract='', citationCount=0, influentialCitationCount=0,
-              pdf_url = None):
-    print(f'\nIndex URL {page_url}\n')
-    result_dict = {key: '' for key in paper_library_columns}
-    id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
-    result_dict["faiss_id"] = id
-    result_dict["title"] = title
-    result_dict["authors"] = authors
-    result_dict["publisher"] = ''
-    result_dict["summary"] = abstract 
-    result_dict["citationCount"]= int(citationCount)
-    result_dict["inflCitations"] = int(influentialCitationCount)
-    result_dict["evaluation"] = ''
-    result_dict["pdf_url"] = pdf_url if pdf_url is not None else page_url
-    pdf_filepath= download_pdf(page_url, title if len(title)>0  else page_url[page_url.rfind('/')+1:])
-    result_dict["pdf_filepath"]= pdf_filepath
-    
-    print(f"indexing new article: {title}\n   pdf file: {type(result_dict['pdf_filepath'])}")
-    result_dict['synopsis'] = ""
-    result_dict['section_ids'] = [] # to be filled in after we get paper id
-    #if status is None:
-    #    continue
-    #print(f' new article:\n{json.dumps(result_dict, indent=2)}')
-    # section and index paper
-    indexed = index_paper(result_dict)
-    if not indexed:
-        return False
-    save_synopsis_data()
-
-
 def index_file(filepath):
-    result_dict = {key: '' for key in paper_library_columns}
+    result_dict = {key: paper_library_init_values[key] for key in paper_library_columns}
     id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     result_dict["faiss_id"] = id
     result_dict["title"] = filepath[filepath.rfind('/')+1:] # will be replaced by grobid result
-    result_dict["authors"] = ''
-    result_dict["publisher"] = ''
-    result_dict["summary"] = ''
-    result_dict["citationCount"]= 0
-    result_dict["inflCitations"] = 0
-    result_dict["evaluation"] = ''
     result_dict["pdf_filepath"]= filepath
-    result_dict['synopsis'] = ""
     result_dict['section_ids'] = [] # to be filled in after we get paper id
     # section and index paper
     result = index_paper(result_dict)
     if not result:
         return False
-    print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
+    #print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
     save_synopsis_data()
+
+
+def index_url(page_url):
+    print(f'\nIndex URL {page_url}\n')
+    result_dict = {key: paper_library_init_values[key] for key in paper_library_columns}
+    id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+    result_dict["faiss_id"] = id
+    #result_dict["authors"] = authors
+    result_dict["article_url"] = page_url
+    result_dict["pdf_url"] = page_url
+    if not page_url.startswith('file:///'):
+        result_dict['pdf_url'] = page_url
+        pdf_filepath= download_pdf(page_url)
+    else:
+        pdf_filepath= page_url[len('file://'):]
+    result_dict["pdf_filepath"]= pdf_filepath
+    
+    # print(f" indexing article: {title}\n pdf file: {type(result_dict['pdf_filepath'])}")
+    result_dict['synopsis'] = ""
+    result_dict['section_ids'] = [] # to be filled in after we get paper id
+    indexed = index_paper(result_dict)
+    if not indexed:
+        return False
+    save_synopsis_data()
+
 
 
 def get_arxiv_preprint_url(query, top_k=10):
@@ -465,7 +481,7 @@ def get_arxiv_preprint_url(query, top_k=10):
     title_embed = embedding_request(query, 'search_query: ')
     result_list = []
     # Set up your search query
-    print(f'arxiv search for {query}')
+    # print(f'arxiv search for {query}')
     search = arxiv.Search(
         query=f'ti:{query}', 
         #query=query,
@@ -504,7 +520,7 @@ def get_title(title):
         headers = {'x-api-key':ssKey, }
         response = requests.get(url, headers = headers)
         if response.status_code != 200:
-            print(f'SemanticsSearch fail code {response.status_code}')
+            print(f'SemanticSearch fail code {response.status_code}')
             return None
         results = response.json()
         #print(f' s2 response keys {results.keys()}')
@@ -537,9 +553,11 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
     if confirm:
         query = cot.confirmation_popup("Search SemanticScholar using this query?", query )
     if not query:
-        print(f'confirmation: No!')
+        #print(f'confirmation: No!')
         return [],0,0
-    else: print(f'get_articles query: {query}')
+    else:
+        # print(f'get_articles query: {query}')
+        pass
     try:
         # Set up your search query
         #query='Direct Preference Optimization for large language model fine tuning'
@@ -563,11 +581,11 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
         #print(f'get article search returned first {len(papers)} papers of {total_papers}')
         for paper in papers:
             title = paper["title"]
-            print(f'considering {title}')
+            #print(f'considering {title}')
             if len(paper_library_df) > 0:
                 dup = (paper_library_df['title'] == title).any()
                 if dup:
-                    print(f'   already indexed {title}')
+                    print(f'*** {title} already indexed')
                     continue
             url = paper['url']
             isOpenAccess = paper['isOpenAccess']
@@ -587,7 +605,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             citationCount = paper['citationCount']
             s2FieldsOfStudy = paper['s2FieldsOfStudy']
             tldr= paper['tldr']
-            embedding = paper['embedding']
+            #embedding = paper['embedding']
             if abstract is None or (tldr is not None and len(tldr) > len(abstract)):
                 abstract = str(tldr)
             if citationCount == 0:
@@ -697,40 +715,50 @@ def index_paper(paper_dict):
     # main path for papers from index_url and / or index_file, where we know nothing other than pdf
     try:
         extract = grobid.parse_pdf(paper_dict['pdf_filepath'])
-        if extract is None:
-            print('grobid extract is None')
-            return False
-        print(f'index_paper grobid keys {extract.keys()}')
-        title = extract['title']
-        paper_dict['title'] = extract['title']
-        paper_dict['authors'] = extract['authors']
-        paper_dict['summary'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
-        meta_data = get_title(title)
-        if meta_data is not None:
-            paper_dict["summary"] = str(meta_data['abstract'])
-            #paper_dict["year"] = meta_data['year'])
-            paper_dict["article_url"] = str(meta_data['url'])
-            paper_dict["summary"] = str(meta_data['abstract'])
-            paper_dict["citationCount"]= int(meta_data['citationCount'])
-            paper_dict["citationStyles"]= str(meta_data['citationStyles'])
-            paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
-        abstract = extract['abstract']
-        if len(paper_library_df) > 0:
-            dup = (paper_library_df['title'] == title).any()
-            if dup:
-                print(f' already indexed {title}')
-                return False
-        paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
-        paper_dict['faiss_id'] = paper_faiss_id
-        paper_index = len(paper_library_df)
-        paper_library_df.loc[paper_index] = paper_dict
-        
     except Exception as e:
         print(f'\ngrobid fail {str(e)}')
+        traceback.print_exc()
         return False
-
-    print(f"grobid extract keys {extract.keys()}")
+    if extract is None or not extract:
+        print('grobid extract is None')
+        return False
+    # print(f'index_paper grobid keys {extract.keys()}')
+    title = None
+    if 'title' in paper_dict and len(paper_dict['title']) >0:
+        title = paper_dict['title']
+    elif 'title' in extract and extract['title'] is not None:
+        title = extract['title']
+    else:
+        title = paper_dict['pdf_filepath']
+    print(f'title 1 {title}')
+    paper_dict['authors'] = extract['authors']
+    paper_dict['summary'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
+    if title is not None:
+        paper_dict['title']=title
+        meta_data = get_title(title)
+    if meta_data is not None:
+        paper_dict["summary"] = str(meta_data['abstract'])
+        #paper_dict["year"] = meta_data['year'])
+        paper_dict["title"] = str(meta_data['title'])
+        paper_dict["article_url"] = str(meta_data['url'])
+        paper_dict["summary"] = str(meta_data['abstract'])
+        paper_dict["citationCount"]= int(meta_data['citationCount'])
+        paper_dict["citationStyles"]= str(meta_data['citationStyles'])
+        paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
+    abstract = paper_dict['summary']
+    if len(paper_library_df) > 0:
+        dup = (paper_library_df['title'] == title).any()
+        if dup:
+            print(f' already indexed {title}')
+            return False
+    paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
+    paper_dict['faiss_id'] = paper_faiss_id
+    paper_index = len(paper_library_df)
+    # paper_dict should be read only from here!
+    if validate_paper(paper_dict):
+        paper_library_df.loc[paper_index] = paper_dict
     text_chunks = [abstract]+extract['sections']
+    section_synopses = []; section_ids = []
     rw_count = 0
     for idx, text_chunk in enumerate(text_chunks):
         if len(text_chunk) < 32:
@@ -742,29 +770,13 @@ def index_paper(paper_dict):
             model_output = embedding_model(**encoded_input)
         embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
         embeddings = F.normalize(embeddings, p=2, dim=1)
-
+        ### no more rewriting on ingest,
+        ###   worried it distorts content more than content uniformity of style aids downstream extract
+        
         id = index_section_synopsis(paper_dict, text_chunk)
-            
-    result = index_paper_synopsis(paper_dict, abstract, paper_index)
+        section_synopses.append(text_chunk)
+        section_ids.append(id)
     return True
-
-def strings_ranked_by_relatedness(
-    query: str,
-    df: pd.DataFrame,
-    relatedness_fn=lambda x, y: 1 - spatial.distance.cosine(x, y),
-    top_n: int = 100,
-) -> list[str]:
-    """Returns a list of strings and relatednesses, sorted from most related to least."""
-    query_embedding = embedding_request(text=str(query), type='search_query: ')
-    strings_and_relatednesses = [
-        (row, relatedness_fn(query_embedding, row["embedding"]))
-        for i, row in df.iterrows()
-    ]
-    strings_and_relatednesses.sort(key=lambda x: x[1], reverse=True)
-    strings, relatednesses = zip(*strings_and_relatednesses)
-    #print(strings[0])
-    return strings[:top_n]
-
 
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
@@ -857,13 +869,13 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_tit
         rerank = True
 
     hyde_query = hyde(query+'. '+dscp)
-    print(f'hyde query: {hyde_query}')
+    #print(f'hyde query: {hyde_query}')
     query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k))
-    print(f'search ids {query_ids}')
+    #print(f'search ids {query_ids}')
     kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k))
-    print(f'kwd ids {kwd_ids}')
+    #print(f'kwd ids {kwd_ids}')
     hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k))
-    print(f'hyde ids {hyde_ids}')
+    #print(f'hyde ids {hyde_ids}')
     if query_is_title:
         # use scikit Tfidf on titles
         vectorizer = TfidfVectorizer()
@@ -913,8 +925,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Process a single command-line argument.")
 
     parser.add_argument("-template", type=str, help="the LLM template to use")
-    parser.add_argument("-index_url", type=str, help="index a pdf url - deprecated")
-    parser.add_argument("-index_paper", type=str, help="index a paper - deprecated")
+    parser.add_argument("-index_url", type=str, help="index a pdf url")
+    parser.add_argument("-index_file", type=str, help="index a pdf from filepath")
+    parser.add_argument("-index_paper", type=str, help="index a paper - internal use only")
     parser.add_argument("-browse", type=str, help="browse local library")
     args = parser.parse_args()
     return args
@@ -1180,6 +1193,10 @@ if __name__ == '__main__':
         url = args.index_url.strip()
         print(f' S2 indexing url {url}')
         index_url(url)
+    if hasattr(args, 'index_file') and args.index_url is not None:
+        filepath = args.index_file.strip()
+        print(f' S2 indexing file {filepath}')
+        index_file(filepath)
     if hasattr(args, 'index_paper') and args.index_paper is not None:
         try:
             paper = json.loads(args.index_paper.strip())
@@ -1192,11 +1209,16 @@ if __name__ == '__main__':
         browse()
         
     else:
-        #print("No argument provided, running default main code.")
-        #search("Compare and Contrast Direct Preference Optimization for LLM Fine Tuning with other Optimization Criteria", web=False)
-        #search("miRNA and DNA Methylation assay cancer detection", web=True)
-        #index_url("https://www.mdpi.com/1999-4915/13/3/382/pdf?version=1615448249&doc_type=pdf")
-        #print(get_arxiv_preprint_url("QLoRA Efficient Finetuning of Quantized LLMs"))
-        pass
+        print(' -index_url, -index_file, or -index_paper')
+    """
+        papers_dir = "/home/bruce/Downloads/owl/tests/owl/arxiv/papers/"
 
+        papers = [d for d in os.listdir(papers_dir) ]
+        print(f'papers: {len(papers)}')
+        for p, paper in enumerate(papers):
+            #if p > 10:
+            #    break
+            print(paper)
+            index_url("file://"+papers_dir+paper)
 
+        """

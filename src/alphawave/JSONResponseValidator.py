@@ -123,7 +123,7 @@ class JSONResponseValidator(PromptResponseValidator):
         if start >= 0 and end > 0 and  end > start:
             text = text[start:end+1]
         parsed=[]
-        #print(f'***** JSONResponseValidator cleaned \n{text}\n')
+        print(f'***** JSONResponseValidator cleaned \n{text}\n')
         try:
             text = preprocess_json_string(text)
             #print(f'***** JSONResponseValidator preprocessed \n{text}\n')
@@ -137,7 +137,7 @@ class JSONResponseValidator(PromptResponseValidator):
                 'type': 'Validation',
                 'valid': False,
                 'feedback': self.missing_json_feedback+template_suffix,
-                'value':raw_text
+                'value':text
             }
 
         # Validate the response against the schema

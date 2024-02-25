@@ -58,10 +58,6 @@ def ask_LLM(model, gpt_message, max_tokens=100, temp=0.3, top_p=1.0, host = None
               display(chunk['choices'][0]['delta']['content'])
               response += chunk['choices'][0]['delta']['content']
 
-      elif model.lower().startswith('mistralai'):
-          print(f'How did we get here? {model}')
-          return None
-
       else:
           completion = llm.run_query(model, gpt_message, max_tokens, temp, top_p,
                                      stop=stop, stop_on_json=stop_on_json, choice_set=choice_set, host=host, port=port, display=display)

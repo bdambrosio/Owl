@@ -369,7 +369,7 @@ class OwlInnerVoice():
         self.active_wm = {}
         self.workingMemoryNewNameIndex = 1
         self.reflect_thoughts = ''
-        get_city_state()
+        #get_city_state()
         self.nytimes = nyt.NYTimes()
         self.news, self.details = self.nytimes.headlines()
         self.articles = '\n'
@@ -972,7 +972,7 @@ Input: {{{{$input}}}}
         prompt_msgs=[
             SystemMessage(self.core_prompt(include_actions=False)),
             ConversationHistory('history', 1200),
-            UserMessage((f"\nCurrent interaction topic:\n{json.dumps(wm_topic)}\n\n" if wm_topic is not None else '')+self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\n'),
+            UserMessage((f"\nCurrent interaction topic:\n{json.dumps(wm_topic)}\n\n" if wm_topic is not None else '')+self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\nRespond with the selected action in plain JSON format without any Markdown or code block formatting as shown earlier.'),
             AssistantMessage('')
         ]
         print(f'action_selection starting analysis')

@@ -59,13 +59,13 @@ def entities(paper_title, paper_outline, paper_summaries, ids,template):
             items.extend(entity_cache[int_id])
         else:
             excerpt_items = extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
-            entity_cache[int_id]=excerpt_items
+            entity_cache[int_id]=list(set(excerpt_items))
             items.extend(entity_cache[int_id])
     print(f'entities total {total}, in cache: {cached}')
     with open(entity_cache_filepath, 'w') as pf:
         json.dump(entity_cache, pf)
     #print(f"wrote {entity_cache_filepath}")
-    return list(set(items))
+    return entity_cache[int_id]
 
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
     """

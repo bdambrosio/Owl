@@ -106,6 +106,8 @@ def process_xml_table(table):
         return None
 
 def parse_pdf(pdf_filepath):
+    print(f'grobid parse_pdf {pdf_filepath}')
+    max_section_len = 3072 # chars, about 1k tokens
     files= {'input': open(pdf_filepath, 'rb')}
     extract = {"title":'', "authors":'', "abstract":'', "sections":[], "tables": []}
     response = requests.post(url, files=files)
@@ -150,28 +152,39 @@ def parse_pdf(pdf_filepath):
             pdf_tables.append(process_xml_table(tables[0]))
     extract['tables'] = pdf_tables
     sections = []
-    max_section_len = 0
     for element in body_divs:
         #print(f"\nprocess div chars: {len(' '.join(element.xpath('.//text()')))}")
         head_texts = element.xpath('./tei:head//text()', namespaces=ns)
         all_text = element.xpath('.//text()')
-        for head in head_texts:
-            #print(f'  process head {head}')
-            for t, text in enumerate(all_text):
-                if head == text:
-                    #print(f'  found head  in all_text {t}')
-                    all_text[t] = head+'\n'
+        # don't need following anymore, concatenating text segments with '\n'
+        #for head in head_texts:
+        #    #print(f'  process head {head}')
+        #    for t, text in enumerate(all_text):
+        #        if head == text:
+        #            #print(f'  found head  in all_text {t}')
+        #            all_text[t] = head+'\n'
 
         # Combine text nodes into a single string
-        combined_text = ' '.join(all_text)
-        if len(combined_text) > max_section_len:
-            max_section_len = len(combined_text)
-        #print(f"Section text:\n{combined_text}\n")
-        if len(combined_text) > 7:
+        combined_text = '\n'.join(all_text)
+        if len(combined_text) < 24:
+            continue
+        if len(combined_text) > max_section_len: #break into chunks on pp
+            pps = ''
+            for text in all_text:
+                if len(pps) + len(text) < max_section_len:
+                    pps += '\n'+text
+                elif len(pps) > int(.5* max_section_len):
+                    sections.append(pps)
+                    pps = text
+                else:
+                    sections.append(pps+'\n'+text)
+                    pps = ''
+        else:
             sections.append(combined_text)
+                    
     extract["sections"] = sections
     print(f'title: {title_text}')
-    print(f"Abstract: {len(abstract_text)} chars, Section count: {len(body_divs)}, tables: {len(pdf_tables)}, max_section_len: {max_section_len}")
+    #print(f"Abstract: {len(abstract_text)} chars, Section count: {len(body_divs)}, tables: {len(pdf_tables)}, max_section_len: {max_section_len}")
     return extract
 
 def get_title(title):
@@ -297,54 +310,12 @@ End your synopsis with:
             model_output = model(**encoded_input)
         embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
         embeddings = F.normalize(embeddings, p=2, dim=1)
-        #print(embeddings)
-
-        """
-        process = cot.confirmation_popup(f'{rw_count}, len {len(text_chunk)}, {text_chunk[:64]}', 'Proceed?' )
-        if not process:
-            continue
-        print(f'rewriting {idx}, rw {rw_count}, length {len(text_chunk)}')
-        with open('rag_input.txt', 'w') as w:
-            w.write(text_chunk)
-        rw.cot = cot #just to be sure...
-        entities = rw.extract_entities(text_chunk, title=title)
-        prompt = [SystemMessage(section_prompt),
-                  AssistantMessage('<SYNOPSIS>\n')
-                  ]
-        max_tokens=max(440,int(len(text_chunk)/12)) # let len grow for big chunks
-        response = cot.llm.ask({"abstract":abstract,
-                                "entities":', '.join(entities),
-                                "text":text_chunk},
-                               prompt,
-                               max_tokens=max_tokens,
-                               temp=0.05,
-                               eos='</SYNOPSIS')
-        if response is None:
-            print(f'\n\nFAILURE CREATING EXCERPT!\n\n')
-            continue
-        if '</SYNOPSIS>' in response:
-            response = response[:response.find('</SYNOPSIS>')]
-        print(f'\nInitial Draft len: {len(response)}\n{response}\n')
-        with open('rag_draft1.txt', 'w') as w:
-            w.write(response)
-        # 'entities' is a single, newline delimited string for ease in llm processing
-        print(f'max_tokens {max_tokens}')
-        draft2 = rw.depth_rewrite(title, title, response, text_chunk, entities, title, int(1.2*max_tokens), title, title, '', cot.llm.template)
-        with open('rag_draft2.txt', 'w') as w:
-            w.write(draft2)
-        print(f'\nRewrite 1 len: {len(draft2)}\n{draft2}\n')
-        draft3 = rw.add_pp_rewrite(title, title, draft2, text_chunk, entities, title, int(1.4*max_tokens), title, title, '', cot.llm.template)
-        with open('rag_draft3.txt', 'w') as w:
-            w.write(draft3)
-        print(f'\nRewrite 2 len: {len(draft3)}\n{draft3}\n')
-        draft4 = rw.depth_rewrite(title, title, draft3, text_chunk, entities, title, int(1.6*max_tokens), title, title, '', cot.llm.template)
-        with open('rag_draft4.txt', 'w') as w:
-            w.write(draft4)
-        #print(f'\nRewrite 4 len: {len(draft4)}\n{draft4}\n')
+        ### no more rewriting on ingest,
+        ###   worried it distorts content more than content uniformity of style aids downstream extract
+        
+        id = index_section_synopsis(paper_dict, text_chunk)
+        section_synopses.append(text_chunk)
         section_ids.append(id)
-        if rw_count > 1:
-            return
-        """
         
 if __name__ == '__main__':
     import OwlCoT as CoT

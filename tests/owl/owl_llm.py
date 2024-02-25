@@ -28,25 +28,26 @@ import time
 models_dir = "/home/bruce/Downloads/models/"
 
 subdirs = [d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))]
-models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'phi-2' in d or 'xDAN' in d or 'miqu' in d or 'Sakura' in d)]
-print(models)
+models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'phi-2' in d or 'xDAN' in d or 'miqu' in d or 'gguf' in d)]
+#print(models)
 
 templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
-             "dolphin-2.7-mixtral-8x7b-6.0bpw-h6-exl2":"chatml",
-             "miqu-1-70b-sf-4.25bpw-h6-exl2":"llama-2",
-             "miqu-1-70b-sf-5.0bpw-h6-exl2":"llama-2",
              "miqu-1-70b-sf-6.0bpw-h6-exl2":"llama-2",
-             "Mixtral-SlimOrca-8x7B-6.0bpw-h6-exl2-2":"chatml",
              "Mistral-7b-instruct": "llama-2",
-             "Mixtral-8x7b-Instruct-6.0b-exl2": "llama-2",
+             "mixtral-8bpw-exl2": "llama-2",
+             "MixtralOrochi8x7B-8.0bpw-h8-exl2": "alpaca",
+             "mixtral-gguf": 'llama-2',
              "Mixtral-8x7B-instruct-8.0bpw-exl2": "llama-2",
              "Mixtral-8x7B-Instruct-v0.1-7.0bpw-h6-exl2": "llama-2",
-             "Nous-Hermes-2-Mixtral-8x7B-DPO-6.0bpw-h6-exl2":"chatml",
+             "Nous-Hermes-2-Mixtral-8x7B-DPO-6.0bpw-h6-loneStriker-exl2": "chatml",
+             "Nous-Hermes-2-Mixtral-8x7B-SFT-8bpw-h8-qeternity-exl2":"chatml",
              "phi-2":"phi-2",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
              "Senku-70B-Full-6.0bpw-h6-exl2": "chatml",
+             "Smaug-Mixtral-8.0bpw-exl2": "llama-2",
+             "Smaug-Mixtral-6.5bpw-exl2": "llama-2",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr"
 }
 
@@ -78,23 +79,38 @@ model_name=models[model_number]
 model_prompt_template = ''
 if model_name in templates:
     model_prompt_template = templates[model_name]
+print(f"Loading model: {model_name} prompt_template {model_prompt_template}")
+json_config = None
+context_size = 16384
+max_new_tokens = 250
+
+# get context size from model config
+try:
+    with open(models_dir+models[model_number]+'/config.json', 'r') as j:
+        json_config = json.load(j)
+        context_size = json_config["max_position_embeddings"]
+        print(f'loaded json.config, found context {context_size}')
+except Exception as e:
+    print(f'failure to load config.json {str(e)}\n setting context to 4096')
+
+if model_name.startswith('miqu-1-70b'):
+    context_size=10000
+    
+context_size = min(16384, context_size)
+print(f'loaded json.config, setting context to {context_size}')
 
 if model_name == 'phi-2':
     tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2")
     model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2")
     model.to('cuda')
     
-elif model_name == 'miqu-70B':
+elif model_name.startswith('mixtral-gguf'):
     # launch the llama.cpp server on localhost 8080
-    llama_cpp = subprocess.Popen(['/home/bruce/Downloads/llama.cpp/server',
-                    '-m',
-                    '/home/bruce/Downloads/models/miqu-70B/miqu-1-70b.q4_k_m.gguf',
-                    '-c',
-                    '10000',
-                    '-ngl',
-                    '87',
-                    '-b',
-                    '256'])
+    llama_cpp = subprocess.Popen(['/home/bruce/Downloads/llama.cpp/build/bin/server',
+                                  '-m', '/home/bruce/Downloads/models/mixtral-gguf/mixtral-8x7b-instruct-v0.1.Q8_0.gguf',
+                                  '-c', '16384',
+                                  '-ngl', '90',
+                                  '-b',  '256'])
     print(f'llama.cpp server started')
 
 else:
@@ -103,6 +119,7 @@ else:
     config = ExLlamaV2Config()
     config.scale_alpha_value=1.0
     config.model_dir = models_dir+model_name
+    #config.max_input_len = min (4096, context_size)
     config.prepare()
 
     model = ExLlamaV2(config)
@@ -116,10 +133,13 @@ else:
         model.load([20, 20, 20])
     elif 'ixtral' in model_name:
         print(f' mixtral load')
-        model.load([20, 22, 22])  # leave room on gpu 0 for other stuff, eg embed
+        model.load([21, 21, 23])  # leave room on gpu 0 for other stuff, eg embed
     elif 'Senku' in model_name:
         print(f' Senku load')
-        model.load([20, 20, 20])
+        model.load([22, 23, 22])
+    elif 'Smaug' in model_name:
+        print(f' Smaug load')
+        model.load([16, 16, 23])
     elif 'UNA' in model_name:
         print(f' UNA load')
         model.load([16, 23])
@@ -128,31 +148,10 @@ else:
     
     tokenizer = ExLlamaV2Tokenizer(config)
 
-print(f"Loading model: {model_name} prompt_template {model_prompt_template}")
-json_config = None
-context_size = 4096
-max_new_tokens = 250
-
-# get context size from model config
-try:
-    with open(models_dir+models[model_number]+'/config.json', 'r') as j:
-        json_config = json.load(j)
-        context_size = json_config["max_position_embeddings"]
-        print(f'loaded json.config, found context {context_size}')
-except Exception as e:
-    print(f'failure to load config.json {str(e)}\n setting context to 4096')
-
-if model_name.startswith('miqu-1-70b'):
-    context_size=16384
-elif model_name == 'miqu-70B':
-    context_size=16384
-    
 if model_name == 'phi-2':
     pass
-elif model_name == 'miqu-70B':
-    pass
 else:
-    cache = ExLlamaV2Cache(model, max_seq_len=min(16384, context_size))
+    cache = ExLlamaV2Cache(model, max_seq_len=context_size)
     # Initialize generator
     generator = ExLlamaV2StreamingGenerator(model, cache, tokenizer)
 
@@ -167,8 +166,6 @@ else:
     # Make sure CUDA is initialized so we can measure performance
     generator.warmup()
 
-print(f'loaded json.config, setting context to {min(16384, context_size)}')
-context_size = min(16384, context_size)
 
 async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False):
     generated_tokens = 0
@@ -203,7 +200,7 @@ async def stream_data(query: Dict[Any, Any], max_new_tokens, stop_on_json=False)
 stop_gen=False    
 async def phi_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, stop_on_json=False):
     global stop_gen
-    print(f'phi enter {type(query)}')
+    #print(f'phi enter {type(query)}')
 
     if stop_gen:
         return
@@ -224,6 +221,23 @@ async def phi_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, st
 
 async def miqu_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, stop_on_json=False):
     global stop_gen
+    #print(f'miqu enter {type(query)} keys {query.keys()}')
+
+    if stop_gen:
+        return
+    del query['max_tokens']
+    del query['temp']
+    del query['top_p']
+    query['n_predict']=int(max_new_tokens)
+    #print(f'\n\nmiqu query {query}\n')
+    response = requests.post('http://127.0.0.1:8080/completion',
+                             headers ={"Content-Type": "application/json"},
+                             data=json.dumps(query))
+    print(f'\nlama.cpp server response {response.json()["content"]}\n')
+    yield response.json()['content']
+
+async def llamacpp_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, stop_on_json=False):
+    global stop_gen
     print(f'miqu enter {type(query)} keys {query.keys()}')
 
     if stop_gen:
@@ -232,11 +246,11 @@ async def miqu_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, s
     del query['temp']
     del query['top_p']
     query['n_predict']=int(max_new_tokens)
-    print(f'\n\nmiqu query {query}\n')
+    #print(f'\n\nsmaug query {query}\n')
     response = requests.post('http://127.0.0.1:8080/completion',
                              headers ={"Content-Type": "application/json"},
                              data=json.dumps(query))
-    print(f'\nlama.cpp server response {response.json()["content"]}\n')
+    #print(f'\nlama.cpp server response {response.json()["content"]}\n')
     yield response.json()['content']
 
     
@@ -291,9 +305,9 @@ async def get_stream(request: Request):
         stop_gen=False
         print(f'phi-2! {query}')
         return StreamingResponse(phi_pseudo_stream(prompt, max_new_tokens=max_tokens, temp=temp, stop_on_json=stop_on_json))
-    elif model_name=='miqu-70B':
+    elif model_name.startswith('mixtral-gguf'):
         stop_gen=False
-        return StreamingResponse(miqu_pseudo_stream(query, max_new_tokens=max_tokens, temp=temp, stop_on_json=stop_on_json))
+        return StreamingResponse(llamacpp_pseudo_stream(query, max_new_tokens=max_tokens, temp=temp, stop_on_json=stop_on_json))
     else:
         settings.temperature = temp
         settings.top_p = top_p

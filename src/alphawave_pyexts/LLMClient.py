@@ -55,7 +55,8 @@ def run_query(model, messages, max_tokens, temp, top_p, host = host, port = port
                 #print(conv.messages[-1])
 
         # priming prompt
-        if conv.response_prime:
+        if conv.response_prime and (messages[len(messages)-1]['role'] != 'assistant'): # needs to end with "assistant" msg and doesn't
+            print(f"llmClient adding priming last: {messages[len(messages)-1]['role']}, {conv.roles[1]}")
             conv.append_message(conv.roles[1], '')
 
         prompt = conv.get_prompt()
