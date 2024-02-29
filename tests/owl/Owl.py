@@ -438,6 +438,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       encoded = self.codec.fromUnicode(r)
       # Decode bytes back to string
       decoded = encoded.data().decode('utf-8')
+      decoded = decoded.replace('\\n','\n')
       if not decoded.endswith('\n'):
          decoded += '\n'
       self.input_area.insertPlainText(decoded)  # Insert the text at the cursor position

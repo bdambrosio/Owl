@@ -124,6 +124,7 @@ else:
 
     model = ExLlamaV2(config)
 
+    max_seq_len = 4096
     if 'bagel' in model_name.lower():
         print(f' bagel load')
         model.load([20, 23, 23])
@@ -133,16 +134,7 @@ else:
         model.load([20, 20, 20])
     elif 'ixtral' in model_name:
         print(f' mixtral load')
-        model.load([21, 21, 23])  # leave room on gpu 0 for other stuff, eg embed
-    elif 'Senku' in model_name:
-        print(f' Senku load')
-        model.load([22, 23, 22])
-    elif 'Smaug' in model_name:
-        print(f' Smaug load')
-        model.load([16, 16, 23])
-    elif 'UNA' in model_name:
-        print(f' UNA load')
-        model.load([16, 23])
+        model.load([18, 20, 23])  # leave room on gpu 0 for other stuff, eg embed
     else:
         model.load([22, 22, 22])
     
@@ -151,7 +143,7 @@ else:
 if model_name == 'phi-2':
     pass
 else:
-    cache = ExLlamaV2Cache(model, max_seq_len=context_size)
+    cache = ExLlamaV2Cache(model)
     # Initialize generator
     generator = ExLlamaV2StreamingGenerator(model, cache, tokenizer)
 

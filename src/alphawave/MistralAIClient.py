@@ -180,7 +180,7 @@ class MistralAIClient(PromptCompletionClient):
                 max_t= int(request[key])
             if key == "model":
                 model =request[key]
-        #print(f'\nmistral prompt\n{prompt}\n\n')
+        print(f'\nmistral model {model}, prompt:\n{prompt}\n\n')
         return self.mistralai_client.chat(model=model, messages = prompt, temperature=temp, max_tokens = max_t)
 
     # mistral prompt use example

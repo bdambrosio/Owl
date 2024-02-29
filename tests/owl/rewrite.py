@@ -1,4 +1,4 @@
-import json
+import json, os
 import tiktoken
 from tqdm import tqdm
 from termcolor import colored
@@ -22,6 +22,22 @@ from alphawave_pyexts import LLMClient as lc
 
 # cot will be set by invoker
 cot=None
+
+entity_cache = {}
+entity_cache_filepath = 'paper_writer_entity_cache.json'
+if not os.path.exists(entity_cache_filepath):
+    with open(entity_cache_filepath, 'w') as pf:
+        json.dump(entity_cache, pf)
+    print(f"created 'paper_entity_cache'")
+else:
+    try:
+        with open(entity_cache_filepath, 'r') as pf:
+            entity_cache=json.load(pf)
+    except Exception as e:
+        print(f'failure to load entity cache, repair or delete\n  {str(e)}')
+        sys.exit(-1)
+    print(f"loaded {entity_cache_filepath}")
+
 
 def hyde(query):
     # rewrite a query as an answer
@@ -47,25 +63,34 @@ def literal_included_entities(entities, text):
     #print(f'Missing entities from draft: {missing_entities}')
     return included_entities
 
-def entities(paper_title, paper_outline, paper_summaries, ids,template):
+def section_entities(id, text, template):
     global entity_cache
-    items = []
+    int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
+    if int_id not in entity_cache:
+        excerpt_items = extract_entities(text, title='', outline='', template=template)
+        entity_cache[int_id]=excerpt_items
+        with open(entity_cache_filepath, 'w') as pf:
+            json.dump(entity_cache, pf)
+    return entity_cache[int_id]
+
+def paper_entities(paper_title, paper_outline, paper_summaries, ids,template):
+    global entity_cache
+    items = set()
     total=len(ids); cached=0
     for id, excerpt in zip(ids, paper_summaries):
         # an 'excerpt' is [title, text]
         int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
         if int_id in entity_cache:
             cached += 1
-            items.extend(entity_cache[int_id])
         else:
             excerpt_items = extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
             entity_cache[int_id]=list(set(excerpt_items))
-            items.extend(entity_cache[int_id])
+        items.update(entity_cache[int_id])
     print(f'entities total {total}, in cache: {cached}')
     with open(entity_cache_filepath, 'w') as pf:
         json.dump(entity_cache, pf)
     #print(f"wrote {entity_cache_filepath}")
-    return entity_cache[int_id]
+    return items
 
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
     """
@@ -89,42 +114,41 @@ def extract_entities(text, title=None, paper_topic=None, outline=None, template=
         
     kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 """),
-                  UserMessage("""Your current task is to extract all keywords and named-entities (which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
+                  UserMessage("""Your current task is to extract all NERs (Named Entities or keywords, which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
 
 Respond using the following format:
-<NAMED_ENTITIES>
-Entity1
-Entity2
+<NER>
+NER1
+NER2
 ...
-</NAMED_ENTITIES>
-
-If distinction between keyword, acronym, or named_entity is unclear, it is acceptable to list a term or phrase under multiple categories.
+</NER>
 
 <RESEARCH EXCERPT>
 {{$text}}
 </RESEARCH EXCERPT>
 """),
-                  AssistantMessage("<NAMED_ENTITIES>\n")
+                  AssistantMessage("<NER>\n")
               ]
     
-    response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NAMED_ENTITIES>')
+    response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NER>')
     # remove all more common things
     keywords = []; response_entities = []
     if response is not None:
-        end = response.lower().rfind ('</NAMED_ENTITIES>'.lower())
+        end = response.lower().rfind ('</NER>'.lower())
         if end < 1: end = len(response)+1
         response = response[:end]
         response_entities = response.split('\n')
-    for entity in response_entities: 
-        if entity.startswith('<NAMED_E') or entity.startswith('</NAMED_E'):
-            continue
-        zipf = wf.zipf_frequency(entity, 'en', wordlist='large')
-        if zipf < 2.85 and entity not in keywords:
-            keywords.append(entity)
-    for word in extract_acronyms(text):
-        zipf = wf.zipf_frequency(word, 'en', wordlist='large')
-        if zipf < 2.85 and word not in keywords:
-            keywords.append(word)
+    candidates = response_entities+extract_acronyms(text)
+    cutoff = 2.85
+    while len(keywords) == 0 and len(candidates) > 0:
+        for candidate in candidates:
+            if candidate.startswith('<NAMED_E') or candidate.startswith('</NAMED_E'):
+                continue
+            zipf = wf.zipf_frequency(candidate, 'en', wordlist='large')
+            if zipf < cutoff and candidate not in keywords:
+                keywords.append(candidate)
+        if len(keywords) <=1:
+            cutoff += .1
     #print(f'\nRewrite Extract_entities: {keywords}\n')
     return keywords
 
@@ -192,6 +216,26 @@ def format_outline(json_data, indent=0):
 
     return formatted_str
 
+
+def extract(title, text, instruction, ners, tokens, template):
+    prompt = [SystemMessage("""You are to perform an information extraction task. 
+Extract information from:
+
+{{$text}}.
+
+In support of the following Downstream Task:
+{{$instruction}}
+
+Note that your task at this time is information extraction:
+1. Do NOT attempt the Downstream Task.
+2. Do NOT include any introductory, discursive, or explantory phrases or text.
+3. Limit your response to simple statements of the data, information, claims, hypotheses, or conclusions contained in the text.
+4. Limit your response to {{$tokens}} words. End your response with </END>"""),
+              AssistantMessage("""Extract:\n""")
+              ]
+    extract = cot.llm.ask({"instruction":instruction, "ners":ners, "tokens":int(tokens*1.25), "text":text},
+                          prompt, max_tokens=tokens, eos='</END>')
+    return extract
 
 def write(paper_title, paper_outline, section_title, paper_summaries, section_topic, section_token_length,
           parent_section_title, heading_1_title, heading_1_draft, template):

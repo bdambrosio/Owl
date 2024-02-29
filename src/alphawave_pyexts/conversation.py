@@ -95,17 +95,17 @@ class Conversation:
         prompt_str=''
         #print(f'Input: {messages}')
         sysMsg = None
-        if self.messages[0][0] == "system": # no initial system message, create empty one for consistent formatting
+        if self.messages[0][0] == "system": # we have an initial system message
             sysMsg = self.messages[0][1]
             if len(self.messages) > 1:
-                if self.messages[1][0] != "user":
-                    # no first user message, create empty one for consistent formatting
+                if self.messages[1][0] == "user": # 
+                    # sys + user, combine
                     prompt_str = B_INST+B_SYS+sysMsg+E_SYS+self.messages[1][1]+E_INST
                     self.messages = self.messages[2:] #drop first two messages
                 else: #next msg is assistant
                     prompt_str = B_INST+B_SYS+sysMsg+E_SYS+E_INST
-                    self.messages = self.messages[1:] #drop first message, we've translated sys msg to user
-            else:
+                    self.messages = self.messages[1:] #drop first message
+            else: # just sys message
                 # just a single msg, the system msg
                 prompt_str = B_INST+B_SYS+sysMsg+E_SYS+E_INST
                 return prompt_str
@@ -677,7 +677,7 @@ register_conv_template(
     )
 )
 
-# Llama-2 default template
+# mistral default template
 register_conv_template(
     Conversation(
         name="mistral-tiny",
@@ -690,7 +690,7 @@ register_conv_template(
     )
 )
 
-# Llama-2 default template
+# mistral default template
 register_conv_template(
     Conversation(
         name="mistral-small",
@@ -703,7 +703,7 @@ register_conv_template(
     )
 )
 
-# Llama-2 default template
+# mistral default template
 register_conv_template(
     Conversation(
         name="mistral-medium",
@@ -716,10 +716,10 @@ register_conv_template(
     )
 )
 
-# Llama-2 default template
+# mistral default template
 register_conv_template(
     Conversation(
-        name="mistral-next",
+        name="mistral-large",
         system="",
         roles=("user", "assistant", "system"),
         messages=(),

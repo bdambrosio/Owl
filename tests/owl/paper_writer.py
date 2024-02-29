@@ -183,61 +183,6 @@ def get_template(row, config):
             return cot.template
     print(f'get_template fail {row}\n{json.dumps(config, indent=2)}')
         
-entity_cache = {}
-entity_cache_filepath = 'paper_writer_entity_cache.json'
-if not os.path.exists(entity_cache_filepath):
-    with open(entity_cache_filepath, 'w') as pf:
-        json.dump(entity_cache, pf)
-    print(f"created 'paper_entity_cache'")
-else:
-    try:
-        with open(entity_cache_filepath, 'r') as pf:
-            entity_cache=json.load(pf)
-    except Exception as e:
-        print(f'failure to load entity cache, repair or delete\n  {str(e)}')
-        sys.exit(-1)
-    print(f"loaded {entity_cache_filepath}")
-
-def literal_missing_entities(entities, draft):
-    # identifies items in the entities_list that DO appear in the summaries but do NOT appear in the current draft.
-    missing_entities = entities.copy()
-    draft_l = draft.lower()
-    for entity in entities:
-        if entity.lower() in draft_l :
-            missing_entities.remove(entity)
-    #print(f'Missing entities from draft: {len(missing_entities)}')
-    return missing_entities
-
-def literal_included_entities(entities, text):
-    # identifies items in the entities_list that DO appear in the current draft.
-    included_entities = []
-    text_l = text.lower()
-    for entity in entities:
-        if entity.lower() in text_l:
-            included_entities.append(entity)
-    #print(f'Missing entities from draft: {missing_entities}')
-    return included_entities
-
-def entities(paper_title, paper_outline, paper_summaries, ids, template):
-    global entity_cache
-    print(ids)
-    items = []
-    total=len(ids); cached=0
-    for id, excerpt in zip(ids, paper_summaries):
-        # an 'excerpt' is [title, text]
-        int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
-        if int_id in entity_cache:
-            cached += 1
-            items.extend(entity_cache[int_id])
-        else:
-            excerpt_items = rw.extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
-            entity_cache[int_id]=excerpt_items
-            items.extend(entity_cache[int_id])
-    print(f'entities total {total}, in cache: {cached}')
-    with open(entity_cache_filepath, 'w') as pf:
-        json.dump(entity_cache, pf)
-    print(f"wrote {entity_cache_filepath}")
-    return list(set(items))
 
 def count_keyphrase_occurrences(texts, keyphrases):
     """
@@ -479,9 +424,12 @@ def write_report(app, topic):
 
 
 def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=None, length=400, dscp='', topic='', paper_title='', abstract='', depth=0, parent_section_title='', parent_section_partial='', heading_1_title='', heading_1_draft = '', num_rewrites=1, resources=None):
+    #
+    ## need to mod this to handle 'resources' longer than available context
+    #
     template = get_template('Write',config)
-    if depth == 0: #set section number initially to 0
-        n = 0; refs=[]
+    if depth == 0: 
+        n = 0; refs=[] #set section number initially to 0
     if len(paper_title) == 0 and depth == 0 and 'title' in paper_outline:
         paper_title=paper_outline['title']
     if 'length' in section_outline:
@@ -499,6 +447,38 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
     subsection_topic = section_outline['dscp'] if 'dscp' in section_outline else section_outline['title']
     subsection_title = section_outline['title']
     #print(f"\nWRITE_PAPER section: {topic}")
+    if depth == 0: 
+        if resources is not None:
+            ids = resources[0]
+            excerpts = resources[1]
+            paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
+            print(f'write_report_aux depth 0 len {len(paper_summaries)}, limit {cot.llm.context_size*2} chars')
+            if len(paper_summaries) > cot.llm.context_size*2: # context is in tokens, len is chars
+                # excerpts are too long for context, do query-specific extract first
+                rewrites = []
+                for id, excerpt in zip(ids, excerpts):
+                    title = excerpt[0]
+                    text = excerpt[1]
+                    if len(text) < (cot.llm.context_size*1.5)/len(paper_summaries):
+                        # short section, don't bother with extract
+                        rewrites.append([title, text])
+                        continue
+                    row = s2.get_section(id)
+                    if row is not None:
+                        ners = row['ners']
+                    else:
+                        ners = ' '.join(rw.extract_entities(subsection_dscp+'. '+text))
+                    tokens = int(((1.0*len(text))/len(paper_summaries))*(cot.llm.context_size*2))
+                    rewrite = rw.extract(title, text, subsection_dscp, ners, tokens, template)
+                    print(f'\nWRAUX in {len(text)} out {len(rewrite)}\n{rewrite}\n')
+                    if len(rewrite) < len(text):
+                        rewrites.append([title, rewrite])
+                    else: # sometimes extract takes more words than the original, ignore it
+                        rewrites.append([title, text])
+            resources = [ids, rewrites]
+            print('paper_writer rewritten resources:\n{json.dumps(resources, indent=2)}')
+
+
     if 'sections' in section_outline and len(section_outline['sections']) > 0:
         #
         ### write section intro first draft
@@ -549,22 +529,25 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
     
     else:
         # no subsections, write this terminal section
-        section = '' if 'sections' not in section_outline else section_outline['title']
+        section = '' if 'title' not in section_outline else section_outline['title']
         print(f'heading_1 {heading_1_title}\npst {parent_section_title}\nsubsection topic {subsection_topic}')
         query = heading_1_title+', '+parent_section_title+' '+subsection_topic
         # below assumes web searching has been done
         if resources is None:
             # do local search, excerpts to use not provided
+            print(f'** write_report_aux Doing local search ! **')
             ids, excerpts = s2.search(query, subsection_dscp) 
         else:
-            ids = resources['sections'][0]
-            excerpts = resources['sections'][1]
+            # resources ['sections'] = [[id1, id2, ...], [[title1, text1],[title2, text2],...]]
+            ids = resources[0]
+            excerpts = resources[1]
         paper_summaries = '\n'.join(['Title: '+s[0]+'\n'+s[1] for s in excerpts])
-        subsection_refs =  []
-        for ref in [s[0]for s in excerpts]:
-            if ref not in subsection_refs:
-                subsection_refs.append(ref)
+        print (f'wra resource paper summaries len after rewrite {len(paper_summaries)}')
         subsection_token_length = max(500,length) # no less than a paragraph
+        subsection_refs =  []
+        for title in [s[0]for s in excerpts]:
+            if title not in subsection_refs:
+                subsection_refs.append(title)
 
         print(f"\nWriting: {section_outline['title']} length {length}")
         draft = rw.write(paper_title, paper_outline, section_outline['title'], paper_summaries, subsection_topic, int(subsection_token_length), parent_section_title, heading_1_title, heading_1_draft, template)
@@ -577,8 +560,8 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
         #
         ### first collect entities
         #
-        keywds = entities(paper_title, paper_outline, excerpts, ids, template)
-        missing_entities = literal_missing_entities(keywds, draft)
+        keywds = rw.paper_entities(paper_title, paper_outline, excerpts, ids, template)
+        missing_entities = rw.literal_missing_entities(keywds, draft)
         #print(f'\n missing entities in initial draft {len(missing_entities)}\n')
         for i in range(num_rewrites):
             if i < num_rewrites-1:
@@ -591,7 +574,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
             else:
                 # refine in final rewrite
                 draft = rw.rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1_title, heading_1_draft, template)
-            missing_entities = literal_missing_entities(keywds, draft)
+            missing_entities = rw.literal_missing_entities(keywds, draft)
             print(f'\n missing entities after rewrite {len(missing_entities)} \n')
 
         
@@ -605,7 +588,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
     return section, subsection_refs
 
 class DisplayApp(QtWidgets.QWidget):
-    def __init__(self, query, sections='', dscp='', template=''):
+    def __init__(self, query, sections=[], dscp='', template=''):
         super().__init__()
         self.query = query
         self.sections = sections
@@ -666,6 +649,12 @@ class DisplayApp(QtWidgets.QWidget):
         self.discuss_button.clicked.connect(self.discuss)
         text_layout.addWidget(self.discuss_button)
       
+        self.describe_button = QPushButton("describe")
+        self.describe_button.setFont(self.widgetFont)
+        self.describe_button.setStyleSheet("QPushButton { background-color: #101820; color: #FAEBD7; }")
+        self.describe_button.clicked.connect(self.describe)
+        text_layout.addWidget(self.describe_button)
+      
         self.setLayout(main_layout)
         self.show()
         
@@ -685,15 +674,31 @@ class DisplayApp(QtWidgets.QWidget):
         self.input_area.clear()
         print(f'calling discuss query{self.query} sections {len(self.sections)}, dscp {self.dscp}')
         discuss_resources(self, input_text, self.sections, self.query+', '+self.dscp, self.template)
-         
+
+    def describe(self):
+        print(f'calling describe sections: {len(self.sections[0])}')
+        print(f'section ids: {self.sections[0]}')
+        entities = set()
+        for id, title_text in zip(self.sections[0], self.sections[1]):
+            int_id = str(int(id))
+            print(id, title_text[0])
+            section_entities = rw.section_entities(id, title_text[1], self.template)
+            entities.update(section_entities)
+            print(section_entities)
+        print(entities)
+        classification_prompt = [SystemMessage("Construct a minimal set of STEM NERs that covers the NERs provided below. The response should contain 5 to 8 NERs that collectively cover 90% of the provided NERs, with no or small overlap among the response NERs and minimal set-difference between the ontological space covered by the response NERs and the ontological space covered by the union of the user-provided NERs. Respond ONLY with the response NERs, followed by </END>."),
+                                 UserMessage('User NERs:\n{{$ners}}'),
+                                 AssistantMessage('Response NERs:\n')
+                                 ]
+        response = cot.llm.ask({'ners':entities}, classification_prompt)
+        print(response)
+
 
 def discuss_resources(display, query, sections, dscp='', template=None):
     """ resources is [[section_ids], [[title, section_synopsis], ...]]"""
     # excerpts is just [[title, section_synopsis], ...]
     global updated_json, config
 
-    section_ids = sections[0]
-    excerpts = sections[1]
     config={}
     rows = ["Outline", "Search", "Write", "ReWrite"]
     # make dummy config, write_aux needs it
@@ -720,20 +725,18 @@ Respond only with the instruction, in plain JSON as above, with no markdown or c
                 ]
     instruction = cot.llm.ask({"topic":dscp, "query":query, "dscp": dscp},
                               messages, stop_on_json=True, max_tokens=250, validator=JSONResponseValidator())
-    outline = {"title": query, "rewrites": 2, "length": length, "dscp": str(instruction['instruction'])}
+    outline = {"title": query, "rewrites": 1, "length": length, "dscp": str(instruction['instruction']),
+               "task": str(instruction['instruction'])}
     display.display_msg(json.dumps(outline, indent=2))
     
-    if len(excerpts) > 10: 
-        # s2_search_resources(outline, resources)
-        pass
-    
-    report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=resources)
+    report, refs = write_report_aux(config, paper_outline=outline, section_outline=outline, heading_1_title=query, length=600, resources=sections)
     
     display.display_msg(report)
     display.display_msg(refs)
     return report, refs 
     
 from Planner import Planner
+
 if __name__ == '__main__':
     def parse_arguments():
         """Parses command-line arguments using the argparse library."""
@@ -753,12 +756,12 @@ if __name__ == '__main__':
                 resources = pickle.load(f)
             print(f'\nResources:\n{json.dumps(resources, indent=2)}')
             app = QApplication(sys.argv)
-            cot = oiv.OwlInnerVoice(None, resources['template'])
+            cot = oiv.OwlInnerVoice(None, template=resources['template'])
             # set cot for rewrite so it can access llm
             rw.cot = cot
             s2.cot = cot
 
-            window = DisplayApp('Question?', resources['sections'], resources['dscp'], resources['template'])
+            window = DisplayApp('Question?', resources['sections'], resources['dscp'], template=resources['template'])
             #window.show()
             app.exec()
             sys.exit(0)

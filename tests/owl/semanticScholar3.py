@@ -192,7 +192,7 @@ else:
 if not os.path.exists(section_library_filepath):
     # Generate a blank dataframe where we can store downloaded files
     section_library_df =\
-        pd.DataFrame(columns=["faiss_id", "paper_id", "synopsis"])
+        pd.DataFrame(columns=["faiss_id", "paper_id", "ners", "ner_faiss_id", "synopsis"])
     section_library_df.to_parquet(section_library_filepath)
     print(f"created '{section_library_filepath}'")
 else:
@@ -205,7 +205,13 @@ def save_synopsis_data():
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
 
-
+def get_section(id):
+    section_library_rows = section_library_df[section_library_df['faiss_id'] == id]
+    if len(section_library_rows) < 1:
+        section_library_rows = section_library_df[section_library_df['ner_faiss_id'] == id]
+    if len(section_library_rows) > 0:
+        section_row = section_library_rows.iloc[0]
+    return section_row
 
 def search_sections(query, top_k=20):
     #print(section_library_df)
@@ -221,10 +227,11 @@ def search_sections(query, top_k=20):
         return [],[]
     item_ids=[]; synopses = []
     for id in ids[0]:
-        section_library_row = section_library_df[section_library_df['faiss_id'] == id]
-        #print section text
-        if len(section_library_row) > 0:
-            section_row = section_library_row.iloc[0]
+        section_library_rows = section_library_df[section_library_df['faiss_id'] == id]
+        if len(section_library_rows) < 1:
+            section_library_rows = section_library_df[section_library_df['ner_faiss_id'] == id]
+        if len(section_library_rows) > 0:
+            section_row = section_library_rows.iloc[0]
             text = section_row['synopsis']
             filtered_df = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']]
             if filtered_df.empty:
@@ -687,23 +694,34 @@ def index_paper_synopsis(paper_dict, synopsis, paper_index):
     paper_library_df.loc[paper_index, 'synopsis'] = synopsis
     return True
 
-def index_section_synopsis(paper_dict, synopsis):
+def index_section_synopsis(paper_dict, text):
     global section_indexIDMap
-    faiss_id = generate_faiss_id(lambda value: value in section_library_df.index)
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
     paper_abstract = paper_dict['summary']
     pdf_filepath = paper_dict['pdf_filepath']
-    embedding = embedding_request(synopsis, 'search_document: ')
+
+    text_embedding = embedding_request(text, 'search_document: ')
+    faiss_id = generate_faiss_id(lambda value: value in section_library_df.index)
     ids_np = np.array([faiss_id], dtype=np.int64)
-    embeds_np = np.array([embedding], dtype=np.float32)
-    print(f'section synopsis length {len(synopsis)} paper_id {paper_dict["faiss_id"]}')
+    embeds_np = np.array([text_embedding], dtype=np.float32)
     section_indexIDMap.add_with_ids(embeds_np, ids_np)
+
+    ners = rw.section_entities(faiss_id, text, None)
+    ner_embedding = embedding_request(', '.join(ners), 'search_document: ')
+    ner_faiss_id = generate_faiss_id(lambda value: value in section_library_df.index)
+    ner_ids_np = np.array([ner_faiss_id], dtype=np.int64)
+    ner_embeds_np = np.array([ner_embedding], dtype=np.float32)
+    section_indexIDMap.add_with_ids(ner_embeds_np, ner_ids_np)
+
     synopsis_dict = {"faiss_id":faiss_id,
                      "paper_id": paper_dict["faiss_id"],
-                     "synopsis": synopsis,
+                     "synopsis": text,
+                     "ners": ners,
+                     "ner_faiss_id": ner_faiss_id
                      }
     section_library_df.loc[len(section_library_df)]=synopsis_dict
+    
     return faiss_id
 
 def mean_pooling(model_output, attention_mask):
@@ -868,12 +886,12 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_tit
         top_k = top_k * 1.5 # get more so we can rerank
         rerank = True
 
-    hyde_query = hyde(query+'. '+dscp)
-    #print(f'hyde query: {hyde_query}')
     query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k))
     #print(f'search ids {query_ids}')
     kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k))
     #print(f'kwd ids {kwd_ids}')
+    hyde_query = hyde(query+'. '+dscp)
+    #print(f'hyde query: {hyde_query}')
     hyde_ids, hyde_summaries = search_sections(hyde_query, top_k=int(top_k))
     #print(f'hyde ids {hyde_ids}')
     if query_is_title:

@@ -136,7 +136,7 @@ class LLM():
         self.conv_template = cv.get_conv_template(self.template)
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
-        self.context_size=8000 # available variable for clients, updated at every ask
+        self.context_size=12000 # available variable for clients, updated at every ask
         
    def repair_json (self, item, validation):
       #
@@ -225,7 +225,7 @@ Chain of Thought:
       if client==self.mistralAIClient or  'MistralAIClient' in str(type(client)):
           self.context_size=16000 # I've read mistral uses sliding 8k window
       if client==self.osClient or  'OSClient' in str(type(client)):
-          self.context_size=8000 # tulu default
+          self.context_size=12000 # conservative local mis/mixtral default
           try:
               response = requests.post('http://127.0.0.1:5004/template')
               if response.status_code == 200:
@@ -251,6 +251,8 @@ Chain of Thought:
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
               print(f'\nask fail, response not dict or status not success {template} {max_tokens}\n {response}')
+              if type(response) is dict and 'status' in response and response['status'] == 'too_long':
+                  print(f'ask prompt:\n{input}')
               return None
           # check if expecting json or any other special form
           validation = None
@@ -1017,11 +1019,14 @@ Input: {{{{$input}}}}
                    self.add_exchange(input, f'retrieval failure {summary}')
                    return {"article": f'\nretrieval failure {summary}'}
             elif type(content) == dict and 'action' in content and content['action']=='tell':
-               #full_tell = self.tell(content['argument'], input, widget, short_profile)
-               #self.add_exchange(input, full_tell)
-               #return {"tell": full_tell}
-               self.add_exchange(input, content['argument'])
-               return {"tell":content['argument']}
+                text = ''
+                if 'argument' in content:
+                    text += content['argument']
+                for key in content.keys():
+                    if key not in ['action', 'argument']:
+                        text += '\n'+key+':\n'+content[key]
+                self.add_exchange(input, text)
+                return {"tell":text}
             elif type(content) == dict and 'action' in content and content['action']=='gpt4':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:

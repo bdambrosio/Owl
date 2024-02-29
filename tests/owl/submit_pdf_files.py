@@ -6,12 +6,11 @@ print (cot.template)
 import semanticScholar3 as s2
 
 s2.cot = cot
-
+s2.rw.cot = cot
 def process_file(filepath):
     # Example function that does something with a filepath
     print(f"Processing file: {filepath}")
-    s2.index_file(filepath)
-    print(f" success")
+    s2.queue_url_for_indexing('file://'+filepath)
 
 def scan_directory(directory):
     path = Path(directory)
