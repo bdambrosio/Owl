@@ -1,8 +1,13 @@
 # Owl 
 <img src="https://github.com/bdambrosio/Owl/blob/main/images/Owl.jpg?raw=true" width="120">
 
+Well, the big announcement today seems to be about STORM - a poor attempt to duplicate a small part of Owl's capability. :)
+
+Of course, noone other than me knows how to use. Sorry bout that. 
+
 Owl is my experimental Research Assistant / general support / research project on Language-based cognitive architecture. 
-* Owl has a UI, so you can chat with it. Complex context management include conversation history management, topic-based working memory, sentiment analysis, background reflection, even respond in speech if you like.
+Owl's report writer is pretty good at this point. It can guide you in creating a description of what you what to know (ie, 'copilot' you), research wikipedia, the web, and academic papers, construct an outline of appropriate depth for the length report you want, and draft and rewrite sections, producing a final report with references. 
+* Owl has a UI, so you can chat with it. Complex context management include conversation history management, topic-based working memory, sentiment analysis, background reflection, it can even respond in speech if you like.
 * Owl has a long term topic/subtopic memory, updated offline when it isn't busy.
 * Owl can search the web (using a port of my llmsearch project), a local faiss of wikipedia, SemanticScholar, and it's own cache of research papers, all as part of chat or in support of other tasks.
 * Owl's research RAG is multi-level - extensive analysis/rewrite occurs at paper ingest.
@@ -15,7 +20,7 @@ Owl is my experimental Research Assistant / general support / research project o
 Owl is mostly useful at  the moment, if at all, as bits of example code. There is NO documentation on how to install, and it isn't built for easy installation. It uses multiple servers: 
 * a fastapi-based llm server for local-hosted llms (although you can choose to use OpenAI or MistralAI if you have keys - I often configure report writing to use gpt-4 or mistral-medium for final report generation). I usually use mixtral-8x7B-instruct 6bit exl2 on a pair of 4090's, fast enough chatting is quite comfortable.
 * a fastapi-based web search server (you need a google api key to run this one)
-* a fastapi-based indexing server (so paper-indexing happens asynchonously, server handles queueing of multiple index requests)
+* a fastapi-based indexing server (so paper/resource-indexing happens asynchonously, server handles queueing of multiple index requests)
 * a grobid server for parsing pdfs (this one is easy, just a stock grobid container)
 * a simple tts server (again trivial, but still, one more server to start, only if you want speech)
 * all the code needed for all these servers is included in this repository, but there is no info yet on how to run any of them!
