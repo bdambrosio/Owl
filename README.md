@@ -3,7 +3,7 @@
 
 Well, the big announcement today seems to be about STORM - a poor attempt to duplicate a small part of Owl's capability. :)
 
-Of course, noone other than me knows how to use. Sorry bout that. 
+Of course, noone other than me knows how to use Owl. Sorry 'bout that. If you care ask me.
 
 Owl is my experimental Research Assistant / general support / research project on Language-based cognitive architecture. 
 Owl's report writer is pretty good at this point. It can guide you in creating a description of what you what to know (ie, 'copilot' you), research wikipedia, the web, and academic papers, construct an outline of appropriate depth for the length report you want, and draft and rewrite sections, producing a final report with references. 
