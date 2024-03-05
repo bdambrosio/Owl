@@ -1,95 +1,84 @@
-import json, os
-import tiktoken
-from tqdm import tqdm
-from termcolor import colored
+import json, os, sys
 import wordfreq as wf
-from wordfreq import tokenize as wf_tokenize
 import re
-from transformers import AutoTokenizer, AutoModel
 from promptrix.VolatileMemory import VolatileMemory
-from promptrix.FunctionRegistry import FunctionRegistry
 from promptrix.Prompt import Prompt
 from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
 from alphawave.OSClient import OSClient
 from alphawave.OpenAIClient import OpenAIClient
-from alphawave.alphawaveTypes import PromptCompletionOptions
 from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
-from alphawave_pyexts import utilityV2 as ut
-from alphawave_pyexts import LLMClient as lc
 
-# cot will be set by invoker
 cot=None
-
-entity_cache = {}
-entity_cache_filepath = 'paper_writer_entity_cache.json'
-if not os.path.exists(entity_cache_filepath):
-    with open(entity_cache_filepath, 'w') as pf:
-        json.dump(entity_cache, pf)
-    print(f"created 'paper_entity_cache'")
+ner_cache = {}
+ner_cache_filepath = 'paper_writer_ner_cache.json'
+if not os.path.exists(ner_cache_filepath):
+    with open(ner_cache_filepath, 'w') as pf:
+        json.dump(ner_cache, pf)
+        print(f"created 'paper_ner_cache'")
 else:
     try:
-        with open(entity_cache_filepath, 'r') as pf:
-            entity_cache=json.load(pf)
+        with open(ner_cache_filepath, 'r') as pf:
+            ner_cache=json.load(pf)
     except Exception as e:
         print(f'failure to load entity cache, repair or delete\n  {str(e)}')
         sys.exit(-1)
-    print(f"loaded {entity_cache_filepath}")
+        print(f"loaded {ner_cache_filepath}")
 
 
 def hyde(query):
     # rewrite a query as an answer
     pass
 
-def literal_missing_entities(entities, draft):
-    # identifies items in the entities_list that DO appear in the summaries but do NOT appear in the current draft.
-    missing_entities = entities.copy()
+def literal_missing_ners(ners, draft):
+    # identifies items in the ners_list that DO appear in the summaries but do NOT appear in the current draft.
+    missing_ners = ners.copy()
     draft_l = draft.lower()
-    for entity in entities:
-        if entity.lower() in draft_l :
-            missing_entities.remove(entity)
-    #print(f'Missing entities from draft: {len(missing_entities)}')
-    return missing_entities
+    for ner in ners:
+        if ner.lower() in draft_l :
+            missing_ners.remove(ner)
+    #print(f'Missing ners from draft: {len(missing_ners)}')
+    return missing_ners
 
-def literal_included_entities(entities, text):
-    # identifies items in the entities_list that DO appear in the current draft.
-    included_entities = []
+def literal_included_ners(ners, text):
+    # identifies items in the ners_list that DO appear in the current draft.
+    included_ners = []
     text_l = text.lower()
-    for entity in entities:
-        if entity.lower() in text_l:
-            included_entities.append(entity)
-    #print(f'Missing entities from draft: {missing_entities}')
-    return included_entities
+    for ner in ners:
+        if ner.lower() in text_l:
+            included_ners.append(ner)
+    #print(f'Missing ners from draft: {missing_ners}')
+    return included_ners
 
-def section_entities(id, text, template):
-    global entity_cache
+def section_ners(id, text, template):
+    global ner_cache
     int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
-    if int_id not in entity_cache:
-        excerpt_items = extract_entities(text, title='', outline='', template=template)
-        entity_cache[int_id]=excerpt_items
-        with open(entity_cache_filepath, 'w') as pf:
-            json.dump(entity_cache, pf)
-    return entity_cache[int_id]
+    if int_id not in ner_cache:
+        excerpt_items = extract_ners(text, title='', outline='', template=template)
+        ner_cache[int_id]=excerpt_items
+        with open(ner_cache_filepath, 'w') as pf:
+            json.dump(ner_cache, pf)
+    return ner_cache[int_id]
 
-def paper_entities(paper_title, paper_outline, paper_summaries, ids,template):
-    global entity_cache
+def paper_ners(paper_title, paper_outline, paper_summaries, ids,template):
+    global ner_cache
     items = set()
     total=len(ids); cached=0
     for id, excerpt in zip(ids, paper_summaries):
         # an 'excerpt' is [title, text]
         int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
-        if int_id in entity_cache:
+        if int_id in ner_cache:
             cached += 1
         else:
-            excerpt_items = extract_entities(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
-            entity_cache[int_id]=list(set(excerpt_items))
-        items.update(entity_cache[int_id])
-    print(f'entities total {total}, in cache: {cached}')
-    with open(entity_cache_filepath, 'w') as pf:
-        json.dump(entity_cache, pf)
-    #print(f"wrote {entity_cache_filepath}")
+            excerpt_items = extract_ners(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
+            ner_cache[int_id]=list(set(excerpt_items))
+        items.update(ner_cache[int_id])
+    print(f'ners total {total}, in cache: {cached}')
+    with open(ner_cache_filepath, 'w') as pf:
+        json.dump(ner_cache, pf)
+    #print(f"wrote {ner_cache_filepath}")
     return items
 
 def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
@@ -103,7 +92,7 @@ def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
     """
     return re.findall(pattern, text)
 
-def extract_entities(text, title=None, paper_topic=None, outline=None, template=None):
+def extract_ners(text, title=None, paper_topic=None, outline=None, template=None):
     topic = ''
     if title is not None:
         topic += title+'\n'
@@ -114,7 +103,7 @@ def extract_entities(text, title=None, paper_topic=None, outline=None, template=
         
     kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
 """),
-                  UserMessage("""Your current task is to extract all NERs (Named Entities or keywords, which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
+                  UserMessage("""Your current task is to extract all NERs (Named Ners or keywords, which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
 
 Respond using the following format:
 <NER>
@@ -132,13 +121,13 @@ NER2
     
     response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NER>')
     # remove all more common things
-    keywords = []; response_entities = []
+    keywords = []; response_ners = []
     if response is not None:
         end = response.lower().rfind ('</NER>'.lower())
         if end < 1: end = len(response)+1
         response = response[:end]
-        response_entities = response.split('\n')
-    candidates = response_entities+extract_acronyms(text)
+        response_ners = response.split('\n')
+    candidates = response_ners+extract_acronyms(text)
     cutoff = 2.85
     while len(keywords) == 0 and len(candidates) > 0:
         for candidate in candidates:
@@ -149,10 +138,10 @@ NER2
                 keywords.append(candidate)
         if len(keywords) <=1:
             cutoff += .1
-    #print(f'\nRewrite Extract_entities: {keywords}\n')
+    #print(f'\nRewrite Extract_ners: {keywords}\n')
     return keywords
 
-def entities_to_str(item_list):
+def ners_to_str(item_list):
     return '\n'.join(item_list)
 
 def count_keyphrase_occurrences(texts, keyphrases):
@@ -217,25 +206,94 @@ def format_outline(json_data, indent=0):
     return formatted_str
 
 
-def extract(title, text, instruction, ners, tokens, template):
-    prompt = [SystemMessage("""You are to perform an information extraction task. 
-Extract information from:
+def extract(title, text, draft, instruction, ners, tokens, template=None):
+    prompt_prefix = SystemMessage("""You are to perform an analysis task. 
+Analyze and extract information from:
 
 {{$text}}.
 
 In support of the following Downstream Task:
+
 {{$instruction}}
 
 Note that your task at this time is information extraction:
 1. Do NOT attempt the Downstream Task.
 2. Do NOT include any introductory, discursive, or explantory phrases or text.
-3. Limit your response to simple statements of the data, information, claims, hypotheses, or conclusions contained in the text.
-4. Limit your response to {{$tokens}} words. End your response with </END>"""),
+3. Respond with a lists of any problem(s) addressed, methods, data, information, claims, hypotheses, and conclusions contained in the text.
+4. Limit your response to {{$tokens}} words. End your response with </END>""")
+
+    if draft is not None and len(draft) > 0:
+        prompt_prefix = SystemMessage("""Your task is to extend an analysis / information extraction with new text.
+Given the analysis result from text provided so far:
+
+<PreviousAnalysis>
+{{$draft}}
+</PreviousAnalysis>
+
+Extract information from this new text:
+
+<NewText>
+{{$text}}.
+</NewText>
+
+In support of the following Downstream Task:
+
+{{$instruction}}
+
+Note that your task at this time is analysis / information extraction:
+1. Do NOT attempt the Downstream Task.
+2. Do NOT include any introductory, discursive, or explantory phrases or text.
+3. Review the PreviousAnalysis. Respond with any additional problems, methods, data, information, claims, hypotheses, and conclusions contained in the new text.
+4. Limit your response to {{$tokens}} words. End your response with </END>""")
+        
+    prompt = [prompt_prefix, 
               AssistantMessage("""Extract:\n""")
               ]
-    extract = cot.llm.ask({"instruction":instruction, "ners":ners, "tokens":int(tokens*1.25), "text":text},
+    extract = cot.llm.ask({"draft": draft, "instruction":instruction, "ners":ners, "tokens":int(tokens), "text":text},
                           prompt, max_tokens=tokens, eos='</END>')
     return extract
+
+
+def extract_w_focus(text, draft, extract_subject, tokens, template=None):
+    prompt_prefix = SystemMessage("""You are to perform an analysis task. 
+Analyze and extract information from:
+
+{{$text}}.
+
+Note that your task at this time is information extraction:
+1. Do NOT include any introductory, discursive, or explantory phrases or text.
+2. Your analysis should be focused on identifying the {{$extract_subject}} of the text
+3. Respond specifically with the {{$extract_subject}} in/of the text.
+4. Limit your response to {{$tokens}} words. End your response with </EXTRACT>""")
+
+    if draft is not None and len(draft) > 0:
+        prompt_prefix = SystemMessage("""Your task is to extend an analysis / information extraction with new text.
+Given the analysis result from text provided so far:
+
+<PreviousAnalysis>
+{{$draft}}
+</PreviousAnalysis>
+
+Extract information from this new text:
+
+<Text>
+{{$text}}.
+</Text>
+
+
+Note that your task at this time is information extraction:
+1. Do NOT include any introductory, discursive, or explantory phrases or text.
+2. Your analysis should be focused on identifying the {{$extract_subject}} of the text
+3. Respond specifically with the {{$extract_subject}} in/of the text.
+4. Limit your response to {{$tokens}} words. End your response with </EXTRACT>""")
+        
+    prompt = [prompt_prefix, 
+              AssistantMessage("""<EXTRACT>\n""")
+              ]
+    extract = cot.llm.ask({"draft": draft, "extract_subject":extract_subject, "tokens":int(tokens), "text":text},
+                          prompt, max_tokens=tokens, eos='</EXTRACT>')
+    return extract
+
 
 def write(paper_title, paper_outline, section_title, paper_summaries, section_topic, section_token_length,
           parent_section_title, heading_1_title, heading_1_draft, template):
@@ -290,9 +348,9 @@ End the section as follows:
     draft = response[:end_idx]
     return draft
 
-def rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title,
+def rewrite(paper_title, section_title, draft, paper_summaries, ners, section_topic, section_token_length, parent_section_title,
             heading_1, heading_1_draft, template):
-    missing_entities = literal_missing_entities(entities, draft)
+    missing_ners = literal_missing_ners(ners, draft)
     sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone.
 You are writing a paper titled:
 {paper_title}
@@ -312,11 +370,11 @@ The {heading_1} section content up to this point is:
 """
 )
 
-    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important missing entities from the current draft. The following entities in the source material above have been identified as missing in the current draft:
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important missing ners from the current draft. The following ners in the source material above have been identified as missing in the current draft:
 
-<MISSING_ENTITIES>
-{{{{$missing_entities}}}}
-</MISSING_ENTITIES>
+<MISSING_NERS>
+{{{{$missing_ners}}}}
+</MISSING_NERS>
 
 The current DRAFT is:
 
@@ -324,19 +382,19 @@ The current DRAFT is:
 {{{{$draft}}}}
 </DRAFT>
 
-Respond with up to six of the most important missing entities to add to the draft.
-The order of the missing entities in the list above is NOT representative of their importance!
-Many or all of the listed missing entities may be irrelevant to the role of this section.
-Rate missing entity importance by:
+Respond with up to six of the most important missing ners to add to the draft.
+The order of the missing ners in the list above is NOT representative of their importance!
+Many or all of the listed missing ners may be irrelevant to the role of this section.
+Rate missing ner importance by:
  - relevance to the section title. 
  - relevance to the existing draft.
  - the role of this section within the overall outline. 
-Do not respond with more than six entities. 
+Do not respond with more than six ners. 
 Respond as follows:
 
-missing_entity 1
-missing_entity 2
-missing_entity 3
+missing_ner 1
+missing_ner 2
+missing_ner 3
 ...
 
 Respond only with the above list. Do not include any commentary or explanatory material.
@@ -354,18 +412,18 @@ The current version of the DRAFT is:
 
 This DRAFT is for the '{section_title}' section.
 
-Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
+Ners (key phrases, acronyms, or names-ners) to add to the above draft include:
 
-<MISSING_ENTITIES>
-{{{{$missing_entities}}}}
-</MISSING_ENTITIES>
+<MISSING_NERS>
+{{{{$missing_ners}}}}
+</MISSING_NERS>
 
 The rewrite must cover the specific topic: {section_topic}
 
 <INSTRUCTIONS>
 Follow these steps:
 Step 1. Reason step by step to determine the role of this section within the paper.
-Step 2. Write a new, denser draft of the same length that includes all entities and information and detail from the previous draft and adds content for the MISSING_ENTITIES listed above.
+Step 2. Write a new, denser draft of the same length that includes all ners and information and detail from the previous draft and adds content for the MISSING_NERS listed above.
  
 Your response include ONLY the rewritten draft, without any explanation or commentary.
 
@@ -379,18 +437,18 @@ end the rewrite as follows:
               UserMessage(MESelectMessage),
               AssistantMessage("<ME>\n")
               ]
-    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_entities": entities_to_str(missing_entities)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_ners": ners_to_str(missing_ners)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
     if response is None or len(response) == 0:
         return draft
     end_idx = response.rfind('</ME>')
     if end_idx < 0:
         end_idx = len(response)
     response = response[:end_idx-1]
-    add_entities = response.split('\n')[:6]
-    # pick just the actual entities out of responses
-    add_entities = literal_included_entities(missing_entities, '\n'.join(add_entities))
+    add_ners = response.split('\n')[:6]
+    # pick just the actual ners out of responses
+    add_ners = literal_included_ners(missing_ners, '\n'.join(add_ners))
     # downselect summaries to focus on selected missing content
-    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_ners, 24)
 
     research_excerpts = ''
     for text in top_n_texts:
@@ -400,7 +458,7 @@ end the rewrite as follows:
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_entities": add_entities}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_ners": add_ners}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -410,11 +468,11 @@ end the rewrite as follows:
         rewrite = rewrite[:end_idx-1]
     return rewrite
 
-def add_pp_rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
+def add_pp_rewrite(paper_title, section_title, draft, paper_summaries, ners, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
 
-    missing_entities = literal_missing_entities(entities, draft)
+    missing_ners = literal_missing_ners(ners, draft)
 
-    # add a new paragraph on new entities
+    # add a new paragraph on new ners
     sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone.
 You are writing a paper titled:
 {paper_title}
@@ -434,11 +492,11 @@ The {heading_1} section content up to this point is:
 """
 )
 
-    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important missing entities from the current draft. The following entities in the source material above have been identified as missing in the current draft:
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important missing ners from the current draft. The following ners in the source material above have been identified as missing in the current draft:
 
-<MISSING_ENTITIES>
-{{{{$missing_entities}}}}
-</MISSING_ENTITIES>
+<MISSING_NERS>
+{{{{$missing_ners}}}}
+</MISSING_NERS>
 
 The current DRAFT is:
 
@@ -446,19 +504,19 @@ The current DRAFT is:
 {{{{$draft}}}}
 </DRAFT>
 
-Respond with up to six of the most important missing entities to add to the draft.
-The order of the missing entities in the list above is NOT representative of their importance!
-Many or all of the listed missing entities may be irrelevant to the role of this section.
-Rate missing entity importance by:
+Respond with up to six of the most important missing ners to add to the draft.
+The order of the missing ners in the list above is NOT representative of their importance!
+Many or all of the listed missing ners may be irrelevant to the role of this section.
+Rate missing ner importance by:
  - relevance to the section title. 
  - relevance to the existing draft.
  - the role of this section within the overall outline. 
-Do not respond with more than six entities. 
+Do not respond with more than six ners. 
 Respond as follows:
 
-missing_entity 1
-missing_entity 2
-missing_entity 3
+missing_ner 1
+missing_ner 2
+missing_ner 3
 ...
 
 Respond only with the above list. Do not include any commentary or explanatory material.
@@ -476,18 +534,18 @@ The current version of the DRAFT is:
 
 This DRAFT is for the: '{section_title}' section within:\n {parent_section_title} 
 
-Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
+Ners (key phrases, acronyms, or names-ners) to add to the above draft include:
 
-<MISSING_ENTITIES>
-{{{{$missing_entities}}}}
-</MISSING_ENTITIES>
+<MISSING_NERS>
+{{{{$missing_ners}}}}
+</MISSING_NERS>
 
 The new paragraph must be pertinent to the specific topic: {section_topic}, and fit as an extension of the current draft.
 
 <INSTRUCTIONS>
 Follow these steps:
 Step 1. Reason step by step to determine the role of this section within the paper.
-Step 2. Write a new, dense, concise paragraph that adds content for the MISSING_ENTITIES listed above.
+Step 2. Write a new, dense, concise paragraph that adds content for the MISSING_NERS listed above.
  
 Your response include ONLY the new paragraph, without any explanation or commentary.
 
@@ -501,17 +559,17 @@ end the rewrite as follows:
               UserMessage(MESelectMessage),
               AssistantMessage("<ME>\n")
               ]
-    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_entities": entities_to_str(missing_entities)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "missing_ners": ners_to_str(missing_ners)}, messages, template=template, max_tokens=200, temp=0.1, eos='</ME>')
     if response is None or len(response) == 0:
         return draft
     end_idx = response.rfind('</ME>')
     if end_idx < 0:
         end_idx = len(response)
     response = response[:end_idx-1]
-    add_entities = response.split('\n')[:6]
-    add_entities = literal_included_entities(missing_entities, '\n'.join(add_entities))
+    add_ners = response.split('\n')[:6]
+    add_ners = literal_included_ners(missing_ners, '\n'.join(add_ners))
     # downselect summaries to focus on selected missing content
-    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_ners, 24)
 
     research_excerpts = ''
     for text in top_n_texts:
@@ -521,7 +579,7 @@ end the rewrite as follows:
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_entities": add_entities}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "missing_ners": add_ners}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -531,9 +589,9 @@ end the rewrite as follows:
         rewrite = rewrite[:end_idx-1]
     return draft + '\n'+rewrite
 
-def depth_rewrite(paper_title, section_title, draft, paper_summaries, entities, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
+def depth_rewrite(paper_title, section_title, draft, paper_summaries, ners, section_topic, section_token_length, parent_section_title, heading_1, heading_1_draft, template):
 
-    missing_entities = literal_missing_entities(entities, draft)
+    missing_ners = literal_missing_ners(ners, draft)
     sysMessage = SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers. You write in a professional, objective tone
 You are writing a paper titled: '{paper_title}'
 
@@ -546,11 +604,11 @@ The following is a set of published research extracts that may be useful in writ
 """
 )
 
-    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important entities in the current draft. The following entities have been identified as present in the current draft:
+    MESelectMessage = f"""You are rewriting the draft for the section titled: '{section_title}', to increase the density of relevant information it contains. Your current task is to select the most important ners in the current draft. The following ners have been identified as present in the current draft:
 
-<ENTITIES>
-{{{{$entities}}}}
-</ENTITIES>
+<NERS>
+{{{{$ners}}}}
+</NERS>
 
 The current DRAFT is:
 
@@ -558,20 +616,20 @@ The current DRAFT is:
 {{{{$draft}}}}
 </DRAFT>
 
-Respond with up to four of the most important entities in the draft.
-The order of the entities in the list above is NOT representative of their importance!
-Many or all of the listed entities may be irrelevant to the role of this draft.
-Rate entity importance by:
+Respond with up to four of the most important ners in the draft.
+The order of the ners in the list above is NOT representative of their importance!
+Many or all of the listed ners may be irrelevant to the role of this draft.
+Rate ner importance by:
  - relevance to the section title. 
  - relevance to the existing draft.
- - important information about this entity in the research excerpts omitted in the current draft.
+ - important information about this ner in the research excerpts omitted in the current draft.
  - the role of this section within the overall outline. 
-Do not respond with more than four entities. 
+Do not respond with more than four ners. 
 Respond as follows:
 
-entity 1
-entity 2
-entity 3
+ner 1
+ner 2
+ner 3
 ...
 
 Respond only with the above list. Do not include any commentary or explanatory material.
@@ -589,18 +647,18 @@ The current version of the DRAFT is:
 
 This DRAFT is for the '{section_title} section within:\n {parent_section_title} 
 
-Entities (key phrases, acronyms, or names-entities) to add to the above draft include:
+Ners (key phrases, acronyms, or names-ners) to add to the above draft include:
 
-<ENTITIES>
-{{{{$entities}}}}
-</ENTITIES>
+<NERS>
+{{{{$ners}}}}
+</NERS>
 
 The rewrite must cover the specific topic: {section_topic}
 
 <INSTRUCTIONS>
 Follow these steps:
 Step 1. Reason step by step to determine the role of this section within the paper.
-Step 2. Write a new, denser draft of the same length that includes all entities and information and detail from the previous draft and adds depth for the ENTITIES listed above.
+Step 2. Write a new, denser draft of the same length that includes all ners and information and detail from the previous draft and adds depth for the NERS listed above.
  
 Your response include ONLY the rewritten draft, without any explanation or commentary.
 
@@ -614,11 +672,11 @@ end the rewrite as follows:
               UserMessage(MESelectMessage),
               AssistantMessage("<AE>\n")
               ]
-    #entities from research summaries mentioned in current draft
-    included_entities = literal_included_entities(entities, draft)
-    #select entities to expand
+    #ners from research summaries mentioned in current draft
+    included_ners = literal_included_ners(ners, draft)
+    #select ners to expand
     print(f'\ntemplate {template}')
-    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "entities": entities_to_str(included_entities)},
+    response = cot.llm.ask({"draft":draft, "paper_summaries":paper_summaries, "ners": ners_to_str(included_ners)},
                            messages,
                            template=template,
                            max_tokens=200, temp=0.1, eos='</AE>')
@@ -628,24 +686,24 @@ end the rewrite as follows:
     if end_idx < 0:
         end_idx = len(response)
     response = response[:end_idx-1]
-    add_entities = response.split('\n')[:4]
+    add_ners = response.split('\n')[:4]
                                              # llm response can include other junk, prune                                             
-    add_entities = literal_included_entities(entities, '\n'.join(add_entities))
+    add_ners = literal_included_ners(ners, '\n'.join(add_ners))
 
-    # downselect summaries to focus on selected entities 
-    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_entities, 24)
+    # downselect summaries to focus on selected ners 
+    top_n_texts = select_top_n_texts(paper_summaries.split('\n'), add_ners, 24)
 
     research_excerpts = ''
     for text in top_n_texts:
         research_excerpts += text[0]+'\n'
         
 
-    # expand content on selected entities
+    # expand content on selected ners
     messages=[sysMessage,
               UserMessage(rewrite_prompt),
               AssistantMessage("<REWRITE>\n")
               ]
-    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "entities": add_entities}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
+    response = cot.llm.ask({"draft":draft, "paper_summaries":research_excerpts, "ners": add_ners}, messages, template=template, max_tokens=int(1.5*section_token_length), temp=0.1, eos='</REWRITE>')
     if response is None or len(response) == 0:
         return draft
     rewrite = response
@@ -655,3 +713,36 @@ end the rewrite as follows:
         rewrite = rewrite[:end_idx-1]
     return rewrite
 
+
+def shorten(resources, focus, max_tokens):
+    """ rewrite a collection of resources (text strings) to a max length, given a focus """
+    """ assumes resources in sequence? """
+    resources = [resource.strip() for resource in resources]
+    resource = '\n'.join(resources)
+    input_length = len(resource)
+    print(f'rw.shorten total in: {input_length} chars, limit: {max_tokens} tokens')
+    if input_length < max_tokens*3: # context is in tokens, len is chars
+        print(f'rw.shorten returning full text: {len(resource)} chars')
+        return resource
+    text_to_shorten = ''
+    rewrite = ''
+    target = 0 # max_tokens
+    for text in resources:
+        print(f'rw.shorten section in: {len(text)}')
+        # process as much text as possible - assumes 'max_tokens' is about 1/3 context size
+        if len(text) + len(text_to_shorten) < 6*max_tokens: # note this is comparing chars to tokens, implicit divide by
+            text_to_shorten += text+'\n'
+            continue
+        #ners = ', '.join(extract_ners(focus+'. '+text_to_shorten))
+        # following is additive bcause we are rewriting entire analysis each time
+        target = int( ((1.0*len(text_to_shorten))/input_length) * max_tokens)
+        problem = extract_w_focus(text_to_shorten, '', 'Problem(s) addressed', target)
+        methods = extract_w_focus(text_to_shorten, '', 'Methods used', target)
+        data = extract_w_focus(text_to_shorten, '', 'Data presented', target)
+        hypotheses = extract_w_focus(text_to_shorten, '', 'Hypotheses made', target)
+        results = extract_w_focus(text_to_shorten, '', 'Results claimed', target)
+        limitations = extract_w_focus(text_to_shorten, '', 'Limitations mentioned', target)
+        text_to_shorten = text # start with this next time.
+        rewrite += '\n'.join([problem, methods, data, hypotheses, results, limitations])
+    print(f'rw.shorten out: {len(rewrite)} chars')
+    return rewrite

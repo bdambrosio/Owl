@@ -467,7 +467,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
                     if row is not None:
                         ners = row['ners']
                     else:
-                        ners = ' '.join(rw.extract_entities(subsection_dscp+'. '+text))
+                        ners = ' '.join(rw.extract_ners(subsection_dscp+'. '+text))
                     tokens = int(((1.0*len(text))/len(paper_summaries))*(cot.llm.context_size*2))
                     rewrite = rw.extract(title, text, subsection_dscp, ners, tokens, template)
                     print(f'\nWRAUX in {len(text)} out {len(rewrite)}\n{rewrite}\n')
@@ -560,8 +560,8 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
         #
         ### first collect entities
         #
-        keywds = rw.paper_entities(paper_title, paper_outline, excerpts, ids, template)
-        missing_entities = rw.literal_missing_entities(keywds, draft)
+        keywds = rw.paper_ners(paper_title, paper_outline, excerpts, ids, template)
+        missing_entities = rw.literal_missing_ners(keywds, draft)
         #print(f'\n missing entities in initial draft {len(missing_entities)}\n')
         for i in range(num_rewrites):
             if i < num_rewrites-1:
@@ -574,7 +574,7 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
             else:
                 # refine in final rewrite
                 draft = rw.rewrite(paper_title, section_outline['title'], draft, paper_summaries, keywds, subsection_topic, 2*subsection_token_length, parent_section_title, heading_1_title, heading_1_draft, template)
-            missing_entities = rw.literal_missing_entities(keywds, draft)
+            missing_entities = rw.literal_missing_ners(keywds, draft)
             print(f'\n missing entities after rewrite {len(missing_entities)} \n')
 
         
@@ -682,7 +682,7 @@ class DisplayApp(QtWidgets.QWidget):
         for id, title_text in zip(self.sections[0], self.sections[1]):
             int_id = str(int(id))
             print(id, title_text[0])
-            section_entities = rw.section_entities(id, title_text[1], self.template)
+            section_entities = rw.section_ners(id, title_text[1], self.template)
             entities.update(section_entities)
             print(section_entities)
         print(entities)

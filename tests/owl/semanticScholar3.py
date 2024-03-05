@@ -434,10 +434,10 @@ def extract_words_from_json(json_data):
 
 def index_dict(paper_dict):
     # called from index_service for search enqueued dict
-    result = index_paper(paper_dict)
-    if not result:
-        return False
-    save_synopsis_data()
+    paper_id = index_paper(paper_dict)
+    if paper_id > -1:
+        save_synopsis_data()
+    return paper_id
 
 def index_file(filepath):
     result_dict = {key: paper_library_init_values[key] for key in paper_library_columns}
@@ -447,15 +447,21 @@ def index_file(filepath):
     result_dict["pdf_filepath"]= filepath
     result_dict['section_ids'] = [] # to be filled in after we get paper id
     # section and index paper
-    result = index_paper(result_dict)
-    if not result:
-        return False
-    #print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
-    save_synopsis_data()
-
+    paper_id = index_paper(result_dict)
+    if paper_id > -1:
+        #print(f"indexing new article  pdf file: {result_dict['pdf_filepath']}")
+        save_synopsis_data()
+    return paper_id
 
 def index_url(page_url):
     print(f'\nIndex URL {page_url}\n')
+    candidates = paper_library_df[paper_library_df['article_url'] == page_url]
+    if len(candidates) ==0:
+        candidates = paper_library_df[paper_library_df['pdf_url'] == page_url]
+    if len(candidates) ==0:
+        candidates = paper_library_df[paper_library_df['pdf_filepath'] == page_url]
+    if len(candidates) >0:
+        return candidates.iloc[0]['faiss_id']
     result_dict = {key: paper_library_init_values[key] for key in paper_library_columns}
     id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     result_dict["faiss_id"] = id
@@ -472,11 +478,10 @@ def index_url(page_url):
     # print(f" indexing article: {title}\n pdf file: {type(result_dict['pdf_filepath'])}")
     result_dict['synopsis'] = ""
     result_dict['section_ids'] = [] # to be filled in after we get paper id
-    indexed = index_paper(result_dict)
-    if not indexed:
-        return False
-    save_synopsis_data()
-
+    paper_id = index_paper(result_dict)
+    if paper_id > -1:
+        save_synopsis_data()
+    return paper_id
 
 
 def get_arxiv_preprint_url(query, top_k=10):
@@ -519,6 +524,12 @@ def get_arxiv_preprint_url(query, top_k=10):
         if cot.confirmation_popup("found this, index it?", best_ppr.title):
             return [x.href for x in best_ppr.links][1]
         return None
+
+def get_paper_sections(paper_id):
+    sections = section_library_df[section_library_df['paper_id'] == paper_id]
+    sections = sections.sort_values('faiss_id', ascending=True)
+    texts = sections['synopsis'].tolist()
+    return texts
 
 def get_title(title):
     title = title.strip()
@@ -707,7 +718,7 @@ def index_section_synopsis(paper_dict, text):
     embeds_np = np.array([text_embedding], dtype=np.float32)
     section_indexIDMap.add_with_ids(embeds_np, ids_np)
 
-    ners = rw.section_entities(faiss_id, text, None)
+    ners = rw.section_ners(faiss_id, text, None)
     ner_embedding = embedding_request(', '.join(ners), 'search_document: ')
     ner_faiss_id = generate_faiss_id(lambda value: value in section_library_df.index)
     ner_ids_np = np.array([ner_faiss_id], dtype=np.int64)
@@ -731,15 +742,20 @@ def mean_pooling(model_output, attention_mask):
 
 def index_paper(paper_dict):
     # main path for papers from index_url and / or index_file, where we know nothing other than pdf
+    if 'title' in paper_dict and len(paper_dict['title']) > 0 and len(paper_library_df) > 0:
+        dups = paper_library_df[paper_library_df['title'] == paper_dict['title']]
+        if len(dups) > 0 :
+            print(f' already indexed {title}')
+            return dup.iloc[0]['faiss_id']
     try:
         extract = grobid.parse_pdf(paper_dict['pdf_filepath'])
     except Exception as e:
         print(f'\ngrobid fail {str(e)}')
         traceback.print_exc()
-        return False
+        return -1
     if extract is None or not extract:
         print('grobid extract is None')
-        return False
+        return -1
     # print(f'index_paper grobid keys {extract.keys()}')
     title = None
     if 'title' in paper_dict and len(paper_dict['title']) >0:
@@ -765,10 +781,10 @@ def index_paper(paper_dict):
         paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
     abstract = paper_dict['summary']
     if len(paper_library_df) > 0:
-        dup = (paper_library_df['title'] == title).any()
-        if dup:
+        dups= paper_library_df[paper_library_df['title'] == title]
+        if len(dups) > 0:
             print(f' already indexed {title}')
-            return False
+            return dups.iloc[0]['faiss_id']
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     paper_dict['faiss_id'] = paper_faiss_id
     paper_index = len(paper_library_df)
@@ -794,7 +810,7 @@ def index_paper(paper_dict):
         id = index_section_synopsis(paper_dict, text_chunk)
         section_synopses.append(text_chunk)
         section_ids.append(id)
-    return True
+    return paper_faiss_id
 
 def sbar_as_text(sbar):
     return f"\n{sbar['needs']}\nBackground:\n{sbar['background']}\nReview:\n{sbar['observations']}\n"
@@ -888,7 +904,7 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_tit
 
     query_ids, query_summaries = search_sections(query+'. '+dscp, top_k=int(top_k))
     #print(f'search ids {query_ids}')
-    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_entities(query+'. '+dscp)), top_k=int(top_k))
+    kwd_ids, kwd_summaries = search_sections(' '.join(rw.extract_ners(query+'. '+dscp)), top_k=int(top_k))
     #print(f'kwd ids {kwd_ids}')
     hyde_query = hyde(query+'. '+dscp)
     #print(f'hyde query: {hyde_query}')

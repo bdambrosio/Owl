@@ -685,9 +685,11 @@ Doc's input:
             id = self.active_wm[name]['id']
 
         if len(str(item)) > 64:
-            key_prompt = [SystemMessage(f"""Generate a very short (less that 10 tokens) descriptive text string for the following item in context. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON. Example: {{"key": 'a text string'}}"""),
-                          ConversationHistory('history', 120),
-                          UserMessage(f'ITEM:\n{str(item)}'),
+            key_prompt = [SystemMessage(f"""Generate a very short (less that 10 tokens) descriptive keystring for the following item. The text string must consist only of a few words, without numbers, punctuation, or special characters. Respond in JSON using the following format:
+
+{{"keystring": '<very short descriptive keystring>'}}
+"""),
+                          UserMessage(f'Item:\n\n{str(item)}'),
                           AssistantMessage('')]
             key_json = self.llm.ask('', key_prompt, max_tokens=25, temp=0.1, stop_on_json=True, validator=JSONResponseValidator())
             print(f' generated key: {key_json}')

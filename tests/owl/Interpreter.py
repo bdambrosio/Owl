@@ -1,38 +1,26 @@
 import os, json, math, time, requests, sys, re
 import traceback
 import requests
-import nyt
-import ipinfo
-import random
-import socket
 import time
 import numpy as np
 import faiss
 import pickle
-import hashlib
-#import readline
-import nltk
 from datetime import datetime, date, timedelta
 import openai
 from promptrix.VolatileMemory import VolatileMemory
-from promptrix.FunctionRegistry import FunctionRegistry
 from promptrix.GPT3Tokenizer import GPT3Tokenizer
 from promptrix.Prompt import Prompt
 from promptrix.SystemMessage import SystemMessage
 from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
 from promptrix.ConversationHistory import ConversationHistory
-from alphawave.MemoryFork import MemoryFork
 from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
 from alphawave.ChoiceResponseValidator import ChoiceResponseValidator
 from alphawave.TOMLResponseValidator import TOMLResponseValidator
-from alphawave_pyexts import utilityV2 as ut
-#from alphawave_pyexts import LLMClient as llm
 from alphawave_pyexts import Openbook as op
 from alphawave.OSClient import OSClient
 from alphawave.OpenAIClient import OpenAIClient
-from alphawave.alphawaveTypes import PromptCompletionOptions
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtGui import QFont, QKeySequence
@@ -47,6 +35,8 @@ from sentence_transformers import SentenceTransformer
 from scipy import spatial
 from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog, OPENAI_MODEL3, OPENAI_MODEL4
 from workingMemory import WorkingMemory as wm
+from LLMScript import LLMScript as script
+
 today = date.today().strftime("%b-%d-%Y")
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
@@ -322,7 +312,6 @@ Your conversation style is warm, gentle, humble, and engaging."""
             UserMessage(f'Criterion:\n{criterion}\nList:\n{input_list}\n')
         ])
        
-        options = PromptCompletionOptions(completion_type='chat', model=self.template, temperature = 0.1, max_tokens=400)
         response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
         if response is not None:
             self.wm.assign(result, response)
@@ -590,6 +579,7 @@ if __name__ == '__main__':
    cot = OwlCoT.OwlInnerVoice()
    interp = Interpreter(cot)
  
+   """
    steps = [{"label": 'one', "action": "assign", "arguments": "Apple", "result": "$item1"},
             {"label": 'two', "action": "tell", "arguments": "$item1", "result": "$Trash"},
             {"label": 'three', "action": "assign", "arguments": 5, "result": "$item2"},
@@ -617,3 +607,12 @@ if __name__ == '__main__':
    ]
 
    interp.interpret(steps)
+   """
+   scriptInterpreter = script(interp, cot)
+   scriptInterpreter.fetch('file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.05181.pdf', 'extract the topic or problem addressed, methods used, data presented, and claims made, and evaluate the significance of this paper', 4000, '$wm123')
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$wm123", "result":"$Trash"}])
+   scriptInterpreter.process(arg='$wm123',
+                             instruction='extract key themes and topics of $wm123 in a form useful as a search query.',
+                             dest='$wm2',
+                             max_tokens=100)
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$wm2", "result":"$Trash"}])

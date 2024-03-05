@@ -1,5 +1,6 @@
 #
-## Working Memory for plan execution: a simple key-addressable dict for now, no persistance
+## Working Memory for plan execution: a simple key-addressable dict for now
+## need to integrate this with OwlCot workingMemory.
 #
 
 class WorkingMemory:
@@ -20,17 +21,17 @@ class WorkingMemory:
            print(f'load failed {str(e)}')
            self.wm = {}
       
-    def has(self, label):
-        return label in self.wm
+    def has(self, name):
+        return name in self.wm
         
-    def get(self, label):
-        if self.has(label):
-            return self.wm[label]
+    def get(self, name):
+        if self.has(name):
+            return self.wm[name]
         else:
             return None
         
-    def assign(self, label, item, type=str, notes=''):
-        print(f'assign {label}, {type}, {str(item)[:32]}')
+    def assign(self, name, item, type=str, notes=''):
+        print(f'assign {name}, {type}, {str(item)[:32]}')
         if type not in [str, int, dict, list, 'action', 'plan']:
             print (f'unknown type for wm item {type}')
             raise TypeException(f'bad wm type {type}')
@@ -41,11 +42,11 @@ class WorkingMemory:
             print (f'type mismatch, declared: {type}, actual: {type(item)}')
             raise TypeException(f'bad wm type {type}')
 
-        self.wm[label] = {"label":label, "item":item, "type":type, "notes":notes}
-        return self.wm[label]
+        self.wm[name] = {"name":name, "item":item, "type":type, "notes":notes}
+        return self.wm[name]
 
-    def delete (self, label):
-        if self.has(label):
-            del self.wm[label]
+    def delete (self, name):
+        if self.has(name):
+            del self.wm[name]
             return True
         return False
