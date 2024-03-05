@@ -238,16 +238,17 @@ Your conversation style is warm, gentle, humble, and engaging."""
    
 
     def parse_as_action(self, item):
-        if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
-            self.cot.display_msg(f'form is not an action/arguments/result {item}')
-            raise InvalidAction(str(item))
-        args = item['arguments'] # 
-        result = item['result']
-        if type(result) is not str or not result.startswith('$'):
-            self.cot.display_msg(f"result must be a variable name: <{result}")
-            raise InvalidAction(str(item))
-        else:
-            return item['action'], args, result
+       if type(item) is not dict or 'action' not in item or 'arguments' not in item or 'result' not in item:
+          self.cot.display_msg(f'form is not an action/arguments/result {item}')
+          raise InvalidAction(str(item))
+       args = item['arguments'] # 
+       result = None # no result or throw it away!
+       if 'result' in item:
+          result = item['result']
+          if type(result) is not str or not result.startswith('$'):
+             self.cot.display_msg(f"result must be a variable name: <{result}")
+             raise InvalidAction(str(item))
+       return item['action'], args, result
 
     def resolve_arg(self, item):
         """
@@ -255,7 +256,7 @@ Your conversation style is warm, gentle, humble, and engaging."""
         """
         if type(item) is str and item.startswith('$'):
             if self.wm.has(item):
-                print(f"resolve_arg returning {self.wm.get(item)['item']}")
+                #print(f"resolve_arg returning {self.wm.get(item)['item']}")
                 return self.wm.get(item)['item']
             else:
                 raise InvalidAction(f"{item} referenced before definition")
@@ -273,11 +274,11 @@ Your conversation style is warm, gentle, humble, and engaging."""
         substituted = item
         for position in positions:
            substituted = substituted[0:position.start()]+str(self.resolve_arg(position[0]))+substituted[position.end():]
-        print(f'item {item}\n substituted {substituted}')
+        #print(f'item {item}\n substituted {substituted}')
         return substituted
 
     def do_article(self, titleAddr):
-        print(f'article {action}')
+        #print(f'article {action}')
         action, arguments, result = self.parse_as_action(action)
         # use OwlCoT to actually retrieve
         #self.wm.assign(result, arguments)
@@ -291,10 +292,11 @@ Your conversation style is warm, gentle, humble, and engaging."""
         ##   if pi35 is not present as a name in active memory, it is created 
         ##   should we recreate key? Not clear, as use case and semantics of key is unclear.
         ##   assume for now assign will be used for simple forms that will be referred to primarily by name, not key.
-        print(f'assign {action}')
+        #print(f'assign {action}')
         action, arg, result = self.parse_as_action(action)
         arg_resolved = self.resolve_arg(arg)
-        self.wm.assign(result, arg_resolved)
+        if result is not None:
+           self.wm.assign(result, arg_resolved)
 
     def do_choose(self, action):
         action, arguments, result = self.parse_as_action(action)
@@ -313,9 +315,9 @@ Your conversation style is warm, gentle, humble, and engaging."""
         ])
        
         response = self.llm.ask('', prompt, max_tokens=400, temp=0.01)
-        if response is not None:
+        if response is not None and result is not None:
             self.wm.assign(result, response)
-        else: 
+        elif result is not None: 
             raise InvalidAction(f'choose returned None')
                  
     def do_compare(self, action):
@@ -347,7 +349,8 @@ Your conversation style is warm, gentle, humble, and engaging."""
                                logRepairs=False, validator=JSONResponseValidator())
         if type(response) == dict and 'status' in response and response['status'] == 'success':
             answer = response['message']['content']
-            self.wm.assign(result, answer)
+            if result is not None:
+               self.wm.assign(result, answer)
             return answer
         
         else: return 'unknown'
@@ -363,17 +366,17 @@ Your conversation style is warm, gentle, humble, and engaging."""
             raise InvalidAction(f'arguments for choose must be a literals or names: {json.dumps(action)}')       
         criterion = self.resolve_arg(arg0)
         text = self.resolve_arg(arg1)
-        print(f'extract from\n{text}\n')
+        #print(f'extract from\n{text}\n')
         prompt = [
             UserMessage(f'Following is a topic and a text. Extract information relevant to topic from the text.Be aware that the text may be partly or completely irrelevant.\nTopic:\n{criterion}\nText:\n{text}'),
             AssistantMessage('')
         ]
         response = self.llm.ask('', prompt, template = self.template, temp=.1, max_tokens=400)
-        if response is not None:
+        if response is not None and result is not None:
             self.cot.create_awm(response, name=result, confirm=False)
             self.cot.display_msg(f'{action}:\n{response}')
             return 
-        else: 
+        elif result is not None: 
             self.cot.create_awm('', name=result, confirm=False)
             self.cot.display_msg(f'{action}:\nNo Text Extracted')
             return 'extract lookup and summary failure'
@@ -389,14 +392,14 @@ Your conversation style is warm, gentle, humble, and engaging."""
         ])
         
         response = self.llm.ask('', prompt)
-        if response is not None:
+        if response is not None and result is not None:
             self.wm.assign(result, response)
         else:
             return 'unknown'
        
     def do_library(self, action):
         # library_research
-        print(f'gpt {action}')
+        #print(f'gpt {action}')
         action, arguments, result = self.parse_as_action(action)
         if type(arguments) is not str:
             raise InvalidAction(f'argument for llm must be a literal or name: {str(arguments)}')       
@@ -405,11 +408,12 @@ Your conversation style is warm, gentle, humble, and engaging."""
         prompt = [SystemMessage(prompt_text)]
         response = self.llm.ask("", prompt)
         #self.cot.display_response(response)
-        self.wm.assign(result, response)
+        if result is not None:
+           self.wm.assign(result, response)
 
     def do_llm(self, action):
         # llm takes a single arg, the prompt
-        print(f'gpt {action}')
+        #print(f'gpt {action}')
         action, arguments, result = self.parse_as_action(action)
         if type(arguments) is not str:
             raise InvalidAction(f'argument for llm must be a literal or name: {str(arguments)}')       
@@ -418,10 +422,11 @@ Your conversation style is warm, gentle, humble, and engaging."""
         prompt = [SystemMessage(prompt_text)]
         response = self.llm.ask("", prompt)
         #self.cot.display_response(response)
-        self.wm.assign(result, response)
+        if result is not None:
+           self.wm.assign(result, response)
 
     def do_request(self, action):
-        print(f'request {action}')
+        #print(f'request {action}')
         action, arguments, result = self.parse_as_action(action)
         if type(arguments) is not str:
             raise InvalidAction(f'argument for request must be a literal or name: {str(arguments)}')
@@ -429,19 +434,19 @@ Your conversation style is warm, gentle, humble, and engaging."""
         url = self.resolve_arg(arguments)
         print(f' requesting url from server {url}')
         try:
-            print(f"http://127.0.0.1:5005/retrieve?title={title}&url={url}")
+            #print(f"http://127.0.0.1:5005/retrieve?title={title}&url={url}")
             response = requests.get(f"http://127.0.0.1:5005/retrieve/?title={title}&url={url}")
             data = response.json()
         except Exception as e:
             print(f'request failed {str(e)}')
             return {"article": f"\nretrieval failure\n{url}\n{str(e)}"}
-        if response is not None:
+        if response is not None and result is not None:
             self.cot.display_response(f"\nRequest Result:\n {data['result'][:24]}\n")
             self.wm.assign(result, data['result'][:1024])
 
     def do_tell(self, action):
         #
-        print(f'tell {action}')
+        #print(f'tell {action}')
         action, arguments, result = self.parse_as_action(action)
         if type(arguments) is not str:
             raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')       
@@ -452,7 +457,7 @@ Your conversation style is warm, gentle, humble, and engaging."""
         # simple core llm version of test, where argument is a prompt for llm
         # 'is $item1 > 0?'
         # used to eval condition body of control flow forms test, if, while
-        print(f'test {form}')
+        #print(f'test {form}')
         if type(form) is not str:
             raise InvalidAction(f'argument for test must be a literal or name: {str(form)}')       
         question = self.resolve_arg(form)
@@ -469,7 +474,7 @@ Respond only with True or False, do not include any introduction or explanation.
 Answer:""")
         ]
         response = self.llm.ask({"text":substituted_question}, prompt, max_tokens=3, temp=0.01)
-        print(f'\nTest: {substituted_question}, result: {response}\n')
+        #print(f'\nTest: {substituted_question}, result: {response}\n')
         if response is not None:
             response = response.lower()
             if 'yes' in response or 'true' in response:
@@ -482,7 +487,7 @@ Answer:""")
     def do_test(self, action):
         # simple llm version of test, where argument is a prompt for llm
         # {"action":"testl", "arguments":'is $item1 > 0?', "result":'$item2'}
-        print(f'test {action}')
+        #print(f'test {action}')
         action, arguments, result = self.parse_as_action(action)
         response = self.test_form(arguments)
         if response is not None:
@@ -500,7 +505,7 @@ Answer:""")
 
     def do_web(self, action):
         #
-        print(f'request {action}')
+        #print(f'request {action}')
         action, arguments, result = self.parse_as_action(action)
         if type(arguments) is not list or type(arguments[0]) is not str:
             raise InvalidAction(f'argument for tell must be a literal or name: {str(arguments)}')
@@ -513,7 +518,8 @@ Answer:""")
             return
         if response is not None:
             self.cot.display_response(data)
-            self.wm.assign(result, data) # store as a string
+            if result is not None:
+               self.wm.assign(result, data) # store as a string
 
     def wiki(self, action):
         # again, where is target var? need to resolve key 'result' value!
@@ -556,7 +562,7 @@ Answer:""")
                 counter += 1
                 IP.append((counter, actions))
             if not self.is_controlFlow(action):
-               print(f'executing {action}')
+               #print(f'executing {action}')
                self.do_item(action)
             else:
                 # only if, rest tbd
@@ -609,10 +615,43 @@ if __name__ == '__main__':
    interp.interpret(steps)
    """
    scriptInterpreter = script(interp, cot)
-   scriptInterpreter.fetch('file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.05181.pdf', 'extract the topic or problem addressed, methods used, data presented, and claims made, and evaluate the significance of this paper', 4000, '$wm123')
-   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$wm123", "result":"$Trash"}])
-   scriptInterpreter.process(arg='$wm123',
-                             instruction='extract key themes and topics of $wm123 in a form useful as a search query.',
-                             dest='$wm2',
+   scriptInterpreter.fetch(uri='file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.05181.pdf',
+                           instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                           dest='$paper1',
+                           max_tokens=4000
+                           )
+
+   scriptInterpreter.process1(arg1='$paper1',
+                              instruction='provide a summary of the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                              dest='$paper1Summary',
+                              max_tokens=300
+                              )
+   
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$paper1Summary", "result":'$trash'}])
+
+   scriptInterpreter.fetch(uri='file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.06332.pdf',
+                           instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                           dest='$paper2',
+                           max_tokens=4000)
+   
+   scriptInterpreter.process1(arg1='$paper2',
+                              instruction='provide a summary of the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                              dest= '$paper2Summary',
+                              max_tokens=300)
+   
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$paper2Summary", "result":'$Trash'}])
+
+   scriptInterpreter.process2(arg1='$paper1', arg2='$paper2',                             
+                             instruction='compare and contrast the problems addressed in these texts. How do they relate?',
+                             dest='$compare',
+                             max_tokens=800)
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$compare", "result":'$Trash'}])
+
+
+   scriptInterpreter.process1(arg1='$paper1',
+                             instruction='extract key themes and topics of $paper1 in a form useful as a search query.',
+                             dest='$query',
                              max_tokens=100)
-   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$wm2", "result":"$Trash"}])
+   
+   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$query", "result":"$Trash"}])
+

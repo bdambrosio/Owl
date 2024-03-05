@@ -290,7 +290,7 @@ Note that your task at this time is information extraction:
     prompt = [prompt_prefix, 
               AssistantMessage("""<EXTRACT>\n""")
               ]
-    extract = cot.llm.ask({"draft": draft, "extract_subject":extract_subject, "tokens":int(tokens), "text":text},
+    extract = cot.llm.ask({"draft": draft, "extract_subject":extract_subject, "tokens":int(tokens*.8), "text":text},
                           prompt, max_tokens=tokens, eos='</EXTRACT>')
     return extract
 
@@ -727,21 +727,27 @@ def shorten(resources, focus, max_tokens):
     text_to_shorten = ''
     rewrite = ''
     target = 0 # max_tokens
+    first_chunk = True
     for text in resources:
         print(f'rw.shorten section in: {len(text)}')
         # process as much text as possible - assumes 'max_tokens' is about 1/3 context size
         if len(text) + len(text_to_shorten) < 6*max_tokens: # note this is comparing chars to tokens, implicit divide by
             text_to_shorten += text+'\n'
             continue
+        if first_chunk: # get the core of the text
+            topic = extract_w_focus(text_to_shorten, '', 'central idea/proposal/topic of this text? Is there a new idea, method, or proposal presented?', 180)
+            rewrite = topic
+            first_chunk=False
+            
         #ners = ', '.join(extract_ners(focus+'. '+text_to_shorten))
         # following is additive bcause we are rewriting entire analysis each time
         target = int( ((1.0*len(text_to_shorten))/input_length) * max_tokens)
-        problem = extract_w_focus(text_to_shorten, '', 'Problem(s) addressed', target)
-        methods = extract_w_focus(text_to_shorten, '', 'Methods used', target)
-        data = extract_w_focus(text_to_shorten, '', 'Data presented', target)
-        hypotheses = extract_w_focus(text_to_shorten, '', 'Hypotheses made', target)
-        results = extract_w_focus(text_to_shorten, '', 'Results claimed', target)
-        limitations = extract_w_focus(text_to_shorten, '', 'Limitations mentioned', target)
+        problem = extract_w_focus(text_to_shorten, '', f'Problem(s) addressed, given primary topic: {topic}', target)
+        methods = extract_w_focus(text_to_shorten, '', f'Methods used, given primary topic is {topic}', target)
+        data = extract_w_focus(text_to_shorten, '', f'Data presented, given primary topic is {topic}', target)
+        hypotheses = extract_w_focus(text_to_shorten, '', f'Hypotheses made, given primary topic is {topic}', target)
+        results = extract_w_focus(text_to_shorten, '', f'Results claimed, given central_topic is {topic}', target)
+        limitations = extract_w_focus(text_to_shorten, '', f'Limitations, relevant to {topic}', target)
         text_to_shorten = text # start with this next time.
         rewrite += '\n'.join([problem, methods, data, hypotheses, results, limitations])
     print(f'rw.shorten out: {len(rewrite)} chars')
