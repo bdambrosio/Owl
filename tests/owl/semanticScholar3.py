@@ -62,7 +62,7 @@ import grobid
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
+print(f'loading S2')
 tokenizer = GPT3Tokenizer()
 ui = None
 cot = None
@@ -125,12 +125,13 @@ def get_semantic_scholar_meta(s2_id):
         return None
 
 def paper_library_df_fixup():
-    #paper_library_df['citation'] = ''
+    #paper_library_df['abstract'] = paper_library_df['summary']
+    #paper_library_df['extract'] = ''
     #paper_library_df.to_parquet(paper_library_filepath)
     return
 
-paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "summary", "inflCitations", "citationCount", "article_url", "pdf_url","pdf_filepath", "section_ids"]
-paper_library_init_values = {"faiss_id":0, "title":'', "authors":'', "citationStyles":'', "publisher":'', "summary":'', "inflCitations":0, "citationCount":0, "article_url":'', "pdf_url":'',"pdf_filepath":'', "synopsis":'', "section_ids":[]}
+paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "abstract", "summary", "extract", "inflCitations", "citationCount", "article_url", "pdf_url","pdf_filepath", "section_ids"]
+paper_library_init_values = {"faiss_id":0, "title":'', "authors":'', "citationStyles":'', "publisher":'', "abstract":'', "summary":'', "extract":"", "inflCitations":0, "citationCount":0, "article_url":'', "pdf_url":'',"pdf_filepath":'', "synopsis":'', "section_ids":[]}
 
 def validate_paper(paper_dict):
     #print(json.dumps(paper_dict, indent=2))
@@ -147,8 +148,8 @@ def validate_paper(paper_dict):
     if len(paper_dict['title']) < 2:
         print(f'missing title in paper_dict: {paper_dict["title"]}')
         return False
-    if len(paper_dict['summary']) < 16:
-        print(f'missing abstract in paper_dict: {paper_dict["summary"]}')
+    if len(paper_dict['abstract']) < 16:
+        print(f'missing abstract in paper_dict: {paper_dict["abstract"]}')
         return False
     if len(paper_dict['pdf_url']) < 2 and len(paper_dict['pdf_filepath']) < 2:
         print(f'missing pdf path in paper_dict: {paper_dict["pdf_url"]}, {paper_dict["pdf_filepath"]}')
@@ -199,11 +200,15 @@ else:
     section_library_df = pd.read_parquet(section_library_filepath)
     print(f"loaded '{section_library_filepath}'\n  keys: {section_library_df.keys()}")
 
+print(f'S2 all libraries and faiss loaded')
 def save_synopsis_data():
     paper_library_df.to_parquet(paper_library_filepath)
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
     faiss.write_index(section_indexIDMap, section_index_filepath)
     section_library_df.to_parquet(section_library_filepath)
+
+def save_paper_df():
+    paper_library_df.to_parquet(paper_library_filepath)
 
 def get_section(id):
     section_library_rows = section_library_df[section_library_df['faiss_id'] == id]
@@ -431,6 +436,28 @@ def extract_words_from_json(json_data):
     words = re.findall(r'\b\w+\b', text)
     return words
 
+def get_paper_pd(id=None, uri=None):
+    if id is not None:
+        candidates = paper_library_df[paper_library_df['faiss_id'] == id]
+        if len(candidates) ==0:
+            return None
+        return candidates.iloc[0]
+    elif uri is not None:
+        candidates = paper_library_df[paper_library_df['article_url'] == uri]
+        if len(candidates) ==0:
+            candidates = paper_library_df[paper_library_df['pdf_url'] == uri]
+        if len(candidates) ==0:
+            candidates = paper_library_df[paper_library_df['pdf_filepath'] == uri]
+        if len(candidates) >0:
+            return candidates.iloc[0]
+    return None
+
+def set_paper_field(paper_id, field_name, value):
+    candidates = paper_library_df[paper_library_df['faiss_id'] == paper_id]
+    if len(candidates) ==0:
+        return False
+    candidates.iloc[0][field_name] = value
+    return candidates.iloc[0]
 
 def index_dict(paper_dict):
     # called from index_service for search enqueued dict
@@ -558,7 +585,7 @@ def get_title(title):
         traceback.print_exc()
 
 
-get_title("Can Large Language Models Understand Context")
+#get_title("Can Large Language Models Understand Context")
 
 def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_k=10, confirm=True):
     """This function gets the top_k articles based on a user's query, sorted by relevance.
@@ -636,7 +663,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             result_dict["title"] = title
             result_dict["authors"] = [", ".join(author['name'] for author in authors)]
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
-            result_dict["summary"] = abstract 
+            result_dict["abstract"] = abstract 
             result_dict["citationCount"]= int(citationCount)
             result_dict["citationStyles"]= str(citationStyles)
             result_dict["inflCitations"] = int(influentialCitationCount)
@@ -709,7 +736,7 @@ def index_section_synopsis(paper_dict, text):
     global section_indexIDMap
     paper_title = paper_dict['title']
     paper_authors = paper_dict['authors'] 
-    paper_abstract = paper_dict['summary']
+    paper_abstract = paper_dict['abstract']
     pdf_filepath = paper_dict['pdf_filepath']
 
     text_embedding = embedding_request(text, 'search_document: ')
@@ -766,20 +793,20 @@ def index_paper(paper_dict):
         title = paper_dict['pdf_filepath']
     print(f'title 1 {title}')
     paper_dict['authors'] = extract['authors']
-    paper_dict['summary'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
+    paper_dict['abstract'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
     if title is not None:
         paper_dict['title']=title
         meta_data = get_title(title)
     if meta_data is not None:
-        paper_dict["summary"] = str(meta_data['abstract'])
+        paper_dict["abstract"] = str(meta_data['abstract'])
         #paper_dict["year"] = meta_data['year'])
         paper_dict["title"] = str(meta_data['title'])
         paper_dict["article_url"] = str(meta_data['url'])
-        paper_dict["summary"] = str(meta_data['abstract'])
+        paper_dict["abstract"] = str(meta_data['abstract'])
         paper_dict["citationCount"]= int(meta_data['citationCount'])
         paper_dict["citationStyles"]= str(meta_data['citationStyles'])
         paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
-    abstract = paper_dict['summary']
+    abstract = paper_dict['abstract']
     if len(paper_library_df) > 0:
         dups= paper_library_df[paper_library_df['title'] == title]
         if len(dups) > 0:

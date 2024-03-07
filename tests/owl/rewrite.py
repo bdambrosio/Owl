@@ -735,7 +735,7 @@ def shorten(resources, focus, max_tokens):
             text_to_shorten += text+'\n'
             continue
         if first_chunk: # get the core of the text
-            topic = extract_w_focus(text_to_shorten, '', 'central idea/proposal/topic of this text? Is there a new idea, method, or proposal presented?', 180)
+            topic = extract_w_focus(text_to_shorten, '', 'central idea/proposal/topic of this text? What is the new idea, method, or proposal presented?', 180)
             rewrite = topic
             first_chunk=False
             

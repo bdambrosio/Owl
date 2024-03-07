@@ -145,7 +145,7 @@ class ChatApp(QtWidgets.QWidget):
       self.tts = False
       self.owlCoT = OwlInnerVoice(self)
       self.memory_display = None
-      self.planner = Planner(self, self.owlCoT)
+      #self.planner = Planner(self, self.owlCoT)
       #self.interpreter = self.planner.interpreter
       self.windowCloseEvent = self.closeEvent
       signal.signal(signal.SIGINT, self.controlC)

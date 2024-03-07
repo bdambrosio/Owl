@@ -613,33 +613,98 @@ if __name__ == '__main__':
    ]
 
    interp.interpret(steps)
-   """
-   scriptInterpreter = script(interp, cot)
-   scriptInterpreter.fetch(uri='file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.05181.pdf',
-                           instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
-                           dest='$paper1',
-                           max_tokens=4000
-                           )
+   
+   uris=['file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.05929.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.09727.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Children_of_AI_A_Protocol_for_Managing_the_Born-Digital_Ephemera_Spawned_by_Generative_AI_Language_Models',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.16291.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.03620.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/An_In-depth_Survey_of_Large_Language_Model-based_Artificial_Intelligence_Agents',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2310.03302.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/KEGG_as_a_reference_resource_for_gene_and_protein_annotation',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.13228.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.13228.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2211.10435.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2311.16452.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2303.17651.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.06852.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2211.09761.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2401.17464.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/pdfidwxfqhp9bNR',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2209.10063.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2212.10509.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.14083.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Training_in_new_forms_of_human-AI_interaction_improves_complex_working_memory_and_switching_skills_of_language_professionals',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2201.11903.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/s41524-022-00784-w.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/s41524-022-00784-w.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.14034.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.14045v2.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2211.08411.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/s41467-024-45563-x.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/information-10-00350.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Review_of_progress_in_Artificial_General_Intelligence_and_Human_Brain_inspired_Cognitive_Architecture',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2401.08565.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpspdfs.semanticscholar.org6052636366e9e0ac60cf7f576295596f37d1f604.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2023.emnlp-main.364.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.07896.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.08855.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.08678.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Navigate_to_Remember_A_Declarative_Memory_Model_for_Incremental_Semantic_Mapping',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.13144.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.01739.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.06082.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2310.07064.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/1909.06146.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2310.02304.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.06044.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2005.11401.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.14992.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2401.10020v1.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/LLM-based_Smart_Reply_LSR_Enhancing_Collaborative_Performance_with_ChatGPT-mediated_Smart_Reply_System',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Assessing_Working_Memory_Capacity_of_ChatGPT',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Decoding_the_Enigma_Benchmarking_Humans_and_AIs_on_the_Many_Facets_of_Working_Memory',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Predicting_Human_Attention_using_Computational_Attention',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.05181.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.09906.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Learning_to_Perform_Complex_Tasks_through_Compositional_Fine-Tuning_of_Language_Models',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2309.03409.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2311.07911.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2212.10561.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Transformers_codes_and_labels_large_language_modelling_for_natural_language_processing_in_clinical_radiology',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsopenaccess.thecvf.comcontentICCV2023papersPeebles_Scalable_Diffusion_Models_with_Transformers_ICCV_2023_paper.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2205.13147.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.01771.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Combining_Minds_and_Machines_Investigating_the_Fusion_of_Cognitive_Architectures_and_Generative_Models_for_General_Embodied_Intelligence',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/Balancing_Autonomy_and_Alignment_A_Multi-Dimensional_Taxonomy_for_Autonomous_LLM-powered_Multi-Agent_Architectures',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2006.08381.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2305.10601.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2305.11206.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.05120.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.05120.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.05120.pdf',
+         'https://arxiv.org/pdf/2208.03299.pdf',
+         'https://arxiv.org/pdf/2402.15627.pdf',
+         'https://arxiv.org/pdf/2402.15627.pdf',
+         'https://arxiv.org/pdf/2402.15627.pdf',
+         'https://arxiv.org/pdf/2402.15627.pdf',
+         'https://arxiv.org/pdf/2402.16837.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.16837.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2305.07185.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2304.12244.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2306.03078.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2302.10866.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2308.03188.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2309.12307.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2311.06158.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2401.01325.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2305.18323.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2311.13133.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2402.14658.pdf',
+         'file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/httpsarxiv.orgpdf2310.12823',
+         ]
+   
 
-   scriptInterpreter.process1(arg1='$paper1',
-                              instruction='provide a summary of the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
-                              dest='$paper1Summary',
-                              max_tokens=300
-                              )
-   
-   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$paper1Summary", "result":'$trash'}])
-
-   scriptInterpreter.fetch(uri='file:///home/bruce/Downloads/owl/tests/owl/arxiv/papers/2402.06332.pdf',
-                           instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
-                           dest='$paper2',
-                           max_tokens=4000)
-   
-   scriptInterpreter.process1(arg1='$paper2',
-                              instruction='provide a summary of the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
-                              dest= '$paper2Summary',
-                              max_tokens=300)
-   
-   interp.interpret([{"label": 'one', "action": "tell", "arguments": "$paper2Summary", "result":'$Trash'}])
 
    scriptInterpreter.process2(arg1='$paper1', arg2='$paper2',                             
                              instruction='compare and contrast the problems addressed in these texts. How do they relate?',
@@ -654,4 +719,4 @@ if __name__ == '__main__':
                              max_tokens=100)
    
    interp.interpret([{"label": 'one', "action": "tell", "arguments": "$query", "result":"$Trash"}])
-
+   """
