@@ -720,6 +720,7 @@ def shorten(resources, focus, max_tokens):
     resources = [resource.strip() for resource in resources]
     resource = '\n'.join(resources)
     input_length = len(resource)
+    context_size = cot.llm.context_size
     print(f'rw.shorten total in: {input_length} chars, limit: {max_tokens} tokens')
     if input_length < max_tokens*3: # context is in tokens, len is chars
         print(f'rw.shorten returning full text: {len(resource)} chars')
@@ -731,7 +732,7 @@ def shorten(resources, focus, max_tokens):
     for text in resources:
         print(f'rw.shorten section in: {len(text)}')
         # process as much text as possible - assumes 'max_tokens' is about 1/3 context size
-        if len(text) + len(text_to_shorten) < 6*max_tokens: # note this is comparing chars to tokens, implicit divide by
+        if len(text) + len(text_to_shorten) < int(context_size*1.5): # note this is comparing chars to tokens, implicit divide by
             text_to_shorten += text+'\n'
             continue
         if first_chunk: # get the core of the text
