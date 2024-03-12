@@ -8,6 +8,9 @@ import OwlCoT
 import Interpreter
 import numpy as np
 import pickle
+from umap.umap_ import UMAP
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_digits
 """
 Here's a proposed approach to build a lattice of abstractions from a collection of research papers and use it to process and integrate new papers:
 
@@ -70,6 +73,27 @@ def get_sibling_nodes(node, cluster_nodes):
     return sibling_nodes
 
 
+def build_clusterNode_embeddings(num_levels, root_node, cluster_nodes):
+    # Generate embeddings for internal nodes (bottom-up)
+    for level in range(num_levels - 1, 0, -1):
+        for node in cluster_nodes[level].values():
+            if node.children is None or len(node.children) == 0:
+                # leaf node embeddings are computed from papers!
+                if np.any(np.isnan(node.embedding)):
+                    raise ValueError(f'Leaf Node embedding is Nan: level {level}, id {node.node_id}\n{node.children}\n{node.paper_ids}')
+                continue
+            print(f'embedding level {level}, node {node.node_id}')
+            child_embeddings = [cluster_nodes[level + 1][child_id].embedding for child_id in node.children if np.any(np.isnan(child_id.embedding)) is False]
+            node.embedding = np.mean(child_embeddings, axis=0)
+            if np.any(np.isnan(node.embedding)):
+                raise ValueError(f'Node embedding is Nan: level {level}, id {node.node_id}\n{node.children}\n{node.paper_ids}')
+
+    # Generate embedding for the root node
+    child_embeddings = [cluster_nodes[1][child_id].embedding for child_id in root_node.children]
+    root_node.embedding = np.mean(child_embeddings, axis=0)
+    if np.any(np.isnan(root_node.embedding)):
+        raise ValueError(f'Root Node embedding is Nan!')
+
 def generate_node_summary(node, cluster_nodes, papers, max_children=20):
     global si
     if node.paper_ids:
@@ -120,10 +144,8 @@ def build_cluster_lattice(papers, num_levels, distance_thresholds):
         print(f'****** clustering at level {level} for parent {parent_node}')
         for cluster_id in range(1, num_clusters + 1):
             print(f'****** cluster_id {cluster_id}')
-            cluster_indices = np.where(clusters == cluster_id)[0]
-            cluster_embeddings = parent_embeddings[cluster_indices]
-            cluster_papers_df = parent_papers.iloc[cluster_indices]
-            cluster_embedding = np.mean(cluster_embeddings, axis=0)
+            cluster_inds = np.where(clusters == cluster_id)[0]
+            cluster_papers_df = parent_papers.iloc[cluster_inds]
             for i, paper in cluster_papers_df.iterrows():
                 print(f" {paper['faiss_id']}, {paper['title']}")
         for cluster_id in range(1, num_clusters + 1):
@@ -131,6 +153,8 @@ def build_cluster_lattice(papers, num_levels, distance_thresholds):
             cluster_embeddings = parent_embeddings[cluster_indices]
             cluster_papers_df = parent_papers.iloc[cluster_indices]
             cluster_embedding = np.mean(cluster_embeddings, axis=0)
+            if np.any(np.isnan(cluster_embedding)):
+                raise ValueError(f'cluster embedding is Nan: level {level}, cluster_id {cluster_id}')
 
             #for i, paper in cluster_papers_df.iterrows():
             #    print(f" level {level} cluster {cluster_id}, id {paper['faiss_id']} {paper['title'][:32']}")
@@ -176,15 +200,7 @@ def build_cluster_lattice(papers, num_levels, distance_thresholds):
     # Generate summary for the root node
     root_node.summary = generate_node_summary(root_node, cluster_nodes, papers)
 
-    # Generate embeddings for internal nodes (bottom-up)
-    for level in range(num_levels - 1, 0, -1):
-        for node in cluster_nodes[level].values():
-            child_embeddings = [cluster_nodes[level + 1][child_id].embedding for child_id in node.children]
-            node.embedding = np.mean(child_embeddings, axis=0)
-
-    # Generate embedding for the root node
-    child_embeddings = [cluster_nodes[1][child_id].embedding for child_id in root_node.children]
-    root_node.embedding = np.mean(child_embeddings, axis=0)
+    build_clusterNode_embeddings(num_levels, root_node, cluster_nodes)
 
     return root_node, cluster_nodes
 
@@ -208,17 +224,32 @@ def load_lattice(filename):
 
 ### first, integrate a new paper
 
-def find_best_fitting_cluster(paper, root_node, cluster_nodes):
+def find_best_fitting_cluster(paper, root_node, cluster_nodes, paper_embedding = None):
     # experiment - initialize similarity threshold to root
-    paper_embedding = si.s2.embedding_request(paper['summary'], 'search_document: ')
+    if paper_embedding is None:
+        paper_embedding = si.s2.embedding_request(paper['summary'], 'search_document: ')
     current_node = root_node
-    similarity_threshold = cosine_similarity(np.array([paper_embedding]), np.array([root_node.embedding]))
+    if np.any(np.isnan(paper_embedding)):
+        print (f"Paper embedding is Nan!")
+    if np.any(np.isnan(root_node.embedding)):
+        print (f"Root node embedding is Nan!")
+    try:
+        similarity_threshold = cosine_similarity(np.array([paper_embedding]), np.array([root_node.embedding]))
+    except Exception as e:
+        print (f"str(e)\n{paper['faiss_id']}, {type(paper_embedding)}, {type(root_node.embedding)}")
+        raise e
     while current_node.children:
         max_similarity = -1
         best_child = None
         for child_id in current_node.children:
             child_node = cluster_nodes[current_node.level + 1][child_id]
-            similarity = cosine_similarity(np.array([paper_embedding]), np.array([child_node.embedding]))
+            if np.any(np.isnan(child_node.embedding)):
+                print (f"child node embedding is Nan!")
+            try:
+                similarity = cosine_similarity(np.array([paper_embedding]), np.array([child_node.embedding]))
+            except Exception as e:
+                print (f"str(e)\n{paper['faiss_id']}, {type(paper_embedding)}, {type(child_node.embedding)}")
+                raise e
             if similarity > max_similarity:
                 max_similarity = similarity
                 best_child = child_node
@@ -312,35 +343,40 @@ def generate_integration_report(paper, cluster_node):
 
 
 def generate_local_contribution_summary(paper, cluster_node):
+    print('\n\n\nGENERATE LOCAL CONTRIBUTION\n')
     si.process2(arg1=paper['summary'],
                 arg2=cluster_node.summary,
-                instruction="""Compare Text1 to Text2, the current knowledge cluster Text1 is a member of.
+                instruction="""Compare Text1 to Text2. Text2 is the knowledge cluster Text1 is most closely related to.
 Succinctly identify:
-1. Those additional topics this paper covers, if any. 
+1. Those new topics this paper covers, if any. 
 2. Those new methods this paper introduces, if any.
-3. Any new data this paper presents 
-4. Any novel inferences or claims this paper makes
+3. Any new data this paper presents. 
+4. Any novel inferences or claims this paper makes.
 5. Any new conclusions this paper draws.
-Conclude with an analysis of any significant shifts Text1 makes in the overall state of knowledge represented by the cluster.""",
-                dest='$localContributionSummary',
+Conclude with an analysis of any significant shifts Text1 makes in the overall state of knowledge represented by Text2.""",
+                dest='$localContribution',
                 max_tokens = 600
                 )
-    return si.wm.get('$localContributionSummary')['item']
+    si.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$localContribution", "result":'$trash'}])
+    return si.wm.get('$localContribution')['item']
 
 
 def generate_broader_contribution_summary(paper, node, level):
+    print('\n\n\nGENERATE BROADER CONTRIBUTION\n')
     si.process2(arg1=paper['summary'],
                 arg2=node.summary,
-                instruction=f"""Compare Text1 to Text2, the current abstract knowledge cluster Text1 is a member of.
+                instruction=f"""Compare Text1 to Text2, an abstract knowledge cluster Text1 is most closely related to.
 Describe, at a high level appropriate for the {str(level)}th level of abstraction, 
 how this paper, if at all, extends, complements, or contradicts the existing literature on this topic 
 as represented by Text2, known fact, and logical reasoning.""",
-                dest='$broaderContributionSummary_' + str(level),
+                dest='$broaderContribution'+str(level),
                 max_tokens = 600
                 )
-    return si.wm.get('$broaderContributionSummary_' + str(level))['item']
+    si.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$broaderContribution"+str(level), "result":'$trash'}])
+    return si.wm.get('$broaderContribution'+str(level))['item']
 
 def generate_comprehensive_answer(paper, root, cluster_nodes):
+    print('\n\n\nGENERATE COMPREHENSIVE CONTRIBUTION\n')
     local_node = find_best_fitting_cluster(paper, root, cluster_nodes)
     local_summary = generate_local_contribution_summary(paper, local_node)
     broader_summaries = []
@@ -405,7 +441,7 @@ def display_node_info(node):
     print(f"Parent ID: {node.parent_id}")
     print(f"Children IDs: {node.children}")
     print(f"Summary: {node.summary}")
-    #print(f"Embedding: {node.embedding}")
+    print(f"Embedding: {type(node.embedding)}")
     print(f"Paper IDs: {node.paper_ids}")
     print()
 
@@ -416,38 +452,52 @@ def browse_lattice(root_node, cluster_nodes):
         
         if current_node.children:
             print("Available actions:")
-            print("1. Go to child node")
-            print("2. Go to parent node")
-            print("3. Quit")
+            print("1. Display paper")
+            print("2. Go to child node")
+            print("3. Go to parent node")
+            print("4. Quit")
             action = input("Enter the action number: ")
             
             if action == "1":
+                paper_id = int(input("Enter the paper faiss id: "))
+                paper = si.s2.get_paper_pd(paper_id=int(paper_id))
+                if paper is not None:
+                    print(paper['summary'])
+                else:
+                    print('cant find paper id {paper_id}')
+            elif action == "2":
                 child_id = int(input("Enter the child node ID: "))
                 if child_id in current_node.children:
                     current_node = cluster_nodes[current_node.level + 1][child_id]
                 else:
                     print("Invalid child node ID.")
+            elif action == "3":
+                if current_node.parent_id is not None:
+                    current_node = cluster_nodes[current_node.level - 1][current_node.parent_id]
+                else:
+                    print("Already at the root node.")
+            elif action == "4":
+                break
+            else:
+                print("Invalid action.")
+        else:
+            print("Available actions:")
+            print("1. Display paper")
+            print("2. Go to parent node")
+            print("3. Quit")
+            action = input("Enter the action number: ")
+            if action == '1':
+                paper = si.s2.get_paper_pd(paper_id=int(paper_id))
+                if paper is not None:
+                    print(paper['summary'])
+                else:
+                    print('cant find paper id {paper_id}')
             elif action == "2":
                 if current_node.parent_id is not None:
                     current_node = cluster_nodes[current_node.level - 1][current_node.parent_id]
                 else:
                     print("Already at the root node.")
             elif action == "3":
-                break
-            else:
-                print("Invalid action.")
-        else:
-            print("Available actions:")
-            print("1. Go to parent node")
-            print("2. Quit")
-            action = input("Enter the action number: ")
-            
-            if action == "1":
-                if current_node.parent_id is not None:
-                    current_node = cluster_nodes[current_node.level - 1][current_node.parent_id]
-                else:
-                    print("Already at the root node.")
-            elif action == "2":
                 break
             else:
                 print("Invalid action.")
@@ -464,17 +514,23 @@ class LLMScript:
         self.wm = interpreter.wm
         print(f'\ncreated script runner!')
         
-    def fetch(self, paper_id=None, uri=None, instruction='', dest=None, max_tokens=200):
+    def extract(self, paper_id=None, uri=None, instruction=None, dest=None, max_tokens=200, redo=False):
         if paper_id is None:
             if uri is None:
-                raise Error('need paper_id or uri!')
-                paper_id = s2.index_url(uri)
+                raise ValueError('need paper_id or uri!')
+            paper_pd = s2.get_paper_pd(uri=uri)
+        else:
+            paper_pd = s2.get_paper_pd(paper_id=paper_id)
+        if paper_pd is None:
+            raise ValueError(f"cant find paper {paper_id}{uri}")
+        if instruction is not None:
+            raise ValueError('instruction arg not allowed in this version!')
         if paper_id < 0:
             raise ValueError('invalid paper_id or uri!')
         texts = s2.get_paper_sections(paper_id = paper_id)
         resource = rw.shorten(texts, instruction, max_tokens)
         self.wm.assign(dest, resource)
-        return paper_id
+        return resource
 
     #process $wm1, 'extract key themes and topics of $wm1 in a form useful as a search query.', $wm2'
     def process1(self, arg1, instruction, dest, max_tokens):
@@ -494,47 +550,112 @@ End your response with </Response>"""),
     def process2(self, arg1, arg2, instruction, dest, max_tokens):
         resolved_arg1 = self.interpreter.resolve_arg(arg1)
         resolved_arg2 = self.interpreter.resolve_arg(arg2)
-        resolved_inst = instruction.replace(arg1, 'the user Input provided below')
-        resolved_inst = resolved_inst.replace(arg2, 'the user SecondInput provided below')
-        prompt = [SystemMessage("""{{$resolved_inst}}
+        #resolved_inst = instruction.replace(arg1, 'the user Input provided below')
+        #resolved_inst = resolved_inst.replace(arg2, 'the user SecondInput provided below')
+        prompt = [SystemMessage("""{{$instruction}}
 Do not include any discursive or explanatory text. Limit your response to {{$length}} words.
 End your response with </Response>"""),
-                  UserMessage('\n<Text1>\n{{$text1}}\n</Text1>\n<Text2>\n{{$text2}}\n</Text2>\n\n'),
+                  UserMessage('\n<Text1>\n{{$text1}}\n</Text1>\n\n<Text2>\n{{$text2}}\n</Text2>\n\n'),
                   AssistantMessage('<Response>\n')
                   ]
-        query = self.cot.llm.ask({"resolved_inst":resolved_inst, "text1":resolved_arg1, "text2":resolved_arg2,
+        query = self.cot.llm.ask({"instruction":instruction, "text1":resolved_arg1, "text2":resolved_arg2,
                                   "length":int(max_tokens/1.33)}, prompt, max_tokens=int(1.2*max_tokens), eos='</Response>')
         self.wm.assign(dest, query)
         return query
     
 
     def create_paper_summary(self, paper_id):
-        paper_id = self.fetch(paper_id=paper_id,
-                        instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
-                        dest='$paper1',
-                        max_tokens=900
+        """ create a short summary of a paper for use by embedder """
+        summary = self.extract(paper_id=paper_id,
+                        #instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                        dest='$summary',
+                        max_tokens=800
                         )
         #print(f'fetched paper_id {paper_id}')
-        if paper_id:
-            response = self.process1(arg1='$paper1', instruction='rewrite the content provided below as an integrated overview. Include all important details, but remove redundant information where possible.',
-                                     dest='$summary',
-                                     max_tokens=600
-                                     )
-            self.s2.set_paper_field(paper_id, 'summary', si.wm.get('$summary'))
+        if summary:
+            self.s2.set_paper_field(paper_id, 'summary', si.wm.get('$summary')['item'])
+            print(f" summary wm contents:\n{si.wm.get('$summary')['item']}")
             self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$summary", "result":'$trash'}])
+            return paper_id
+        else:
+            raise Error ('Nothing returned from self.extract')
+            
+    def create_paper_extract(self, paper_id):
+        """ create a long technical extract of a paper for use in RAG """
+        extract = self.extract(paper_id=paper_id,
+                        #instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                        dest='$extract',
+                        max_tokens=3000
+                        )
+        print(f'created extract for paper_id {paper_id} len {len(extract)}')
+        if extract:
+            print(f"\n\n\n Extract var \n{si.wm.get('#extract')}\n\n")
+            self.s2.set_paper_field(paper_id, 'extract', si.wm.get('$extract')['item'])
+            self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$extract", "result":'$trash'}])
+            return paper_id
+        else:
+            raise Error ('Nothing returned from self.extract')
             
 
-    def create_paper_extract(self, paper_id):
+    def create_paper_novelty(self, paper_id):
+        """ identify what is novel in a paper """
+        # start with extract
         paper_id = self.fetch(paper_id=paper_id,
-                        instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
+                        #instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
                         dest='$paper1',
-                        max_tokens=2000
+                        max_tokens=3000
                         )
         #print(f'fetched paper_id {paper_id}')
-        if paper_id:
-            
-            self.s2.set_paper_field(paper_id, 'extract', si.wm.get('$paper1'))
+        if not paper_id:
+            return
 
+        # now identify what is novel to llm
+        self.process1(arg1='$paper1',
+                      instruction="""Please identify the main concepts, entities, and key facts present in the text below. 
+For each item you identify, indicate whether it is something you are already familiar with or if it represents new information to you.
+                      
+Provide your response in the following format:
+ - Concept/Entity/Fact 1: [Familiar/New]
+ - Concept/Entity/Fact 2: [Familiar/New]
+ ...
+ """,
+                      dest='$familiarity_assesment',
+                      max_tokens=2000
+                      )
+        
+        self.process2(arg1='$paper1',
+                      arg2='$familiarity_assesment',
+                      instruction="""
+    Given Text1 below and your assessment of familiarity with the main concepts, entities, and key facts (Text2):
+    Please identify the specific information, findings, or ideas in the paper summary that you consider to be new, different, or complementary to your existing knowledge. Focus on elements that expand or enrich your understanding of the topic.
+    
+    Provide your response in the following format:
+    - Novel Information 1: [Description]
+    - Novel Information 2: [Description]
+    ...
+""",
+                      dest='$novel_information',
+                      max_tokens=2000
+                      )
+        self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$novel_information", "result":'$trash'}])
+        self.process2(arg1='$paper1',
+                      arg2='$novel_information',
+                      instruction="""
+    Given the paper provided in Text1 below and your identified novel information, findings, or ideas provided in Text2 below:
+    Please generate an overview of the paper in which you prioritize and highlight the novel elements you identified. Ensure that the overview maintains the overall context and coherence of the paper's content while emphasizing the new and complementary information. While highlighting the novel elements of Text1, also be sure to include all other problem, method, data, limitation, and conclusion information in the text.
+    
+    Provide your summary in a clear and structured format, using paragraphs or bullet points as appropriate.
+""",
+                      dest='$overview',
+                      max_tokens=2000
+                      )
+        
+        si.wm.get('$overview')
+        self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$overview", "result":'$trash'}])
+        return self.wm.get('$novel_information')['item']
+
+
+    
     def pre_process_paper(self, uri):
         ### extract and summarize a paper, add extract and summary to df
         # first call fetch, which creates full extract
@@ -552,10 +673,13 @@ End your response with </Response>"""),
         # one-shot, not for regular use
         # fixup hack to update all summaries to meet claude3 lattice design
         for index, row in self.s2.paper_library_df.iterrows():
-            #if row['summary'] is None or len(row['summary']) < 24:
-            if row['extract'] is None or len(row['extract']) < 240:
-                self.pre_process_paper(uri=row['pdf_url'])
-            self.wm.assign('$paper', row['extract'])
+            paper_id = row['faiss_id']
+            if row['extract'] is None or len(row['extract']) < 1000:
+                print(f" {index} {row['faiss_id']}")
+                self.create_paper_extract(paper_id)
+            if index % 10 ==0:
+                print(f'saving...')
+                self.s2.save_paper_df()
             
 
     def update_summaries(self):
@@ -564,12 +688,38 @@ End your response with </Response>"""),
         # fixup hack to update all summaries to meet claude3 lattice design
         for index, row in self.s2.paper_library_df.iterrows():
             paper_id = row['faiss_id']
+            #if row['summary'] is None or len(row['summary'])< 32:
+            print(f" {index} {row['faiss_id']}")
             self.create_paper_summary(paper_id)
+            if index % 10 ==0:
+                print(f'saving...')
+                self.s2.save_paper_df()
             
         self.s2.save_paper_df()
-            
 
-
+    def umap(self):
+        # Load the embeddings (example using digits dataset)
+        papers = si.s2.aper_library_df
+        embeddings = np.array([si.s2.embedding_request(paper, 'search_document: ') for paper in papers['summary']])
+        labels = np.array([i for i in range(len(papers))])
+        
+    
+        print(type(embeddings), embeddings.shape, type(labels), labels.shape)
+        print(labels[:3])
+        # Create a UMAP model
+        umap_model = UMAP(n_components=2, random_state=42)
+        
+        # Fit and transform the embeddings
+        reduced_embeddings = umap_model.fit_transform(embeddings)
+        
+        # Plot the reduced embeddings
+        plt.figure(figsize=(8, 6))
+        plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=labels, cmap='viridis', s=10)
+        plt.colorbar(label='Labels')
+        plt.xlabel('UMAP Dimension 1')
+        plt.ylabel('UMAP Dimension 2')
+        plt.title('UMAP Visualization of Reduced Embeddings')
+        plt.show()
         
 if __name__=='__main__':
     cot = OwlCoT.OwlInnerVoice()
@@ -578,33 +728,41 @@ if __name__=='__main__':
     print('created interp')
     si = LLMScript(interp, cot)
     print('created si')
-    #si.update_summaries()
-    paper = si.s2.get_paper_pd(id=46039551)
     #print(f'paper\n{paper}')
-    root_node, nodes = build_cluster_lattice(si.s2.paper_library_df, 3, [1.4,1.2,1.0])
-    save_lattice(root_node, nodes, 'lattice.pkl')
-    root_node, nodes = load_lattice('lattice.pkl')
+    #root_node, nodes = build_cluster_lattice(si.s2.paper_library_df, 3, [1.4,1.2,1.0])
+    #save_lattice(root_node, nodes, 'lattice.pkl')
+    #root_node, nodes = load_lattice('lattice.pkl')
+    #paper = si.s2.get_paper_pd(paper_id=12218601)
+    #si.create_paper_summary(paper_id=12218601)
+    #si.create_paper_extract(paper_id=12218601)
+    #save_lattice(root_node, nodes, 'lattice.pkl')
+    si.update_summaries()
+    si.s2.save_paper_df()
+    #si.update_extracts()
+    #save_lattice(root_node, nodes, 'lattice.pkl')
     #print(root_node, nodes)
-    # print(generate_comprehensive_answer(paper, root_node, nodes))
+    #save_lattice(root_node, nodes, 'lattice.pkl')
+    #paper = si.s2.get_paper_pd(paper_id=93853867)
+    #paper = si.s2.get_paper_pd(paper_id=12218601)
+    #print(generate_comprehensive_answer(paper, root_node, nodes))
     # Load the lattice from a file
     #root_node, nodes = load_lattice('lattice.pkl')
-
+    #si.create_paper_novelty(93853867)
     # Start browsing the lattice
+    #build_clusterNode_embeddings(3, root_node, nodes)
+    #browse_lattice(root_node, nodes)
+    #si.umap()
+
+    si.process1(arg1=paper['summary'],
+                instruction="""Respond with a question for which Text1, provided below, contains an answer. 
+Reason step by step:
+ - 1. Analyze Text1 to identify information not available from known fact or logical reasoning
+ - 2. Verify hen formulate a question for which that information is the answer.
+Respond only with the question and the Text1 passage containing the answer.""",
+                dest='$questions',
+                max_tokens=100
+                )
+    
+    si.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$questions", "result":'$trash'}])
     browse_lattice(root_node, nodes)
-
-
-
-"""
-split_cluster return
-generate node summary for 0, end=" of "
- node 0 of 0
-including [323529736, 12218601, 227529427, 4183600, 313811026, 186147248, 171137813]
-assign $paperSummary, <class 'str'>, This collection represents resea
-generate node summary for 1, end=" of "
- node 1 of 1
-including [323529736, 4183600, 186147248, 243597710, 41595642, 92387789, 248324031, 206591833]
-assign $paperSummary, <class 'str'>, This collection represents resea
-generate node summary for 2, end=" of "
- node 2 of 1
-including [12218601, 227529427, 313811026, 171137813, 251801157, 164319949, 172297354, 138421729, 164430366, 297017174, 59827999]
-"""
+    

@@ -201,6 +201,7 @@ else:
     print(f"loaded '{section_library_filepath}'\n  keys: {section_library_df.keys()}")
 
 print(f'S2 all libraries and faiss loaded')
+
 def save_synopsis_data():
     paper_library_df.to_parquet(paper_library_filepath)
     faiss.write_index(paper_indexIDMap, paper_index_filepath)
@@ -436,28 +437,43 @@ def extract_words_from_json(json_data):
     words = re.findall(r'\b\w+\b', text)
     return words
 
-def get_paper_pd(id=None, uri=None):
-    if id is not None:
-        candidates = paper_library_df[paper_library_df['faiss_id'] == id]
+def get_paper_pd(paper_id=None, uri=None):
+    if paper_id is not None:
+        candidates = paper_library_df[paper_library_df['faiss_id'] == paper_id]
         if len(candidates) ==0:
-            return None
+            raise ValueError(f"Can't find paper with faiss_id {paper_id}")
         return candidates.iloc[0]
     elif uri is not None:
         candidates = paper_library_df[paper_library_df['article_url'] == uri]
-        if len(candidates) ==0:
+        if len(candidates)==0: # try pdf_uri match
             candidates = paper_library_df[paper_library_df['pdf_url'] == uri]
-        if len(candidates) ==0:
+        if len(candidates)==0: # try pdf_filepath uri match
             candidates = paper_library_df[paper_library_df['pdf_filepath'] == uri]
-        if len(candidates) >0:
+        if len(candidates)==0:
+            raise ValueError(f"Can't find paper with uri {uri}")
+        else:
             return candidates.iloc[0]
-    return None
+    else:
+        raise ValueError(f"get_paper_pd must have paper_id or uri")
 
 def set_paper_field(paper_id, field_name, value):
     candidates = paper_library_df[paper_library_df['faiss_id'] == paper_id]
-    if len(candidates) ==0:
-        return False
-    candidates.iloc[0][field_name] = value
-    return candidates.iloc[0]
+    if len(candidates) == 0:
+        raise ValueError(f'no paper with faiss_id {paper_id}')
+    index = candidates.index[0]
+    paper_library_df.loc[index, field_name] = value
+    #print(f"set {paper_library_df.loc[index, 'faiss_id']} {field_name} to {paper_library_df.loc[index, field_name][:32]}")
+
+    # verify
+    candidates = paper_library_df[paper_library_df['faiss_id'] == paper_id]
+    if len(candidates) == 0:
+        raise ValueError(f'no paper with faiss_id {paper_id}')
+    paper = candidates.iloc[0]
+    if paper[field_name] == value:
+        return paper
+    else:
+        raise ValueError('paper field not set!')
+    
 
 def index_dict(paper_dict):
     # called from index_service for search enqueued dict

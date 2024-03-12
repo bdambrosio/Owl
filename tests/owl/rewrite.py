@@ -254,43 +254,43 @@ Note that your task at this time is analysis / information extraction:
     return extract
 
 
-def extract_w_focus(text, draft, extract_subject, tokens, template=None):
-    prompt_prefix = SystemMessage("""You are to perform an analysis task. 
-Analyze and extract information from:
+def extract_w_focus(text, section_name, section_draft, extract_topic, tokens, template=None):
+    if section_draft is not None and len(section_draft) > 0:
+        prefix_text = """Your task is to extend an analysis / information extraction on
+{{$extract_topic}}
+using the new Text provided below.
 
-{{$text}}.
-
-Note that your task at this time is information extraction:
-1. Do NOT include any introductory, discursive, or explantory phrases or text.
-2. Your analysis should be focused on identifying the {{$extract_subject}} of the text
-3. Respond specifically with the {{$extract_subject}} in/of the text.
-4. Limit your response to {{$tokens}} words. End your response with </EXTRACT>""")
-
-    if draft is not None and len(draft) > 0:
-        prompt_prefix = SystemMessage("""Your task is to extend an analysis / information extraction with new text.
-Given the analysis result from text provided so far:
+The information extracted on this topic from previous text is:
 
 <PreviousAnalysis>
-{{$draft}}
+{{$section_draft}}
 </PreviousAnalysis>
 
-Extract information from this new text:
+Respond ONLY with the updated information extraction on 
+{{$extract_topic}}
 
+You should include as much relevant information from the Previous Analysis as possible, while integrating new information into a coherent exposition.
+
+The new text is: """
+    else:
+        prefix_text = """Your task is to analyze and extract information on
+{{$extract topic}}
+from the following Text: """
+
+    prompt_text=prefix_text+"""
 <Text>
 {{$text}}.
 </Text>
 
-
-Note that your task at this time is information extraction:
+Your task at this time is information extraction:
 1. Do NOT include any introductory, discursive, or explantory phrases or text.
-2. Your analysis should be focused on identifying the {{$extract_subject}} of the text
-3. Respond specifically with the {{$extract_subject}} in/of the text.
-4. Limit your response to {{$tokens}} words. End your response with </EXTRACT>""")
-        
-    prompt = [prompt_prefix, 
+2. Focus on identifying and responding with the information on: {{$extract_topic}}
+3. Limit your response to {{$tokens}} words. End your response with </EXTRACT>"""
+
+    prompt = [SystemMessage(prompt_text),
               AssistantMessage("""<EXTRACT>\n""")
               ]
-    extract = cot.llm.ask({"draft": draft, "extract_subject":extract_subject, "tokens":int(tokens*.8), "text":text},
+    extract = cot.llm.ask({"section_draft": section_draft, "extract_topic":extract_topic, "tokens":int(tokens*.67), "text":text},
                           prompt, max_tokens=tokens, eos='</EXTRACT>')
     return extract
 
@@ -729,27 +729,59 @@ def shorten(resources, focus, max_tokens):
     rewrite = ''
     target = 0 # max_tokens
     first_chunk = True
-    for text in resources:
+    problem='';methods='';data=''; conclusions='';limitations=''
+    for n, text in enumerate(resources):
         print(f'rw.shorten section in: {len(text)}')
         # process as much text as possible - assumes 'max_tokens' is about 1/3 context size
-        if len(text) + len(text_to_shorten) < int(context_size*1.5): # note this is comparing chars to tokens, implicit divide by
+        if len(text) + len(text_to_shorten) < int(context_size*2): # note this is comparing chars to tokens, implicit divide by
             text_to_shorten += text+'\n'
-            continue
+            if n < len(resources)-1:
+                # don't process yet if this isn't the last section of text
+                continue
         if first_chunk: # get the core of the text
-            topic = extract_w_focus(text_to_shorten, '', 'central idea/proposal/topic of this text? What is the new idea, method, or proposal presented?', 180)
-            rewrite = topic
+            topic = 'Overview\n'+extract_w_focus(text_to_shorten, 'Overview', '',
+                                                 'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?',
+                                                 80)
             first_chunk=False
-            
+        
         #ners = ', '.join(extract_ners(focus+'. '+text_to_shorten))
-        # following is additive bcause we are rewriting entire analysis each time
-        target = int( ((1.0*len(text_to_shorten))/input_length) * max_tokens)
-        problem = extract_w_focus(text_to_shorten, '', f'Problem(s) addressed, given primary topic: {topic}', target)
-        methods = extract_w_focus(text_to_shorten, '', f'Methods used, given primary topic is {topic}', target)
-        data = extract_w_focus(text_to_shorten, '', f'Data presented, given primary topic is {topic}', target)
-        hypotheses = extract_w_focus(text_to_shorten, '', f'Hypotheses made, given primary topic is {topic}', target)
-        results = extract_w_focus(text_to_shorten, '', f'Results claimed, given central_topic is {topic}', target)
-        limitations = extract_w_focus(text_to_shorten, '', f'Limitations, relevant to {topic}', target)
+        #target = int( ((1.0*len(text_to_shorten))/input_length) * max_tokens/2)
+        target = int(max_tokens/5) # we rewrite each pass, so target is fixed size!
+
+        problem = extract_w_focus(text_to_shorten, 'Problem', problem,
+                                  f'the problem(s) addressed, research question, objective, or problem statement.',
+                                  #topic,
+                                  target)
+        #print(f'PROBLEM:\n{problem}\n')
+
+        methods = extract_w_focus(text_to_shorten, 'Methods', methods,
+                                  f'the methods used, methodological approach, techniques, experimental design, analyses (statistical or logical), or computational techniques used',
+                                  #'\n'.join([topic, 'Problem Area',problem]),
+                                  target)
+        #print(f'\nMETHODS:\n{methods}\n')
+
+        data = extract_w_focus(text_to_shorten, 'Data', data,
+                               f'the data presented, given primary topic is {topic}',
+                               #'\n'.join([topic, 'Problem Area',problem, 'Methods', methods, 'Data', data]),
+                               target)
+        #print(f'\nDATA:\n{data}\n')
+
+
+        conclusions = extract_w_focus(text_to_shorten, 'Conclusions', conclusions,
+                                      f'The Main findings, interpretations, and conclusions. Also the implications and possible future work, given the overal subject area: {topic}',
+                                      #'\n'.join([topic, 'Problem Area', problem, 'Methods', methods, 'Data', data, 'Conclusions', conclusions]),
+                                      target)
+        #print(f'CONCLUSIONS:\n{conclusions}\n')
+
+
+        limitations = extract_w_focus(text_to_shorten, 'Limitations', limitations,
+                                      f'The limitations, constraints, assumptions, or potential weaknesses of the study, within: {topic}',
+                                      #rewrite = '\n'.join([topic, 'Problem Area',problem, 'Methods', methods, , 'Data', data, 'Conclusions', conclusions, 'Limitations', limitations]),
+                                      target)
+        #print(f'LIMITATIONS:\n{limitations}\n')
+
+
         text_to_shorten = text # start with this next time.
-        rewrite += '\n'.join([problem, methods, data, hypotheses, results, limitations])
+        rewrite = '\n'.join([topic, 'Problem Area',problem, 'Methods', methods, 'Limitations',limitations, 'Data', data, 'Conclusions', conclusions])
     print(f'rw.shorten out: {len(rewrite)} chars')
     return rewrite
