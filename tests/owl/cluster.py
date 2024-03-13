@@ -43,12 +43,57 @@ from sklearn.metrics.pairwise import cosine_similarity
 si = None
 import re
 
-keys = ['key1', 'key2', 'key3']
-result_string = '''key1: value1 with : and \n
-key2: value2 with : and \n
-key3: value3 with : and \n'''
+import numpy as np
+from scipy.spatial import ConvexHull
 
-def recover_dict_from_text(text, dimensions):
+def find_max_projection_difference(embedding_set, query_embedding):
+    """ find the maximum difference between any two points from the embedding set 
+        when projected onto the dimension defined by the query embedding """
+    
+    # Normalize the query embedding
+    query_embedding_norm = query_embedding / np.linalg.norm(query_embedding)
+    
+    # Project each embedding onto the query dimension
+    projections = np.dot(embedding_set, query_embedding_norm)
+    
+    # Find the maximum and minimum projected values
+    max_projection = np.max(projections)
+    min_projection = np.min(projections)
+    
+    # Calculate the maximum difference between projected values
+    max_difference = max_projection - min_projection
+    
+    return max_difference
+
+
+def find_best_separating_set(embedding_sets, query_embedding):
+    """ find which dimension best splits on query """
+    max_volume = 0
+    best_set = None
+
+    for embedding_set in embedding_sets:
+        # Concatenate the query embedding with the current set of embeddings
+        embeddings = np.vstack([query_embedding, embedding_set])
+
+        # Calculate pairwise distances between the query and the embeddings
+        distances = np.linalg.norm(embeddings - query_embedding, axis=1)
+
+        # Create a simplex using the pairwise distances
+        simplex = distances.reshape(-1, 1)
+
+        # Calculate the volume of the simplex
+        volume = ConvexHull(simplex).volume
+
+        # Update the best set if the current volume is larger
+        if volume > max_volume:
+            max_volume = volume
+            best_set = embedding_set
+
+    return best_set
+
+
+
+def text_dimensions(text, dimensions):
     # summary and excerpt texts in papers are dicts that have been rendered as flat lists.
     # this attempts to recover them
     if not text.startswith('\n'):
@@ -59,11 +104,19 @@ def recover_dict_from_text(text, dimensions):
         key = keys[i]
         if i == len(keys) - 1:
             # Last key, capture until the end of the string
-            value = re.findall(f"\n{key}\n(.*)", text, re.DOTALL)[0].strip()
+            try:
+                value = re.findall(f"\n{key}\n(.*)", text, re.DOTALL)[0].strip()
+            except IndexError:
+                print(f'text dimensions index error: {key} {text}')
+                value = ''
         else:
             # Capture until the next key
             next_key = keys[i + 1]
-            value = re.findall(f"\n{key}\n(.*?)\n{next_key}\n", text, re.DOTALL)[0].strip()
+            try:
+                value = re.findall(f"\n{key}\n(.*?)\n{next_key}\n", text, re.DOTALL)[0].strip()
+            except IndexError:
+                print(f'text dimensions index error: {key} {text}')
+                value = ''
         recovered_dict[key] = value
     return recovered_dict
 
@@ -100,9 +153,9 @@ def get_sibling_nodes(node, cluster_nodes):
     return sibling_nodes
 
 
-def build_clusterNode_embeddings(num_levels, root_node, cluster_nodes):
+def build_clusterNode_embeddings(max_depth, root_node, cluster_nodes):
     # Generate embeddings for internal nodes (bottom-up)
-    for level in range(num_levels - 1, 0, -1):
+    for level in range(max_depth - 1, 0, -1):
         for node in cluster_nodes[level].values():
             if node.children is None or len(node.children) == 0:
                 # leaf node embeddings are computed from papers!
@@ -154,18 +207,34 @@ def generate_node_summary(node, cluster_nodes, papers, max_children=20):
     return si.wm.get('$paperSummary')['item']
 
 
-def build_cluster_lattice(papers, num_levels, distance_thresholds):
+def build_cluster_forest(papers, max_depth=3, dimensions=rw.default_dimensions, thresholds=[1.4,1.2,1.0]):
+    forest = {}
+    base_root, base_nodes = build_cluster_DAG(papers, max_depth=max_depth, dimension=None, dimensions=None, thresholds=thresholds)
+    forest["base"] = {"root":base_root, "nodes":base_nodes}
+    for key in dimensions.keys():
+        key_root, key_nodes = build_cluster_DAG(papers,
+                                                max_depth=max_depth,
+                                                dimension=key,
+                                                dimensions=dimensions,
+                                                thresholds=thresholds)
+        forest[key] = {"root":key_root,"nodes":key_nodes}
+    return forest
+        
+def build_cluster_DAG(papers, max_depth, dimension, dimensions, thresholds):
     # Extract embeddings from papers
-    embeddings = np.array([si.s2.embedding_request(paper, 'search_document: ') for paper in papers['summary']])
-
+    if dimension is None:
+        embeddings = np.array([si.s2.embedding_request(paper, 'search_document: ') for paper in papers['summary']])
+    else:
+        embeddings = np.array([si.s2.embedding_request(text_dimensions(paper, dimensions)[dimension],
+                                                       'search_document: ') for paper in papers['summary']])
     def split_cluster(parent_node, parent_embeddings, parent_papers, level):
-        if level >= num_levels:
+        if level >= max_depth:
             return
 
         # Perform hierarchical clustering for the current cluster
         Z = linkage(parent_embeddings, method='ward')
-        num_clusters = fcluster(Z, t=distance_thresholds[level], criterion='distance').max()
-        clusters = fcluster(Z, t=distance_thresholds[level], criterion='distance')
+        num_clusters = fcluster(Z, t=thresholds[level], criterion='distance').max()
+        clusters = fcluster(Z, t=thresholds[level], criterion='distance')
         print(f'\n\n***level {level}, clusters {num_clusters}')
         # Iterate over subclusters
         print(f'****** clustering at level {level} for parent {parent_node}')
@@ -196,7 +265,7 @@ def build_cluster_lattice(papers, num_levels, distance_thresholds):
             parent_node.children.append(cluster_node.node_id)
 
             # Add paper IDs to the cluster node if it's a leaf node
-            if level + 1 >= num_levels or len(cluster_papers_df)>2:
+            if level + 1 >= max_depth or len(cluster_papers_df)>2:
                 cluster_node.paper_ids = papers.iloc[cluster_indices]['faiss_id'].tolist()
                 # Recursively split the subcluster
             else:
@@ -216,18 +285,18 @@ def build_cluster_lattice(papers, num_levels, distance_thresholds):
 
 
         # Generate summaries for leaf nodes
-    for node in cluster_nodes[num_levels].values():
+    for node in cluster_nodes[max_depth].values():
         node.summary = generate_node_summary(node, cluster_nodes, papers)
 
     # Generate summaries for internal nodes (bottom-up)
-    for level in range(num_levels - 1, 0, -1):
+    for level in range(max_depth - 1, 0, -1):
         for node in cluster_nodes[level].values():
             node.summary = generate_node_summary(node, cluster_nodes, papers)
 
     # Generate summary for the root node
     root_node.summary = generate_node_summary(root_node, cluster_nodes, papers)
 
-    build_clusterNode_embeddings(num_levels, root_node, cluster_nodes)
+    build_clusterNode_embeddings(max_depth, root_node, cluster_nodes)
 
     return root_node, cluster_nodes
 
@@ -240,11 +309,20 @@ def save_lattice(root_node, cluster_nodes, filename):
     with open(filename, 'wb') as file:
         pickle.dump(lattice_data, file)
 
-
 def load_lattice(filename):
     with open(filename, 'rb') as file:
         lattice_data = pickle.load(file)
     return lattice_data['root_node'], lattice_data['cluster_nodes']
+
+
+def save_forest(forest, filename):
+    with open(filename, 'wb') as file:
+        pickle.dump(forest, file)
+
+def load_forest(filename):
+    with open(filename, 'rb') as file:
+        forest = pickle.load(file)
+    return forest
 
 
 ### higher level functionality for abstraction lattice
@@ -424,32 +502,6 @@ def generate_comprehensive_answer(paper, root, cluster_nodes):
                 max_tokens = 600)
     return si.wm.get('$review')['item']
                                 
-"""
-# Example usage
-papers = [
-    {'paper_id': 1, 'summary': 'Paper 1 summary', 'embedding_vector': np.random.rand(512)},
-    {'paper_id': 2, 'summary': 'Paper 2 summary', 'embedding_vector': np.random.rand(512)},
-    # ... add more papers
-]
-
-num_levels = 3
-cluster_size_thresholds = [10, 5]  # Adjust these thresholds based on your requirements
-
-root_node, cluster_nodes = build_cluster_lattice(papers, num_levels, cluster_size_thresholds, None)
-
-# Access the cluster nodes and their attributes
-for level, nodes in cluster_nodes.items():
-    print(f"Level {level}:")
-    for node_id, node in nodes.items():
-        print(f"Node ID: {node.node_id}")
-        print(f"Parent ID: {node.parent_id}")
-        print(f"Summary: {node.summary}")
-        print(f"Embedding: {node.embedding}")
-        print(f"Children: {node.children}")
-        print(f"Paper IDs: {node.paper_ids}")
-        print("---")
-
-"""
 
 #
 ### Browse lattice
@@ -537,16 +589,40 @@ if __name__=='__main__':
     print('created interp')
     si = LLMScript(interp, cot)
     print('created si')
-    root_node, nodes = build_cluster_lattice(si.s2.paper_library_df, 3, [1.4,1.2,1.0])
-    save_lattice(root_node, nodes, 'lattice.pkl')
-    root_node, nodes = load_lattice('lattice.pkl')
+    #root_node, nodes = build_cluster_DAG(papers=si.s2.paper_library_df,
+    #                                     dimension=None,
+    #                                     dimensions=None,
+    #                                     max_depth=3,
+    #                                     thresholds=[1.4,1.2,1.0])
+    #forest = build_cluster_forest(papers=si.s2.paper_library_df,
+    #                                     dimensions=rw.default_dimensions,
+    #                                     max_depth=3,
+    #                                     thresholds=[1.4,1.2,1.0])
+    
+    #save_forest(forest, 'paper_forest.pkl')
+    forest = load_forest('paper_forest.pkl')
+    query ="""list all the miRNA that can be useful in early-stage cancer detection and that can be assayed via blood sample, that is, that appear in extra-celluar vesicles as circulating miRNA."""
+    tree = forest['base']
+    children = tree['root'].children
+    child_embeds = np.array([tree['nodes'][1][child].embedding for child in children])
+    query_embed = si.s2.embedding_request(query, 'search_document: ')
+    volume = find_max_projection_difference(child_embeds, query_embed)
+    print(f'base, {volume}')
+    for dimension in rw.default_dimensions:
+        tree = forest[dimension]
+        children = tree['root'].children
+        child_embeds = np.array([tree['nodes'][1][child].embedding for child in children])
+        query_embed = si.s2.embedding_request(query, 'search_document: ')
+        volume = find_max_projection_difference(child_embeds, query_embed)
+        print(f'{dimension}, {volume}')
+        
     #si.create_paper_summary(paper_id=12218601)
     #si.create_paper_extract(paper_id=12218601)
     #save_lattice(root_node, nodes, 'lattice.pkl')
     #si.update_extracts()
     #si.s2.save_paper_df()
-    paper = si.s2.get_paper_pd(paper_id=12218601)
-    summary_dict = recover_dict_from_text(paper['summary'], rw.default_dimensions)
+    #paper = si.s2.get_paper_pd(paper_id=12218601)
+    #summary_dict = recover_dict_from_text(paper['summary'], rw.default_dimensions)
     #print(json.dumps(summary_dict, indent=2))
     #si.update_extracts()
     #save_lattice(root_node, nodes, 'lattice.pkl')

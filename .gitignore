@@ -280,3 +280,4 @@ tests/owl/*.txt
 tests/owl/indexing_service_queue.json
 tests/owl/*.*~
 tests/owl/*.bak
+tests/owl/arxiv.*
