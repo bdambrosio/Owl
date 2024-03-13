@@ -277,3 +277,6 @@ tests/owl/topic_thread_updates.json~
 tests/vlite/
 tests/wandb/
 tests/owl/*.txt
+tests/owl/indexing_service_queue.json
+tests/owl/*.*~
+tests/owl/*.bak

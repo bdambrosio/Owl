@@ -714,7 +714,19 @@ end the rewrite as follows:
     return rewrite
 
 
-def shorten(resources, focus, max_tokens):
+# the first set of extract dimensions defined, for research papers
+
+default_dimensions = {"Overview":{'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?'},
+                      "Problem":{"instruction":'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?'},
+                      "Approach":{"instruction":'the specific methods, techniques, algorithms, theoretical foundations, or design principles employed to address the problem or achieve the objectives.'},
+                      "Analysis":{"instruction":'the assessment or evaluation reported in the work, including data analysis, experimental results, theoretical analysis, performance metrics, or comparative studies.'},
+                      "Findings":{"instruction":'the main outcomes, insights, contributions, or findings reported in the work, such as new knowledge, algorithms, theoretical advancements, or performance improvements.'},
+                      "Limitations":{"instruction":'the assumptions, constraints, limitations, or potential areas for further research and improvement identified in the work.'},
+                      "Impact":{"instruction":'the practical applications, real-world impact, potential use cases, or implications of the work in relevant domains or industries.'},
+                      "Context":{"instruction":'the relationship of the work to existing literature, the broader context of the field, and the novelty or significance of the contribution within that context.'}
+                      }
+
+def shorten(resources, focus, dimensions=default_dimensions, max_tokens=80*len(default_dimensions)):
     """ rewrite a collection of resources (text strings) to a max length, given a focus """
     """ assumes resources in sequence? """
     resources = [resource.strip() for resource in resources]
@@ -729,7 +741,9 @@ def shorten(resources, focus, max_tokens):
     rewrite = ''
     target = 0 # max_tokens
     first_chunk = True
-    problem='';methods='';data=''; conclusions='';limitations=''
+    dimension_extracts = ['' for i in len(dimensions.keys())]
+    target = int(max_tokens/(len(dimensions.keys())-1)) # we rewrite each pass, so target is fixed size!
+
     for n, text in enumerate(resources):
         print(f'rw.shorten section in: {len(text)}')
         # process as much text as possible - assumes 'max_tokens' is about 1/3 context size
@@ -740,48 +754,17 @@ def shorten(resources, focus, max_tokens):
                 continue
         if first_chunk: # get the core of the text
             topic = 'Overview\n'+extract_w_focus(text_to_shorten, 'Overview', '',
-                                                 'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?',
+                                                 dimensions['overview']['instruction'],
                                                  80)
             first_chunk=False
         
-        #ners = ', '.join(extract_ners(focus+'. '+text_to_shorten))
-        #target = int( ((1.0*len(text_to_shorten))/input_length) * max_tokens/2)
-        target = int(max_tokens/5) # we rewrite each pass, so target is fixed size!
-
-        problem = extract_w_focus(text_to_shorten, 'Problem', problem,
-                                  f'the problem(s) addressed, research question, objective, or problem statement.',
-                                  #topic,
-                                  target)
-        #print(f'PROBLEM:\n{problem}\n')
-
-        methods = extract_w_focus(text_to_shorten, 'Methods', methods,
-                                  f'the methods used, methodological approach, techniques, experimental design, analyses (statistical or logical), or computational techniques used',
-                                  #'\n'.join([topic, 'Problem Area',problem]),
-                                  target)
-        #print(f'\nMETHODS:\n{methods}\n')
-
-        data = extract_w_focus(text_to_shorten, 'Data', data,
-                               f'the data presented, given primary topic is {topic}',
-                               #'\n'.join([topic, 'Problem Area',problem, 'Methods', methods, 'Data', data]),
-                               target)
-        #print(f'\nDATA:\n{data}\n')
-
-
-        conclusions = extract_w_focus(text_to_shorten, 'Conclusions', conclusions,
-                                      f'The Main findings, interpretations, and conclusions. Also the implications and possible future work, given the overal subject area: {topic}',
-                                      #'\n'.join([topic, 'Problem Area', problem, 'Methods', methods, 'Data', data, 'Conclusions', conclusions]),
-                                      target)
-        #print(f'CONCLUSIONS:\n{conclusions}\n')
-
-
-        limitations = extract_w_focus(text_to_shorten, 'Limitations', limitations,
-                                      f'The limitations, constraints, assumptions, or potential weaknesses of the study, within: {topic}',
-                                      #rewrite = '\n'.join([topic, 'Problem Area',problem, 'Methods', methods, , 'Data', data, 'Conclusions', conclusions, 'Limitations', limitations]),
-                                      target)
-        #print(f'LIMITATIONS:\n{limitations}\n')
-
+        for e, key in enumerate(dimensions.keys()):
+            if key != 'overview': # skip overview after first pass, 
+                dimension_extracts[key] = extract_w_focus(text_to_shorten, key, dimension_extracts[key],
+                                                dimensions[key]['instruction'],
+                                                target)
+        #print(f'\n{key}:\n{extracts[key]}\n')
 
         text_to_shorten = text # start with this next time.
-        rewrite = '\n'.join([topic, 'Problem Area',problem, 'Methods', methods, 'Limitations',limitations, 'Data', data, 'Conclusions', conclusions])
     print(f'rw.shorten out: {len(rewrite)} chars')
-    return rewrite
+    return dimension_extracts
