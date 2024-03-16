@@ -199,15 +199,15 @@ def generate_node_summary(node, cluster_nodes, papers, max_children=20):
         truncated_summaries = ' '.join(concatenated_summaries.split()[:max_tokens])
         concatenated_summaries = truncated_summaries + '...'
 
-    si.process1(arg1=concatenated_summaries,
+    cot.script.process1(arg1=concatenated_summaries,
                   instruction='The content provided below is a collection of summaries of papers or subtopics. Provide a synopsis of this content, focusing on the overall subfield represented by this collection. Include an overview of the topics or problem addressed, methods used, data presented, inferences or claims made, and conclusions drawn. Remove redundant information where possible. Your response should be a coherent narrative representing the collection as a whole and the important contributions in this collection.',
                   dest='$paperSummary',
                   max_tokens=800
                   )
-    return si.wm.get('$paperSummary')['item']
+    return cot.script.wm.get('$paperSummary')['item']
 
 
-def build_cluster_forest(papers, max_depth=3, dimensions=rw.default_dimensions, thresholds=[1.4,1.2,1.0]):
+def build_cluster_forest(papers, max_depth=3, dimensions=rw.default_sections, thresholds=[1.4,1.2,1.0]):
     forest = {}
     base_root, base_nodes = build_cluster_DAG(papers, max_depth=max_depth, dimension=None, dimensions=None, thresholds=thresholds)
     forest["base"] = {"root":base_root, "nodes":base_nodes}
@@ -223,9 +223,9 @@ def build_cluster_forest(papers, max_depth=3, dimensions=rw.default_dimensions, 
 def build_cluster_DAG(papers, max_depth, dimension, dimensions, thresholds):
     # Extract embeddings from papers
     if dimension is None:
-        embeddings = np.array([si.s2.embedding_request(paper, 'search_document: ') for paper in papers['summary']])
+        embeddings = np.array([s2.embedding_request(paper, 'search_document: ') for paper in papers['summary']])
     else:
-        embeddings = np.array([si.s2.embedding_request(text_dimensions(paper, dimensions)[dimension],
+        embeddings = np.array([s2.embedding_request(text_dimensions(paper, dimensions)[dimension],
                                                        'search_document: ') for paper in papers['summary']])
     def split_cluster(parent_node, parent_embeddings, parent_papers, level):
         if level >= max_depth:
@@ -332,7 +332,7 @@ def load_forest(filename):
 def find_best_fitting_cluster(paper, root_node, cluster_nodes, paper_embedding = None):
     # experiment - initialize similarity threshold to root
     if paper_embedding is None:
-        paper_embedding = si.s2.embedding_request(paper['summary'], 'search_document: ')
+        paper_embedding = s2.embedding_request(paper['summary'], 'search_document: ')
     current_node = root_node
     if np.any(np.isnan(paper_embedding)):
         print (f"Paper embedding is Nan!")
@@ -371,7 +371,7 @@ def add_paper_to_cluster(paper, root_node, cluster_nodes, papers):
         best_child = None
         for child_id in current_node.children:
             child_node = cluster_nodes[current_node.level + 1][child_id]
-            similarity = cosine_similarity(si.s2.embedding_request(paper['summary'], 'search_document: '), child_node.embedding)
+            similarity = cosine_similarity(s2.embedding_request(paper['summary'], 'search_document: '), child_node.embedding)
             if similarity > max_similarity:
                 max_similarity = similarity
                 best_child = child_node
@@ -449,7 +449,7 @@ def generate_integration_report(paper, cluster_node):
 
 def generate_local_contribution_summary(paper, cluster_node):
     print('\n\n\nGENERATE LOCAL CONTRIBUTION\n')
-    si.process2(arg1=paper['summary'],
+    cot.script.process2(arg1=paper['summary'],
                 arg2=cluster_node.summary,
                 instruction="""Compare Text1 to Text2. Text2 is the knowledge cluster Text1 is most closely related to.
 Succinctly identify:
@@ -462,13 +462,13 @@ Conclude with an analysis of any significant shifts Text1 makes in the overall s
                 dest='$localContribution',
                 max_tokens = 600
                 )
-    si.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$localContribution", "result":'$trash'}])
-    return si.wm.get('$localContribution')['item']
+    cot.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$localContribution", "result":'$trash'}])
+    return cot.script.wm.get('$localContribution')['item']
 
 
 def generate_broader_contribution_summary(paper, node, level):
     print('\n\n\nGENERATE BROADER CONTRIBUTION\n')
-    si.process2(arg1=paper['summary'],
+    cot.script.process2(arg1=paper['summary'],
                 arg2=node.summary,
                 instruction=f"""Compare Text1 to Text2, an abstract knowledge cluster Text1 is most closely related to.
 Describe, at a high level appropriate for the {str(level)}th level of abstraction, 
@@ -477,8 +477,8 @@ as represented by Text2, known fact, and logical reasoning.""",
                 dest='$broaderContribution'+str(level),
                 max_tokens = 600
                 )
-    si.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$broaderContribution"+str(level), "result":'$trash'}])
-    return si.wm.get('$broaderContribution'+str(level))['item']
+    cot.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$broaderContribution"+str(level), "result":'$trash'}])
+    return cot.script.wm.get('$broaderContribution'+str(level))['item']
 
 def generate_comprehensive_answer(paper, root, cluster_nodes):
     print('\n\n\nGENERATE COMPREHENSIVE CONTRIBUTION\n')
@@ -496,11 +496,11 @@ def generate_comprehensive_answer(paper, root, cluster_nodes):
     for i, summary in enumerate(broader_summaries[::-1]):
         comprehensive_answer += f'Level {i+1}:\n{summary}\n\n'
     
-    si.process1(comprehensive_answer,
+    cot.script.process1(comprehensive_answer,
                 instruction='rewrite into a single coherent narrative',
                 dest = '$review',
                 max_tokens = 600)
-    return si.wm.get('$review')['item']
+    return cot.script.wm.get('$review')['item']
                                 
 
 #
@@ -539,7 +539,7 @@ def browse_lattice(root_node, cluster_nodes):
             
             if action == "1":
                 paper_id = int(input("Enter the paper faiss id: "))
-                paper = si.s2.get_paper_pd(paper_id=int(paper_id))
+                paper = s2.get_paper_pd(paper_id=int(paper_id))
                 if paper is not None:
                     print(paper['summary'])
                 else:
@@ -566,7 +566,7 @@ def browse_lattice(root_node, cluster_nodes):
             print("3. Quit")
             action = input("Enter the action number: ")
             if action == '1':
-                paper = si.s2.get_paper_pd(paper_id=int(paper_id))
+                paper = s2.get_paper_pd(paper_id=int(paper_id))
                 if paper is not None:
                     print(paper['summary'])
                 else:
@@ -583,57 +583,54 @@ def browse_lattice(root_node, cluster_nodes):
 
 
 if __name__=='__main__':
+    import semanticScholar3 as s2
     cot = OwlCoT.OwlInnerVoice()
-    print('created cot')
-    interp = Interpreter.Interpreter(cot)
-    print('created interp')
-    si = LLMScript(interp, cot)
-    print('created si')
-    #root_node, nodes = build_cluster_DAG(papers=si.s2.paper_library_df,
-    #                                     dimension=None,
-    #                                     dimensions=None,
-    #                                     max_depth=3,
-    #                                     thresholds=[1.4,1.2,1.0])
-    #forest = build_cluster_forest(papers=si.s2.paper_library_df,
-    #                                     dimensions=rw.default_dimensions,
-    #                                     max_depth=3,
-    #                                     thresholds=[1.4,1.2,1.0])
     
-    #save_forest(forest, 'paper_forest.pkl')
+    root_node, nodes = build_cluster_DAG(papers=s2.paper_library_df,
+                                         dimension=None,
+                                         dimensions=None,
+                                         max_depth=3,
+                                         thresholds=[1.4,1.2,1.0])
+    forest = build_cluster_forest(papers=s2.paper_library_df,
+                                         dimensions=rw.default_sections,
+                                         max_depth=3,
+                                         thresholds=[1.4,1.2,1.0])
+    
+    save_forest(forest, 'paper_forest.pkl')
     forest = load_forest('paper_forest.pkl')
     query ="""list all the miRNA that can be useful in early-stage cancer detection and that can be assayed via blood sample, that is, that appear in extra-celluar vesicles as circulating miRNA."""
     tree = forest['base']
     children = tree['root'].children
     child_embeds = np.array([tree['nodes'][1][child].embedding for child in children])
-    query_embed = si.s2.embedding_request(query, 'search_document: ')
+    query_embed = s2.embedding_request(query, 'search_document: ')
     volume = find_max_projection_difference(child_embeds, query_embed)
     print(f'base, {volume}')
-    for dimension in rw.default_dimensions:
+    for dimension in rw.default_sections:
         tree = forest[dimension]
         children = tree['root'].children
         child_embeds = np.array([tree['nodes'][1][child].embedding for child in children])
-        query_embed = si.s2.embedding_request(query, 'search_document: ')
+        query_embed = s2.embedding_request(query, 'search_document: ')
         volume = find_max_projection_difference(child_embeds, query_embed)
         print(f'{dimension}, {volume}')
         
-    #si.create_paper_summary(paper_id=12218601)
-    #si.create_paper_extract(paper_id=12218601)
+    #cot.script.create_paper_summary(paper_id=12218601)
+    #cot.script.create_paper_extract(paper_id=12218601)
     #save_lattice(root_node, nodes, 'lattice.pkl')
-    #si.update_extracts()
-    #si.s2.save_paper_df()
-    #paper = si.s2.get_paper_pd(paper_id=12218601)
-    #summary_dict = recover_dict_from_text(paper['summary'], rw.default_dimensions)
+    #cot.script.update_extracts()
+    #s2.save_paper_df()
+    #paper = s2.get_paper_pd(paper_id=12218601)
+    #summary_dict = recover_dict_from_text(paper['summary'], rw.default_sections)
     #print(json.dumps(summary_dict, indent=2))
-    #si.update_extracts()
+    #cot.script.update_extracts()
     #save_lattice(root_node, nodes, 'lattice.pkl')
     #print(root_node, nodes)
     #save_lattice(root_node, nodes, 'lattice.pkl')
-    #paper = si.s2.get_paper_pd(paper_id=93853867)
-    #paper = si.s2.get_paper_pd(paper_id=12218601)
+    #paper = s2.get_paper_pd(paper_id=93853867)
+    #paper = s2.get_paper_pd(paper_id=12218601)
     #print(generate_comprehensive_answer(paper, root_node, nodes))
     # Load the lattice from a file
     #root_node, nodes = load_lattice('lattice.pkl')
-    #si.create_paper_novelty(93853867)
+    #cot.script.create_paper_novelty(93853867)
     # Start browsing the lattice
-    #build_clusterNode_embeddings(3, root_node, nodes)
+    build_clusterNode_embeddings(3, root_node, nodes)
     #browse_lattice(root_node, nodes)

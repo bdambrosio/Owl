@@ -33,15 +33,10 @@ import signal
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
-from OwlCoT import ListDialog, LLM, GPT4, TextEditDialog, OPENAI_MODEL3, OPENAI_MODEL4
+from pyqt_utils import ListDialog, TextEditDialog
 from workingMemory import WorkingMemory as wm
-from LLMScript import LLMScript as script
 
 today = date.today().strftime("%b-%d-%Y")
-
-NYT_API_KEY = os.getenv("NYT_API_KEY")
-sections = ['arts', 'automobiles', 'books/review', 'business', 'fashion', 'food', 'health', 'home', 'insider', 'magazine', 'movies', 'nyregion', 'obituaries', 'opinion', 'politics', 'realestate', 'science', 'sports', 'sundayreview', 'technology', 'theater', 't-magazine', 'travel', 'upshot', 'us', 'world']
-openai_api_key = os.getenv("OPENAI_API_KEY")
 
 local_time = time.localtime()
 year = local_time.tm_year

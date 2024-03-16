@@ -108,8 +108,8 @@ max_tokens = 7144
 class ImageDisplay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.image_files = ["images/Owl.png", "images/Owl2.png", "images/Owl_as_human.png","images/Owl_as_human2.png",
-                            "images/yiCoach.png", "images/jnani2.png"]
+        self.image_files = ["images/Owl2.png", "images/Owl.png", "images/Owl_as_human.png","images/Owl_as_human2.png",
+                            "images/jnani2.png"]
         self.current_image_index=0
         # Create layout manager
         layout = QtWidgets.QVBoxLayout()
@@ -585,7 +585,7 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
    ## Semantic memory interface
    #
 
-   def search_s2(self): # release a working memory item from active memory
+   def search_s2(self): # 
       selectedText = ''
       cursor = self.input_area.textCursor()
       if cursor.hasSelection():
@@ -596,7 +596,8 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
       response,titles = self.owlCoT.s2_search(selectedText)
       self.display_response('\n'+response)
       self.display_msg('\nRefs:\n'+'\n'.join(titles))
-      
+      self.owlCoT.add_exchange(selectedText, response+'\n\nRefs:\n'+'\n'.join(titles))
+
 
    def is_valid_uri(self, uri):
       # Improved regex pattern for matching most URIs

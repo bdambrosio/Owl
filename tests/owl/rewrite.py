@@ -714,10 +714,10 @@ end the rewrite as follows:
     return rewrite
 
 
-# the first set of extract dimensions defined, for research papers
+# the first set of extract sections defined, for research papers
 
-default_dimensions = {"Overview":{'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?'},
-                      "Problem":{"instruction":'primary subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?'},
+default_sections = {"SubjectArea":{"instruction":'the primary scientific subject area of this text, both in broad scientific terms and the relevant subfield within which this work takes place?'},
+                      "Problem":{"instruction":'the primary problem, task, or objective addressed.'},
                       "Approach":{"instruction":'the specific methods, techniques, algorithms, theoretical foundations, or design principles employed to address the problem or achieve the objectives.'},
                       "Analysis":{"instruction":'the assessment or evaluation reported in the work, including data analysis, experimental results, theoretical analysis, performance metrics, or comparative studies.'},
                       "Findings":{"instruction":'the main outcomes, insights, contributions, or findings reported in the work, such as new knowledge, algorithms, theoretical advancements, or performance improvements.'},
@@ -726,9 +726,10 @@ default_dimensions = {"Overview":{'primary subject area of this text, both in br
                       "Context":{"instruction":'the relationship of the work to existing literature, the broader context of the field, and the novelty or significance of the contribution within that context.'}
                       }
 
-def shorten(resources, focus, dimensions=default_dimensions, max_tokens=80*len(default_dimensions)):
+def shorten(resources, focus='', sections=default_sections, max_tokens=80*len(default_sections)):
     """ rewrite a collection of resources (text strings) to a max length, given a focus """
     """ assumes resources in sequence? """
+    num_sections = len(sections.keys())
     resources = [resource.strip() for resource in resources]
     resource = '\n'.join(resources)
     input_length = len(resource)
@@ -740,9 +741,8 @@ def shorten(resources, focus, dimensions=default_dimensions, max_tokens=80*len(d
     text_to_shorten = ''
     rewrite = ''
     target = 0 # max_tokens
-    first_chunk = True
-    dimension_extracts = ['' for i in len(dimensions.keys())]
-    target = int(max_tokens/(len(dimensions.keys())-1)) # we rewrite each pass, so target is fixed size!
+    section_extracts = ['' for i in range(num_sections)]
+    target = int(max_tokens/num_sections) # we rewrite each pass, so target is fixed size!
 
     for n, text in enumerate(resources):
         print(f'rw.shorten section in: {len(text)}')
@@ -752,19 +752,14 @@ def shorten(resources, focus, dimensions=default_dimensions, max_tokens=80*len(d
             if n < len(resources)-1:
                 # don't process yet if this isn't the last section of text
                 continue
-        if first_chunk: # get the core of the text
-            topic = 'Overview\n'+extract_w_focus(text_to_shorten, 'Overview', '',
-                                                 dimensions['overview']['instruction'],
-                                                 80)
-            first_chunk=False
         
-        for e, key in enumerate(dimensions.keys()):
-            if key != 'overview': # skip overview after first pass, 
-                dimension_extracts[key] = extract_w_focus(text_to_shorten, key, dimension_extracts[key],
-                                                dimensions[key]['instruction'],
-                                                target)
+        for e, key in enumerate(sections.keys()):
+            print(f'{e}, {key} {type(sections[key])}')
+            section_extracts[e] = extract_w_focus(text_to_shorten, key, section_extracts[e],
+                                                    sections[key]['instruction'],
+                                                    target)
         #print(f'\n{key}:\n{extracts[key]}\n')
 
         text_to_shorten = text # start with this next time.
     print(f'rw.shorten out: {len(rewrite)} chars')
-    return dimension_extracts
+    return section_extracts

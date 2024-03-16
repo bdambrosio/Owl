@@ -52,7 +52,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec, QRect
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication, QCheckBox
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem, QLineEdit
-from OwlCoT import LLM, ListDialog, generate_faiss_id
+from pyqt_utils import ListDialog, generate_faiss_id
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel

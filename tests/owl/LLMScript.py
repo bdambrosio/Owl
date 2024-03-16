@@ -4,8 +4,6 @@ from promptrix.UserMessage import UserMessage
 from promptrix.AssistantMessage import AssistantMessage
 import semanticScholar3 as s2
 import rewrite as rw
-import OwlCoT
-import Interpreter
 import numpy as np
 import pickle
 from umap.umap_ import UMAP
@@ -13,36 +11,37 @@ import matplotlib.pyplot as plt
 from sklearn.datasets import load_digits
 
 
-
-
 class LLMScript:
     def __init__ (self, interpreter, cot):
-        
         self.interpreter = interpreter
         self.cot = cot
-        self.s2 = s2
         s2.cot = cot
         rw.cot = cot
         self.wm = interpreter.wm
         print(f'\ncreated script runner!')
         
-    def extract(self, paper_id=None, uri=None, instruction=None, dest=None, max_tokens=200, redo=False):
-        if paper_id is None:
-            if uri is None:
-                raise ValueError('need paper_id or uri!')
-            paper_pd = s2.get_paper_pd(uri=uri)
-        else:
-            paper_pd = s2.get_paper_pd(paper_id=paper_id)
+    def extract(self, paper_pd = None, paper_id=None, uri=None, instruction=None, dest=None, max_tokens=200, redo=False):
+        # works with a paper row, a in-memory paper_library_df faiss_id, or a uri (http:// or file:///)
         if paper_pd is None:
-            raise ValueError(f"cant find paper {paper_id}{uri}")
+            if paper_id is None:
+                if uri is None:
+                    raise ValueError('need paper_id or uri!')
+                paper_pd = s2.get_paper_pd(uri=uri)
+            else:
+                paper_pd = s2.get_paper_pd(paper_id=paper_id)
+            if paper_pd is None:
+                    raise ValueError(f"cant find paper {paper_id}{uri}")
+        else:
+            paper_id = paper_pd['faiss_id']
+
         if instruction is not None:
             raise ValueError('instruction arg not allowed in this version!')
-        if paper_id < 0:
-            raise ValueError('invalid paper_id or uri!')
+
         texts = s2.get_paper_sections(paper_id = paper_id)
-        resource = rw.shorten(texts, instruction, max_tokens)
+        # Note below is now an array of length 'dimensions', without headers
+        resource = rw.shorten(texts, instruction, sections=rw.default_sections, max_tokens=max_tokens)
         self.wm.assign(dest, resource)
-        return resource
+        return dict(zip(rw.default_sections, resource))
 
     #process $wm1, 'extract key themes and topics of $wm1 in a form useful as a search query.', $wm2'
     def process1(self, arg1, instruction, dest, max_tokens):
@@ -79,19 +78,18 @@ End your response with </Response>"""),
     def create_paper_summary(self, paper_id):
         """ create a short summary of a paper for use by embedder """
         summary = self.extract(paper_id=paper_id,
-                        #instruction='extract the topic or problem addressed, methods used, data presented, inferences or claims made, and conclusions',
                         dest='$summary',
                         max_tokens=800
                         )
-        #print(f'fetched paper_id {paper_id}')
+        print(f'fetched paper_id {paper_id}\n{summary}')
         if summary and type(summary) is dict:
             summary_text = '\n'.join(f"{key}\n{value}" for key, value in summary.items())
-            self.s2.set_paper_field(paper_id, 'summary', summary_text)
+            s2.set_paper_field(paper_id, 'summary', summary_text)
             print(f" summary wm contents:\n{summary_text}")
             #self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$summary", "result":'$trash'}])
             return paper_id
         else:
-            raise Error ('No summary returned from self.extract')
+            raise Exception (f'No summary returned from self.extract\n{summary}')
             
     def create_paper_extract(self, paper_id):
         """ create a long technical extract of a paper for use in RAG """
@@ -103,12 +101,12 @@ End your response with </Response>"""),
         print(f'created extract for paper_id {paper_id} len {len(extract)}')
         if extract and type(extract) is dict:
             extract_text = '\n'.join(f"{key}\n{value}" for key, value in extract.items())
-            self.s2.set_paper_field(paper_id, 'extract', extract_text)
+            s2.set_paper_field(paper_id, 'extract', extract_text)
             print(f" summary wm contents:\n{extract_text}")
             #self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$extract", "result":'$trash'}])
             return paper_id
         else:
-            raise Error ('No extract returned from self.extract')
+            raise Exception ('No extract returned from self.extract')
             
 
     def create_paper_novelty(self, paper_id):
@@ -172,12 +170,12 @@ Provide your response in the following format:
     def pre_process_paper(self, uri):
         ### extract and summarize a paper, add extract and summary to df
         # first call fetch, which creates full extract
-        paper_id = self.s2.index_url(uri=uri)
+        paper_id = s2.index_url(uri=uri)
         if paper_id is not None:
             self.create_paper_extract(paper_id)
             self.create_paper_summary(paper_id)
             # lattice add paper - tbd
-        self.s2.save_paper_df()
+        s2.save_paper_df()
         self.interpreter.interpret([{"label": 'one', "action": "tell", "arguments": "$paper1Summary", "result":'$trash'}])
         
 
@@ -185,30 +183,30 @@ Provide your response in the following format:
         #sys.exit(-1)
         # one-shot, not for regular use
         # fixup hack to update all summaries to meet claude3 lattice design
-        for index, row in self.s2.paper_library_df.iterrows():
+        for index, row in s2.paper_library_df.iterrows():
             paper_id = row['faiss_id']
             if row['extract'] is None or len(row['extract']) < 1000:
                 print(f" {index} {row['faiss_id']}")
                 self.create_paper_extract(paper_id)
             if index % 10 ==0:
                 print(f'saving...')
-                self.s2.save_paper_df()
+                s2.save_paper_df()
             
 
     def update_summaries(self):
         #sys.exit(-1)
         # one-shot, not for regular use
         # fixup hack to update all summaries to meet claude3 lattice design
-        for index, row in self.s2.paper_library_df.iterrows():
+        for index, row in s2.paper_library_df.iterrows():
             paper_id = row['faiss_id']
             #if row['summary'] is None or len(row['summary'])< 32:
             print(f" {index} {row['faiss_id']}")
             self.create_paper_summary(paper_id)
             if index % 10 ==0:
                 print(f'saving...')
-                self.s2.save_paper_df()
+                s2.save_paper_df()
             
-        self.s2.save_paper_df()
+        s2.save_paper_df()
 
     def umap(self):
         # Load the embeddings (example using digits dataset)
@@ -239,11 +237,11 @@ if __name__=='__main__':
     print('created cot')
     interp = Interpreter.Interpreter(cot)
     print('created interp')
-    si = LLMScript(interp, cot)
+    si = LLMScript(interp, s2, cot)
     print('created si')
     #si.create_paper_summary(paper_id=12218601)
     #si.create_paper_extract(paper_id=12218601)
-    paper = si.s2.get_paper_pd(paper_id=12218601)
+    #paper = si.s2.get_paper_pd(paper_id=12218601)
     #paper = si.s2.get_paper_pd(paper_id=12218601)
     #si.create_paper_novelty(93853867)
     

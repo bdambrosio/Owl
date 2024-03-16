@@ -51,7 +51,7 @@ from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QLis
 from PyQt5.QtCore import pyqtSignal
 import signal
 import OwlCoT as oiv
-from OwlCoT import LLM, ListDialog, generate_faiss_id,OPENAI_MODEL3,OPENAI_MODEL4
+from pyqt_utils import ListDialog, generate_faiss_id
 import semanticScholar3 as s2
 import wordfreq as wf
 from wordfreq import tokenize as wf_tokenize
@@ -469,13 +469,15 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
                     else:
                         ners = ' '.join(rw.extract_ners(subsection_dscp+'. '+text))
                     tokens = int(((1.0*len(text))/len(paper_summaries))*(cot.llm.context_size*2))
-                    rewrite = rw.extract(title, text, subsection_dscp, ners, tokens, template)
+                    rewrite = rw.extract(title, text, draft=None,
+                                         instruction=subsection_dscp,
+                                         ners=ners, tokens=tokens, template=template)
                     print(f'\nWRAUX in {len(text)} out {len(rewrite)}\n{rewrite}\n')
                     if len(rewrite) < len(text):
                         rewrites.append([title, rewrite])
                     else: # sometimes extract takes more words than the original, ignore it
                         rewrites.append([title, text])
-            resources = [ids, rewrites]
+                resources = [ids, rewrites]
             print('paper_writer rewritten resources:\n{json.dumps(resources, indent=2)}')
 
 

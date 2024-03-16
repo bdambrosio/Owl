@@ -49,7 +49,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QTextCodec, QRect
 from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacerItem, QApplication, QCheckBox
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem, QLineEdit
-from OwlCoT import LLM, ListDialog, generate_faiss_id
+from pyqt_utils import TextEditDialog, ListDialog, generate_faiss_id
 import wordfreq as wf
 import torch
 import torch.nn.functional as F
@@ -58,6 +58,7 @@ from transformers import AutoTokenizer, AutoModel
 import webbrowser
 import rewrite as rw
 import grobid
+
 # used for title matching
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -834,6 +835,9 @@ def index_paper(paper_dict):
     # paper_dict should be read only from here!
     if validate_paper(paper_dict):
         paper_library_df.loc[paper_index] = paper_dict
+        paper_pd=paper_library_df.loc[paper_index]
+    else:
+        raise ValueError(f"Can't create valid paper_pd\n{json.dumps(paper_dict, indent=2)}")
     text_chunks = [abstract]+extract['sections']
     section_synopses = []; section_ids = []
     rw_count = 0
@@ -853,6 +857,8 @@ def index_paper(paper_dict):
         id = index_section_synopsis(paper_dict, text_chunk)
         section_synopses.append(text_chunk)
         section_ids.append(id)
+    cot.script.create_paper_summary(paper_id=paper_faiss_id)
+    cot.script.create_paper_extract(paper_id=paper_faiss_id)
     return paper_faiss_id
 
 def sbar_as_text(sbar):
@@ -878,14 +884,21 @@ def reverse_reciprocal_ranking(*lists):
 
 
 def hyde(query):
-    hyde_prompt="Write a short sentence of 10-20 words responding to:\n{{$query}}\n\nEnd your sentence with: </RESPONSE>"
-    prompt = [SystemMessage(hyde_prompt)]
+    hyde_prompt="""Write a short sentence of 10-20 words responding to the following text:
+
+<Text>
+{{$query}}
+</Text>
+
+End your sentence with: 
+</Response>"""
+    prompt = [SystemMessage(hyde_prompt), AssistantMessage('<Response>')]
     response = cot.llm.ask({"query":query},
                            prompt,
                            max_tokens=50,
                            temp=0.2,
-                           eos='</RESPONSE>')
-    end_idx =  response.lower().rfind('</RESPONSE>'.lower())
+                           eos='</Response>')
+    end_idx =  response.lower().rfind('</Response>'.lower())
     if end_idx < 0:
         end_idx = len(response)+1
     return response[:end_idx]
@@ -993,7 +1006,8 @@ def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_tit
             elif section_id in hyde_ids:
                 index = hyde_ids.index(section_id)
                 excerpts.append(hyde_summaries[index])
-                
+    #
+    ### and finally, down-select using cluster-ranking.
     return reranked_ids, excerpts
 
 def parse_arguments():

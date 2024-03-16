@@ -18,6 +18,8 @@ import nltk
 from datetime import datetime, date, timedelta
 import openai
 from openai import OpenAI
+from LLMScript import LLMScript
+from Interpreter import Interpreter
 
 client = OpenAI()
 from promptrix.VolatileMemory import VolatileMemory
@@ -39,12 +41,17 @@ from alphawave_pyexts import LLMClient
 from alphawave_pyexts import Openbook as op
 from alphawave_pyexts import conversation as cv
 from alphawave.OSClient import OSClient
-from alphawave.MistralAIClient import MistralAIClient
-from alphawave.OpenAIClient import OpenAIClient
-from alphawave.alphawaveTypes import PromptCompletionOptions
+
+import anthropic
+from alphawave.ClaudeClient import ClaudeClient
 
 from mistralai.client import MistralClient
 from mistralai.models.chat_completion import ChatMessage
+from alphawave.MistralAIClient import MistralAIClient
+
+from alphawave.OpenAIClient import OpenAIClient
+from alphawave.alphawaveTypes import PromptCompletionOptions
+
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtGui import QFont, QKeySequence
@@ -54,11 +61,13 @@ from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacer
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 import signal
+from pyqt_utils import TextEditDialog, ListDialog
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
 from scipy import spatial
 import pdfminer
-
+import rewrite as rw
+import semanticScholar3 as s2 # 2 for the 2 's' in se...Sch...
 today = date.today().strftime("%b-%d-%Y")
 
 NYT_API_KEY = os.getenv("NYT_API_KEY")
@@ -115,13 +124,16 @@ def get_model_template():
         if template.startswith('gpt') or template.startswith('mistral-'):
             break
         template = input('template name? ').strip()
+        if template is None or len(template)==0:
+            try:
+                response = requests.post('http://127.0.0.1:5004/template')
+                if response.status_code == 200:
+                    template = response.json()['template']
+                    print(f'using local server with {template}')
+                    return template
+            except Exception as e:
+                print(f'no local server prompt template name info available {str(e)}')
     return template
-
-def generate_faiss_id(allocated_p):
-    faiss_id = random.randint(1, 333333333)
-    while allocated_p(faiss_id):
-        faiss_id = random.randint(1, 333333333)
-    return faiss_id
 
 class LLM():
    def __init__(self, ui, memory, osClient, openAIClient, template=None):
@@ -296,49 +308,6 @@ Chain of Thought:
          return None
        
 
-class TextEditDialog(QDialog):
-    def __init__(self, static_text, editable_text, parent=None, modal=True):
-        super(TextEditDialog, self).__init__(parent)
-        
-        layout = QVBoxLayout(self)
-        
-        self.static_label = QLabel(static_text, self)
-        layout.addWidget(self.static_label)
-        
-        self.text_edit = QTextEdit(self)
-        self.text_edit.setText(editable_text)
-        layout.addWidget(self.text_edit)
-        
-        self.yes_button = QPushButton('Yes', self)
-        self.yes_button.clicked.connect(self.accept)
-        layout.addWidget(self.yes_button)
-        
-        self.no_button = QPushButton('No', self)
-        self.no_button.clicked.connect(self.reject)
-        layout.addWidget(self.no_button)
-        if not modal:
-            self.setModal(False)
-        
-class ListDialog(QDialog):
-    def __init__(self, items, parent=None):
-        super(ListDialog, self).__init__(parent)
-        
-        self.setWindowTitle('Choose an Item')
-        
-        self.list_widget = QListWidget(self)
-        for item in items:
-            self.list_widget.addItem(item)
-        
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.list_widget)
-        layout.addWidget(self.button_box)
-        
-    def selected_index(self):
-        return self.list_widget.currentRow()
 
 class OwlInnerVoice():
     def __init__(self, ui=None, template=None):
@@ -354,9 +323,10 @@ class OwlInnerVoice():
         self.functions = FunctionRegistry()
         self.tokenizer = GPT3Tokenizer()
         self.memory = VolatileMemory({'input':'', 'history':[]})
-        self.load_conv_history()
-        self.llm = LLM(ui, self.memory, self.osClient, self.openAIClient, self.template)
         self.jsonValidator = JSONResponseValidator()
+        self.llm = LLM(ui, self.memory, self.osClient, self.openAIClient, self.template)
+        self.interpreter = Interpreter(self)
+        self.script = LLMScript(self.interpreter, self)
         self.max_tokens = 4000
         self.keys_of_interest = ['title', 'abstract', 'uri']
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
@@ -389,7 +359,8 @@ class OwlInnerVoice():
                        "Technical Assistance": 'Topics involving programming, coding, and troubleshooting issues.',
                        }
 
-        
+        rw.cot = self #Make sure rewrite knows how to get to llm 
+
     #def put_awm(self, name, value):
     #    if name not in self.active_wm:
     #        self.create_awm(value, name=name)
@@ -418,7 +389,7 @@ class OwlInnerVoice():
       h_len = 0
       save_history = []
       for item in range(len(history)-1, -1, -1):
-         if h_len+len(json.dumps(history[item])) < 12000:
+         if h_len+len(json.dumps(history[item])) < 24000:
             h_len += len(str(history[item]))
             save_history.append(history[item])
       save_history.reverse()
@@ -440,7 +411,7 @@ class OwlInnerVoice():
           self.memory.set('history', [])
 
     def add_exchange(self, input, response):
-       #print(f'add_exchange {input} {response}')
+       print(f'add_exchange {input} {response}')
        history = self.memory.get('history')
        usr_msg = {'role':'user', 'content': input.strip()+'\n'}
        history.append(usr_msg)
@@ -450,6 +421,7 @@ class OwlInnerVoice():
        asst_msg = {'role': 'assistant', 'content': response.strip()+'\n'}
        history.append(asst_msg)
        self.memory.set('history', history)
+       print(f'add_exchange history {history}')
        with open('owl_ch.json', 'a') as f:
            f.write(json.dumps(usr_msg)+'\n')
            f.write(json.dumps(asst_msg)+'\n')
@@ -610,7 +582,7 @@ class OwlInnerVoice():
           #lines = inputLog.split('\n')
           lines = inputLog[-2000:]
         
-          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own. End your response with '/END' 
+          analysis_prompt_text = f"""Analyze the input from Doc below for it's emotional tone, and respond with a few of the prominent emotions present. Note that the later lines are more recent, and therefore more indicitave of current state. Select emotions that best match the emotional tone of Doc's input. Remember that you are analyzing Doc's state, not your own. End your response with '</Response>' 
 Doc's input:
 {{{{$input}}}}
 """
@@ -618,9 +590,9 @@ Doc's input:
           analysis_prompt = [
              SystemMessage(short_profile),
              UserMessage(analysis_prompt_text),
-             AssistantMessage(' ')
+             AssistantMessage('<Response')
           ]
-          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=250, temp=0.2, eos='/END')
+          analysis = self.llm.ask(lines, analysis_prompt, max_tokens=250, temp=0.2, eos='</Response>')
           if analysis is not None:
               self.docEs = analysis.strip().split('\n')[0:2] # just use the first 2 pp
           return self.docEs
@@ -976,7 +948,7 @@ Input: {{{{$input}}}}
         prompt_msgs=[
             SystemMessage(self.core_prompt(include_actions=False)),
             ConversationHistory('history', 1200),
-            UserMessage((f"\nCurrent interaction topic:\n{json.dumps(wm_topic)}\n\n" if wm_topic is not None else '')+self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\nRespond with the selected action in plain JSON format without any Markdown or code block formatting as shown earlier.'),
+            UserMessage((f"\nCurrent interaction topic:\n{json.dumps(wm_topic)}\n\n" if wm_topic is not None else '')+self.available_actions()+'\n\n<INPUT>\n{{$input}}\n</INPUT>\nRespond with the selected action in plain JSON format without any Markdown or code block formatting as in the above examples.'),
             AssistantMessage('')
         ]
         print(f'action_selection starting analysis')
@@ -1038,7 +1010,9 @@ Input: {{{{$input}}}}
             elif type(content) == dict and 'action' in content and content['action']=='library':
                 query = self.confirmation_popup(content['action'], content['argument'])
                 if query:
+                   print('COT calling self.s2_search')
                    text, refs = self.s2_search(query)
+                   print('   ...returned from self.s2_search')
                    self.add_exchange(query, text+'\n\nRefs:\n'+'\n'.join(refs))
                    return {"gpt4":text}
             elif type(content) == dict and 'action' in content and content['action']=='question':
@@ -1193,10 +1167,10 @@ User Input:
        #   wakeup_messages += f' - is web search service started?\n'
        prompt = [SystemMessage(self.core_prompt()),
                  ConversationHistory('history', 400),
-                 UserMessage(f'end your response with "/END"\n\n{greeting}'),
-                 AssistantMessage('')
+                 UserMessage(f'End your response with "</Greeting>"\n\n{greeting}'),
+                 AssistantMessage('<Greeting>')
                  ]
-       response = self.llm.ask('',prompt, temp=0.1, max_tokens=120, eos='/END')
+       response = self.llm.ask('',prompt, temp=0.1, max_tokens=120, eos='</Greeting>')
        if response is None:
            wakeup_messages += f' - is llm service started?\n'
        else:
@@ -1245,11 +1219,11 @@ User Input:
             AssistantMessage('')
             ]
         
-        feelings = self.llm.ask('Owl, if you had feelings, what would you be feeling right now? Answer in 28 words or less without disclaimers. End your response with "/END"', prompt, template = self.template, temp=.6, max_tokens=48, eos='/END')
+        feelings = self.llm.ask('Owl, if you had feelings, what would you be feeling right now? Answer in 28 words or less without disclaimers. End your response with "</Response>"', prompt, template = self.template, temp=.6, max_tokens=48, eos='</Response>')
         if feelings is not None:
             self.add_exchange("Owl, how are you feeling?", feelings)
             results['ai_feelings'] = feelings
-        goals = self.llm.ask('What would Owl like to be doing right now in 32 words or less? End your response with "/END"', prompt, template = self.template, temp=.6, max_tokens=48, eos='/END')
+        goals = self.llm.ask({"input":'What would Owl like to be doing right now in 32 words or less? End your response with </Response>'}, prompt, template = self.template, temp=.6, max_tokens=48, eos='</Response>')
         if goals is not None:
             self.add_exchange("Owl, what would you wish for?", goals)
             results['ai_goals'] = goals
@@ -1266,6 +1240,8 @@ User Input:
         
     def reflect(self):
        global es
+       if True:
+           return
        results = {}
        print('reflection begun')
        profile_text = self.short_prompt()
@@ -1319,16 +1295,38 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
  
 
     def summarize(self, query, response, profile):
-      prompt = [
-         SystemMessage(profile),
-         UserMessage(f'Following is a Task and background information from an external processor. Respond to the Task, using the external processor Response as well as known fact, logic, and reasoning. Be aware that the external processor Response may be partly or completely irrelevant. Respond in a professional tone.\nTask:\n{query}\nResponse:\n{response}'),
-         AssistantMessage('')
-      ]
-      response = self.llm.ask(response, prompt, template = self.template, temp=.1)
-      if response is not None:
-         return '\n'+response+'\n'
-      else: return 'summarize failure'
+        if self.ui is not None and hasattr(self.ui, 'max_tokens_combo'):
+            max_tokens= int(self.ui.max_tokens_combo.currentText())
+        else:
+            max_tokens = 600
+        
+        prompt = [
+            SystemMessage(profile),
+            UserMessage(f"""Following is a Task and Information from an external processor. 
+Write an essay responding to the Task, using the provided Information below as well as known fact, logic, and reasoning. 
+            
+<Task>
+{query}
+</Task>
 
+Be aware that the provided Information below may be partly or completely irrelevant. 
+
+<Information>
+{response}
+</Information>
+
+Your essay should present specific facts, findings, methods, inferences, or conclusions related to the Task.
+Respond only with the essay of no more than {int(max_tokens*.67)} tokens in length, in plain, unformatted, text. 
+Do not include any additional discursive or explanatory text.
+End your response with: </END>
+"""),
+            AssistantMessage('')
+        ]
+        response = self.llm.ask(response, prompt, template = self.template, eos='</END>', temp=.1, max_tokens=max_tokens)
+        if response is not None:
+            return '\n'+response+'\n'
+        else: return 'summarize failure'
+        
     def wiki(self, query, profile):
        short_profile = self.short_prompt()
        query = query.strip()
@@ -1339,7 +1337,7 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
           if self.op is None:
              self.op = op.OpenBook()
           wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(query, wiki_lookup_response, short_profile)
+          wiki_lookup_summary=self.summarize(f'Write an essay about {query} based on known fact, reasoning, and information provided below.', wiki_lookup_response, 'You are a skilled professional technical writer, writing for a knowledgeable audience.')
           return wiki_lookup_summary
 
     def s2_search(self, query):
@@ -1351,7 +1349,13 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
        titles = [item[0] for item in summaries]
        titles = list(set(titles))
        texts = [item[1] for item in summaries]
-       summary=self.summarize(query, '\n'.join(texts)[:24000], short_profile)
+       # if texts too long, use rw.shorten? - bad idea, omits too much.
+       # tbd - try downselect via llm rerank?
+       information = '\n'.join(texts)
+       #if len(information) > 1.5* self.llm.context_size:
+       #    information = rw.shorten(texts, sections=rw.default_sections, max_tokens=self.llm.context_size-1000)
+       summary=self.summarize(f'Write an essay about {query} based on known fact, reasoning, and information provided below.', information[:int(self.llm.context_size*2)], 'You are a skilled professional technical writer, writing for a knowledgeable audience.')
+       print('returning from self.s2_search')
        return summary, titles
 
     def gpt4(self, query, profile):

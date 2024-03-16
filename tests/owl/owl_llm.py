@@ -45,6 +45,9 @@ templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
+             "Qwen1.5-72B-5.0bpw-h6-exl2-liberated":"chatml",
+             "Qwen1.5-72B-6.0bpw-h6-exl2-liberated":"chatml",
+             "orca-2-13b-16bit":"chatml",
              "Senku-70B-Full-6.0bpw-h6-exl2": "chatml",
              "Smaug-Mixtral-8.0bpw-exl2": "llama-2",
              "Smaug-Mixtral-6.5bpw-exl2": "llama-2",
@@ -119,6 +122,7 @@ else:
     config = ExLlamaV2Config()
     config.scale_alpha_value=1.0
     config.model_dir = models_dir+model_name
+    #config.max_seq_len=context_size
     #config.max_input_len = min (4096, context_size)
     config.prepare()
 
@@ -131,13 +135,19 @@ else:
     elif 'tulu' in model_name:
         model.load([20, 23, 23])
     elif 'miqu-1-70b' in model_name:
+        print('miqu-1-70b load')
         model.load([20, 20, 20])
     elif 'ixtral' in model_name:
         print(f' mixtral load')
         model.load([18, 20, 23])  # leave room on gpu 0 for other stuff, eg embed
+    elif 'Qwen1.5' in model_name:
+        print(f' QWen1.5 load')
+        model.load([15, 16, 23])  #
+        context_size=6144
+        config.max_seq_len=context_size
     else:
         model.load([22, 22, 22])
-    
+    print('model load done..')
     tokenizer = ExLlamaV2Tokenizer(config)
 
 if model_name == 'phi-2':
