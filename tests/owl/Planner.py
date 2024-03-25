@@ -298,20 +298,20 @@ Your conversation style is warm, gentle, humble, and engaging. """
       # Loop for obtaining user responses
       # Generate interview questions for the remaining steps using GPT-4
       interview_instructions = [
-         ("needs", "Generate an interview question to add details to the task the user wants to accomplish."),
-         ("background", "Generate a followup interview question about any additional requirements of the task."),
+         ("needs", "Generate a question to add details to the task the user wants to accomplish."),
+         ("background", "Generate a followup question about any additional requirements of the task."),
          ("observations", "Summarize the information about the task, and comment on any incompleteness in the definition."),
       ]
       if short:
          #only ask one question
          interview_instructions = [
-         ("background", "Generate a followup interview question about any additional requirements of the task."),
+         ("background", "Generate a question about any additional requirements of the task."),
       ]
-      messages = [SystemMessage("Your task is to interview the user to expand the known information about a task to be accomplished. The task title is "+task_dscp)]
+      messages = [SystemMessage("Your task is to interview the user to expand the information about a task to be accomplished. The task title is "+task_dscp)]
       for step, instruction in interview_instructions:
          messages.append(UserMessage(instruction+"""\nRespond using the following JSON template:
 
-{"question":"'<question text>'}
+{"question":'<question to ask>'}
 
 Respond only with the above JSON, without any commentary or explanatory text
 """))
@@ -325,7 +325,7 @@ Respond only with the above JSON, without any commentary or explanatory text
                past = plan_state.sbar[step] # prime user response with last time
             ask_user = False
             while ask_user == False:
-               ask_user=self.cot.confirmation_popup(user_prompt, past)
+               ask_user=self.cot.confirmation_popup(str(user_prompt), str(past))
             sbar[step] = {'q':user_prompt, 'a':ask_user}
             messages.append(AssistantMessage(user_prompt))
             messages.append(UserMessage(ask_user))

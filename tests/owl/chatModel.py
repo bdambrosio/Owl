@@ -1,4 +1,4 @@
-import os
+import os, sys
 import re
 import traceback
 import requests
@@ -95,7 +95,7 @@ class Interactions:
         self.memory = VolatileMemory({'input':'', 'history':[]})
         self.owl = oiv(None)
         
-        self.interactions = self.read_interaction_history('owl_ch.json')
+        self.interactions = self.read_interaction_history('owl_data/owl_ch.json')
         self.jsonValidator = JSONResponseValidator()
         self.max_tokens = 8000
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
@@ -119,53 +119,90 @@ class Interactions:
 
     def determine_thread(self, user_input, current_thread_name, active_threads, conversation_history):
         # Prepare the prompt for the LLM
-        prompt = "Instructions:\n"
-        prompt += "1. Analyze the user input and determine the most relevant thread from among the active threads.\n"
-        prompt += "2. If the user input introduces a new topic or thread, suggest a new thread-name.\n"
-        prompt += """3. The thread-name response format is the thread_name, followed by a ':' followed by a short explanation, of no more than 10 words, of the thread-name. For example:
+        prompt = """Instructions:
+Analyze the user input and determine if it is a continuation of an existing conversation thread by comparing the new user input to the descriptions of existing thread-names.
+If so, respond with the thread-name of the most closely aligned existing thread. 
+This should be the preferred option in most cases. 
 
-chat:informal friendly conversation with no specific goal
+Otherwise, perhaps the user has introduced a new thread or subthread. 
+In that case:
+1.Pick a new thread-name of no more than 8 tokens.
+2.If the new thread-name contains an existing thread-name or is a subtopic of an existing thread:
+ - test if the user input matches the existing thread-name description. If so, prepend the existing thread-name, followed by '.', to its name, and eliminate any duplication. For example, if there is an existing thread named 'miRNA' and the new thread-name is 'miRNA disregulation in cancer', you should respond with a new thread-name of 'miRNA.disregulation in cancer'.
+ - otherwise, use the newly created thread-name without any prepend.
+3. When responding with a new thread-name, append a short description.
+The new thread response format is the thread-name, followed by a ':' followed by a short description (of no more than 32 tokens), of the thread-content. 
 
+The description should be sufficient to distinguish future thread content from other, similar, active threads, while general enough to capture future content in the new thread topic area.
+
+<Example New Thread>
+games: video and other computer games
+</Example New Thread>
+
+Do not include any discursive or explanatory text in your response.\
+Remember to end your response with:
+</Thread>
 """
-        prompt += "4. Do not include any discursive or explanatory text.\n"
-        prompt += "5. End your response with '\n</ThreadName>'."
     
         # Add active threads to the prompt
-        prompt += "Active Threads:\n"
+        prompt += "<ActiveThreads>\n"
         for thread_name in active_threads.keys():
             prompt += f" - {thread_name}: {active_threads[thread_name]}\n"
+        prompt += "</ActiveThreads>\n"
     
         # Add conversation history to the prompt
-        prompt += "\nRecent Conversation History, to aid in determining thread change:\n"
+        prompt += f'\nLast active thread: {current_thread_name}\n'
+        prompt += "\nlast interaction in that thread, to aid in determining if thread change:\n"
         for interaction in conversation_history:
             prompt += f" - {interaction['role']}: {interaction['content'].strip()}\n"
     
-        prompt += f'\nCurrently active thread: {current_thread_name}\n'
         # Add instructions for the LLM
-        prompt += f"User Input: {user_input}\n\n"
+        prompt += f"New User Input: {user_input}\n\n"
         
         # Ask the LLM to determine the thread
-        llm_response = self.owl.llm.ask({}, [SystemMessage(prompt), AssistantMessage('<ThreadName>')],
-                                        temp=0.1, eos='</ThreadName>', max_tokens=25)
+        llm_response = self.owl.llm.ask({}, [SystemMessage(prompt), AssistantMessage('<Thread>')],
+                                        temp=0.1, eos='</Thread>', max_tokens=48)
     
+        if type(llm_response) is not str:
+            return None, None
         # Process the LLM's response
         llm_response = llm_response.strip()
+        llm_response = llm_response.replace('\\\n','').strip()
+        response_parts = llm_response.split(':')
+        proposed_thread_name = response_parts[0].strip()
+        print(proposed_thread_name)
+
+        thread_dscp=''
+        if len(response_parts)  > 1:
+            thread_dscp = response_parts[1].strip()
+
+        # only allow one level of subthread
+        name_parts = proposed_thread_name.split('.')
+        depth = 0
+        thread_name = ''
+        for name_part in name_parts:
+            name_part = name_part.strip()
+            if len(name_part) > 2:
+                if depth > 0:
+                    thread_name+= '.'
+                thread_name += name_part
+                depth += 1
+                if depth >=2:
+                    break
+            
+        if thread_name not in active_threads or len(active_threads[thread_name])<5 and len(thread_dscp) > 5:
+            active_threads[thread_name]=thread_dscp
+            print(f"\nNew: {thread_name}: {thread_dscp}\n")
     
-        if llm_response in active_threads:
-            # User input belongs to an existing thread
-            return llm_response
-        else:
-            # User input introduces a new thread
-            new_thread_name = llm_response
-            return new_thread_name
+        return thread_name, thread_dscp
 
     #
     ## Topic analysis, the main point of this file
     #
 
     def topic_analysis(self):
-        for entry in self.owl.wm_topics:
-            print(self.owl.wm_entry_printform(entry))
+        #for entry in self.owl.wm_topics:
+            #print(self.owl.wm_entry_printform(entry))
             
         updates = {}
         for i, interaction in enumerate(self.interactions):
@@ -199,7 +236,7 @@ chat:informal friendly conversation with no specific goal
                        updates[topic_name] = []
                     updates[topic_name].append(update)
 
-        with open('topic_interaction_updates.json', 'w') as j:
+        with open('owl_data/topic_interaction_updates.json', 'w') as j:
            json.dump(updates, j)
 
         # process interaction updates for a topic into a single thread update for that topic
@@ -210,7 +247,7 @@ chat:informal friendly conversation with no specific goal
 
 
     def create_thread_updates(self):
-        with open('topic_interaction_updates.json', 'r') as j:
+        with open('owl_data/topic_interaction_updates.json', 'r') as j:
            interaction_updates = json.load(j)
          
         thread_updates = {}
@@ -248,12 +285,12 @@ Respond only in JSON using the above format.
                  topic_name = 'Topic: '+update['topic']
                  thread_updates[topic_name] = update
               
-        with open('topic_thread_updates.json', 'w') as j:
+        with open('owl_data/topic_thread_updates.json', 'w') as j:
            json.dump(thread_updates, j)
 
 
     def update_topics(self):
-       with open('topic_thread_updates.json', 'r') as j:
+       with open('owl_data/topic_thread_updates.json', 'r') as j:
           topic_updates = json.load(j)
          
        # topic thread_updates uses fully qualified 'Topic: <topic_name>' as keys for topic items
@@ -362,21 +399,26 @@ if __name__ == '__main__':
     interact = Interactions('zephyr')
     active_threads = {"chat":'general conversation not focused on a specific task or objective.',
                       "support":'user has asked for emotional support.'}
-    for i in range(200):
-        if interact.interactions[-i]['role'] != 'user':
+    turns = interact.interactions
+    current_thread_name='chat' # start assuming chat
+    last_n = len(turns)-6 # only process last_n turns
+    print(last_n)
+    last_n=300
+    for i in range(-last_n, 0,1):
+        turn_i = len(turns)+i
+        if turns[turn_i]['role'] != 'user' or len(turns[turn_i]['content']) < 16:
             continue
-        ch = interact.interactions[-(i+5):-i]
-        current_thread_name='chat'
-        thread_name = interact.determine_thread(interact.interactions[-i]['content'], current_thread_name, active_threads, ch).strip()
-        thread_name = thread_name.replace('\\\n','')
-        thread_parts = thread_name.split(':')
-        thread_name = thread_parts[0].strip()
-        thread_dscp=''
-        if len(thread_parts)  > 1:
-            thread_dscp = thread_parts[1].strip()
+        user_input = turns[turn_i]['content']
+        recent_conversation_history = turns[turn_i]['content']
+        thread_name, thread_dscp = interact.determine_thread(turns[turn_i]['content'],
+                                                current_thread_name, active_threads, turns[turn_i-2:turn_i])
+        if thread_name is None:
+            continue
         if thread_name not in active_threads or len(active_threads[thread_name])<5 and len(thread_dscp) > 5:
             active_threads[thread_name]=thread_dscp
-        print(f"{thread_name}: {thread_dscp}\n")
+            print(f"\n New {thread_name}: {thread_dscp}")
+        print(f"{thread_name}")
+            
         current_thread_name = thread_name
     #i.update_topics()
     print(json.dumps(active_threads, indent=2))

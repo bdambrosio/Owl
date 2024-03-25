@@ -1,6 +1,9 @@
 #
 ## Working Memory for plan execution: a simple key-addressable dict for now
 ## need to integrate this with OwlCot workingMemory.
+
+### currently not used anywhere?
+
 #
 
 class WorkingMemory:

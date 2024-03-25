@@ -6,7 +6,7 @@ class Editor(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.filename = "Owl.pkl"
+        self.filename = "owl_data/Owl.pkl"
         self.load()
         layout = QVBoxLayout()
         self.edit = QTextEdit()

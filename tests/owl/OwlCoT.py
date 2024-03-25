@@ -61,6 +61,7 @@ from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacer
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem
 import signal
+import pyqt_utils
 from pyqt_utils import TextEditDialog, ListDialog
 # Encode titles to vectors using SentenceTransformers 
 from sentence_transformers import SentenceTransformer
@@ -142,7 +143,8 @@ class LLM():
         self.openAIClient=openAIClient
         self.osClient= osClient
         self.mistralAIClient = MistralAIClient(apiKey=os.environ["MISTRAL_API_KEY"])
-        print(f'mistral client {self.mistralAIClient}')
+        self.anthropicClient = ClaudeClient(apiKey=os.environ["CLAUDE_API_KEY"])
+
         self.template = template # default prompt template.
         print(f'LLM initializing default template to {template}')
         self.conv_template = cv.get_conv_template(self.template)
@@ -163,7 +165,7 @@ This may include removing any special characters that will cause loads to fail.
 This repair should be performed recursively, including all field values.
 The provided TextString may have been prematurely truncated. 
 If so, the repair should include adding any necessary JSON termination.
-Return only the repaired JSON without any Markdown or code block formatting.
+Return only the repaired JSON without any further formatting.
 
 Problem 1: {"action": 'tell', "statement":'xyz
 Chain of Thought: 
@@ -228,6 +230,9 @@ Chain of Thought:
           elif "mistral-" in self.template:
               client=self.mistralAIClient
               #print(f'llm.ask using MistralAIClient {template}')
+          elif "claude" in self.template:
+              client=self.anthropicClient
+              #print(f'llm.ask using anthropicClient {template}')
           else:
               client = self.osClient
           
@@ -236,7 +241,9 @@ Chain of Thought:
           self.context_size=16000
       if client==self.mistralAIClient or  'MistralAIClient' in str(type(client)):
           self.context_size=16000 # I've read mistral uses sliding 8k window
-      if client==self.osClient or  'OSClient' in str(type(client)):
+      if client==self.anthropicClient or 'ClaudeClient' in str(type(client)):
+          self.context_size=32768 # 
+      if client==self.osClient or 'OSClient' in str(type(client)):
           self.context_size=12000 # conservative local mis/mixtral default
           try:
               response = requests.post('http://127.0.0.1:5004/template')
@@ -258,8 +265,7 @@ Chain of Thought:
           # alphawave will now include 'json' as a stop condition if validator is JSONResponseValidator
           # we should do that for other types as well! - e.g., second ``` for python (but text notes following are useful?)
           response = ut.run_prompt(client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
-          #response = ut.run_wave (client, input if type(input) is dict else {"input":input}, prompt, options, self.memory, self.functions, self.tokenizer)
-          #print(f'\nask {type(response)}\n{response}')
+
           # check for total fail to get response
           if type(response) is not dict or 'status' not in response or response['status'] != 'success':
               print(f'\nask fail, response not dict or status not success {template} {max_tokens}\n {response}')
@@ -301,6 +307,10 @@ Chain of Thought:
 
           # not expecting validatable syntax, so just return content
           content = response['message']['content']
+          if eos is not None: # claude returns eos
+              eos_index=content.rfind(eos)
+              if eos_index > -1:
+                  content=content[:eos_index]
           return content
       except Exception as e:
          traceback.print_exc()
@@ -395,13 +405,13 @@ class OwlInnerVoice():
       save_history.reverse()
       data['history'] = save_history
       # Pickle data dict with all vars  
-      with open('Owl.pkl', 'wb') as f:
+      with open('owl_data/Owl.pkl', 'wb') as f:
          pickle.dump(data, f)
 
     def load_conv_history(self):
        global memory
        try:
-          with open('Owl.pkl', 'rb') as f:
+          with open('owl_data/Owl.pkl', 'rb') as f:
              data = pickle.load(f)
              history = data['history']
              print(f'loading conversation history')
@@ -433,7 +443,7 @@ class OwlInnerVoice():
        if he.returncode == 0:
           try:
              print(f'reloading conversation history')
-             with open('Owl.pkl', 'rb') as f:
+             with open('owl_data/Owl.pkl', 'rb') as f:
                 data = pickle.load(f)
                 history = data['history']
                 # test each form for sanity
@@ -466,7 +476,7 @@ class OwlInnerVoice():
     ###
     def save_workingMemory(self):
         # note we need to update wm when awm changes! tbd
-        with open('OwlDocHash.pkl', 'wb') as f:
+        with open('owl_data/OwlDocHash.pkl', 'wb') as f:
           data = {}
           data['docHash'] = self.docHash
           pickle.dump(data, f)
@@ -475,15 +485,15 @@ class OwlInnerVoice():
        docHash_loaded = False
        try:
           self.docHash = {}
-          with open('OwlDocHash.pkl', 'rb') as f:
+          with open('owl_data/OwlDocHash.pkl', 'rb') as f:
              data = pickle.load(f)
              self.docHash = data['docHash']
-             print(f'loaded {len(self.docHash.keys())} items from OwlDockHash.pkl')
+             print(f'loaded {len(self.docHash.keys())} items from owl_data/OwlDockHash.pkl')
              docHash_loaded = True
        except Exception as e:
           # no docHash or load failed, reinitialize
           self.docHash = {}
-          with open('OwlDocHash.pkl', 'wb') as f:
+          with open('owl_data/OwlDocHash.pkl', 'wb') as f:
              data = {}
              data['docHash'] = self.docHash
              pickle.dump(data, f)
@@ -652,7 +662,7 @@ Doc's input:
         if name is None or confirm:
             name = self.confirmation_popup("name?", str(self.get_workingMemory_active_names()))
         if name is None or name not in self.active_wm:
-            id = generate_faiss_id(lambda x: (x in self.docHash)) 
+            id = pyqt_utils.generate_faiss_id(lambda x: (x in self.docHash)) 
         else:
             id = self.active_wm[name]['id']
 
@@ -875,7 +885,7 @@ To access full articles, use the action 'article'.
 
     def available_actions(self):
        return """
-Respond in a plain JSON format without any Markdown or code block formatting.
+Respond in a plain JSON format without any further formatting.
 Available actions include:
 
 <ACTIONS>
@@ -888,7 +898,7 @@ Available actions include:
 - web: Search the web for detailed or ephemeral or transient information not otherwise available. First generate a query text argument suitable for google search.  Example: {"action":"web","argument":"Weather forecast for Berkeley, CA for January 1, 2023", "reasoning":"reasons for choosing web"}
 - wiki: Search the local Wikipedia database for scientific or technical information not available from known fact or reasoning. First generate a query text suitable for wiki search. Example: {"action":"wiki","argument":"What is the EPR paradox in quantum physics?", "reasoning":"this is a general information question for which I do not know sufficient fact or information"}
 
-Respond in a plain JSON format without any Markdown or code block formatting, as shown in the above examples.
+Respond in a plain JSON format with no further formatting, as shown in the above examples.
 </ACTIONS>
 
 Given the following user input, reason about which action is needed at this time. concisely record your reasoning in the "reasoning" field of the response. 
@@ -898,7 +908,7 @@ If you need more detail or personal information, consider using the 'question' a
 If you need impersonal information or world knowledge, consider using the 'wiki' or 'web' action.
 If you need additional transient or ephemeral information like current events or weather, consider using the 'web' action.
 The default action is to use tell to directly respond.
-Respond in a plain JSON format without any Markdown or code block formatting as shown in the above examples.
+Respond in a plain JSON format with no further formatting or format information as shown in the above examples.
 
 """
 
@@ -913,7 +923,7 @@ Respond in a plain JSON format without any Markdown or code block formatting as 
             prompt = [SystemMessage(f"""{self.v_short_prompt()}
 Your task is to determine the main topic of the following user input.
 The topic must be one of:\n{self.format_topic_names()}
-Respond in a plain JSON format without any Markdown or code block formatting, and without any comments or explanatory text, using the following format:
+Respond in a plain JSON format with no further formatting or format information, and without any comments or explanatory text, using the following format:
 
 {{"topic": '<topic_name>'}}
                       
@@ -1305,18 +1315,19 @@ Choose at most one or two thoughts, and limit your total response to about 120 w
             UserMessage(f"""Following is a Task and Information from an external processor. 
 Write an essay responding to the Task, using the provided Information below as well as known fact, logic, and reasoning. 
             
-<Task>
-{query}
-</Task>
-
-Be aware that the provided Information below may be partly or completely irrelevant. 
+Be aware that the provided Information below may be irrelevant. 
 
 <Information>
 {response}
 </Information>
 
+<Task>
+{query}
+</Task>
+
+Write an essay responding to the Task, using the provided Information above as well as known fact, logic, and reasoning. 
 Your essay should present specific facts, findings, methods, inferences, or conclusions related to the Task.
-Respond only with the essay of no more than {int(max_tokens*.67)} tokens in length, in plain, unformatted, text. 
+Respond only with the essay of about {int(max_tokens*.67)} tokens in length, in plain, unformatted, text. 
 Do not include any additional discursive or explanatory text.
 End your response with: </END>
 """),
@@ -1337,27 +1348,76 @@ End your response with: </END>
           if self.op is None:
              self.op = op.OpenBook()
           wiki_lookup_response = self.op.search(query)
-          wiki_lookup_summary=self.summarize(f'Write an essay about {query} based on known fact, reasoning, and information provided below.', wiki_lookup_response, 'You are a skilled professional technical writer, writing for a knowledgeable audience.')
+          wiki_lookup_summary=self.summarize(query=f'Write an essay about {query} based on known fact, reasoning, and information provided below.',
+                                             response=wiki_lookup_response,
+                                             profile='You are a skilled professional technical writer, writing for a knowledgeable audience.')
           return wiki_lookup_summary
 
-    def s2_search(self, query):
-       short_profile = self.short_prompt()
-       query = query.strip()
-       ids, summaries = self.ui.s2.search(query)
-       #print(f' s2_search query {query}, result {type(ids)}, {type(summaries[0])}')
-       #print(f' s2_search summaries\n{summaries}')
-       titles = [item[0] for item in summaries]
-       titles = list(set(titles))
-       texts = [item[1] for item in summaries]
-       # if texts too long, use rw.shorten? - bad idea, omits too much.
-       # tbd - try downselect via llm rerank?
-       information = '\n'.join(texts)
-       #if len(information) > 1.5* self.llm.context_size:
-       #    information = rw.shorten(texts, sections=rw.default_sections, max_tokens=self.llm.context_size-1000)
-       summary=self.summarize(f'Write an essay about {query} based on known fact, reasoning, and information provided below.', information[:int(self.llm.context_size*2)], 'You are a skilled professional technical writer, writing for a knowledgeable audience.')
-       print('returning from self.s2_search')
-       return summary, titles
 
+
+    def s2_search_basic(self, query, max_tokens=None):
+        if max_tokens is None and self.ui is not None and hasattr(self.ui, 'max_tokens_combo'):
+            max_tokens = int(self.ui.max_tokens_combo.currentText())
+        short_profile = self.short_prompt()
+        query = query.strip()
+
+        requirements = self.script.sufficient_response(query)
+        ids, summaries = self.s2.search(query, dscp=requirements, top_k=int(max_tokens/100))
+        titles = [item[0] for item in summaries]
+        titles = set(titles)
+        texts = [item[1] for item in summaries]
+        facts = self.script.facts(query, ids, texts)
+        # put facts at end, long context often loses beginning info! (haystack)
+        information = '\n'.join(texts)+'\n\n'+facts
+        info_start = int(max(0,len(information)-int(self.llm.context_size*2)))
+        summary=self.summarize(query=f'Write a technical report on {query}, based on known fact, reasoning, and information provided below. Limit your response to {max_tokens} tokens',
+                               response=information[info_start:],
+                               profile='You are a skilled professional technical writer, writing for a knowledgeable audience.')
+        return summary, titles
+       
+    def s2_search(self, query):
+        summary, titles = self.s2_search_basic(query, max_tokens=int(1.33*int(self.ui.max_tokens_combo.currentText())))
+        prompt=[SystemMessage("""You are a skilled professional technical writer, writing for a knowledgeable audience.
+Given this overall instruction:
+
+<Instruction>
+{{$query}}
+</Instruction>
+
+And this draft short technical report response:
+
+<Report>
+{{$response}}
+</Report>
+
+What unanswered questions or opportunities to add detail remain?
+Respond in list format as shown in the following example:
+
+<Questions>
+- <missing detail>
+- <unanswered question>
+- ...
+</Questions>
+
+Respond ONLY with the above information, without any further formatting or explanatory text.
+End your response with </Questions>
+
+"""),
+                AssistantMessage('<Questions>')
+                ]
+        followup_queries = self.llm.ask({"query":query, "response":summary}, prompt, eos='</Questions>', max_tokens=400)
+        if followup_queries is not None:
+            summary+= '\nFollowup:\n'
+            followup_queries = followup_queries.split('- ')
+            for followup_query in followup_queries[:3]:
+                if len(followup_query.strip())> 2 and '</Questions>' not in followup_query:
+                    print(f'followup query: {followup_query}')
+                    followup_summary, followup_titles =\
+                        self.s2_search_basic(followup_query, max_tokens=int(.5*int(self.ui.max_tokens_combo.currentText())))
+                    summary+= '\n'+followup_summary
+                    titles.update(followup_titles)
+        return summary, titles
+                
     def gpt4(self, query, profile):
        short_profile = self.short_prompt()
        query = query.strip()

@@ -50,10 +50,8 @@ from PyQt5.QtWidgets import QPushButton, QHBoxLayout, QComboBox, QLabel, QSpacer
 from PyQt5.QtWidgets import QVBoxLayout, QTextEdit, QPushButton, QDialog, QListWidget, QDialogButtonBox
 from PyQt5.QtWidgets import QMainWindow, QMessageBox, QWidget, QListWidget, QListWidgetItem, QLineEdit
 from pyqt_utils import TextEditDialog, ListDialog, generate_faiss_id
-import wordfreq as wf
 import torch
 import torch.nn.functional as F
-from wordfreq import tokenize as wf_tokenize
 from transformers import AutoTokenizer, AutoModel
 import webbrowser
 import rewrite as rw
@@ -127,12 +125,13 @@ def get_semantic_scholar_meta(s2_id):
 
 def paper_library_df_fixup():
     #paper_library_df['abstract'] = paper_library_df['summary']
+    #paper_library_df['year'] = 1900
     #paper_library_df['extract'] = ''
     #paper_library_df.to_parquet(paper_library_filepath)
     return
 
-paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "abstract", "summary", "extract", "inflCitations", "citationCount", "article_url", "pdf_url","pdf_filepath", "section_ids"]
-paper_library_init_values = {"faiss_id":0, "title":'', "authors":'', "citationStyles":'', "publisher":'', "abstract":'', "summary":'', "extract":"", "inflCitations":0, "citationCount":0, "article_url":'', "pdf_url":'',"pdf_filepath":'', "synopsis":'', "section_ids":[]}
+paper_library_columns = ["faiss_id", "title", "authors", "citationStyles", "publisher", "abstract", "summary", "extract", "inflCitations", "citationCount", "year", "article_url", "pdf_url","pdf_filepath", "section_ids"]
+paper_library_init_values = {"faiss_id":0, "title":'', "authors":'', "citationStyles":'', "publisher":'', "abstract":'', "summary":'', "extract":"", "inflCitations":0, "citationCount":0, "year":1900, "article_url":'', "pdf_url":'',"pdf_filepath":'', "synopsis":'', "section_ids":[]}
 
 def validate_paper(paper_dict):
     #print(json.dumps(paper_dict, indent=2))
@@ -158,6 +157,7 @@ def validate_paper(paper_dict):
     if len(paper_dict['article_url']) < 2:
         print(f'missing article url in paper_dict: {paper_dict["article_url"]}')
         return False
+
     return True
         
 # s2FieldsOfStudy
@@ -578,28 +578,37 @@ def get_paper_sections(paper_id):
 def get_title(title):
     title = title.strip()
     try:
-        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={title}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,s2FieldsOfStudy"
+        url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={title}&fields=url,title,year,abstract,authors,citationStyles,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf"
         headers = {'x-api-key':ssKey, }
         response = requests.get(url, headers = headers)
         if response.status_code != 200:
-            print(f'SemanticSearch fail code {response.status_code}')
+            print(f'{response.status_code} - {title}')
             return None
         results = response.json()
         #print(f' s2 response keys {results.keys()}')
         total_papers = results["total"]
         if total_papers == 0:
+            print(f'NM  - {title}')
             return None
         papers = results["data"]
         #print(f'get article search returned first {len(papers)} papers of {total_papers}')
         for paper in papers:
             paper_title = paper["title"].strip()
-            print(f'considering {paper_title}')
-            if paper_title.startswith(title):
+            #print(f'considering {paper_title}')
+            if paper_title.lower().startswith(title.lower()):
                 #data = get_semantic_scholar_meta(paper['paperId'])
-                print(f'title meta-data {paper.keys()}')
+                print(f'found {paper_title}')
                 return paper
+        print(f'NM  - {title}')
     except Exception as e:
         traceback.print_exc()
+        print(f'EXC {str(e)}\n   - {title}')
+    return None
+
+def verify_paper_library():
+    for n, paper in paper_library_df.iterrows():
+        print(f"{paper['title']}")
+        get_title(paper['title'])
 
 
 #get_title("Can Large Language Models Understand Context")
@@ -655,7 +664,11 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             if isOpenAccess and 'openAccessPdf' in paper and type(paper['openAccessPdf']) is dict :
                 openAccessPdf = paper['openAccessPdf']['url']
             else: openAccessPdf = None
-            year = paper['year']
+            year=0
+            try:
+                year = int(paper['year'])
+            except Exception as e:
+                print(f'year not an int {year} \n {str(e)}')
             if confirm:
                 query = cot.confirmation_popup("Index this article?", title+"\n"+str(year))
                 if not query:
@@ -677,6 +690,7 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
             result_dict = {key: '' for key in paper_library_columns}
             id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
             result_dict["faiss_id"] = id
+            result_dict["year"] = year
             result_dict["title"] = title
             result_dict["authors"] = [", ".join(author['name'] for author in authors)]
             result_dict["publisher"] = '' # tbd - double check if publisher is available from arxiv
@@ -791,6 +805,8 @@ def index_paper(paper_dict):
         if len(dups) > 0 :
             print(f' already indexed {title}')
             return dup.iloc[0]['faiss_id']
+
+    # call grobid server to parse pdf
     try:
         extract = grobid.parse_pdf(paper_dict['pdf_filepath'])
     except Exception as e:
@@ -811,6 +827,9 @@ def index_paper(paper_dict):
     print(f'title 1 {title}')
     paper_dict['authors'] = extract['authors']
     paper_dict['abstract'] = extract['abstract'] # will be overwritten by S2 abstract if we can get it
+
+
+    # construct paper_dict (data for paper_library_df row)
     if title is not None:
         paper_dict['title']=title
         meta_data = get_title(title)
@@ -824,15 +843,18 @@ def index_paper(paper_dict):
         paper_dict["citationStyles"]= str(meta_data['citationStyles'])
         paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
     abstract = paper_dict['abstract']
+
+    # now have updated title, make sure we don't already have this paper
     if len(paper_library_df) > 0:
         dups= paper_library_df[paper_library_df['title'] == title]
         if len(dups) > 0:
             print(f' already indexed {title}')
             return dups.iloc[0]['faiss_id']
+
     paper_faiss_id = generate_faiss_id(lambda value: value in paper_library_df.faiss_id)
     paper_dict['faiss_id'] = paper_faiss_id
     paper_index = len(paper_library_df)
-    # paper_dict should be read only from here!
+    # validate data - paper_dict should be read only from here!
     if validate_paper(paper_dict):
         paper_library_df.loc[paper_index] = paper_dict
         paper_pd=paper_library_df.loc[paper_index]
@@ -841,6 +863,8 @@ def index_paper(paper_dict):
     text_chunks = [abstract]+extract['sections']
     section_synopses = []; section_ids = []
     rw_count = 0
+
+    # section embeddings
     for idx, text_chunk in enumerate(text_chunks):
         if len(text_chunk) < 32:
             continue
@@ -852,11 +876,12 @@ def index_paper(paper_dict):
         embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
         embeddings = F.normalize(embeddings, p=2, dim=1)
         ### no more rewriting on ingest,
-        ###   worried it distorts content more than content uniformity of style aids downstream extract
-        
+        ###  worried it distorts content more than content uniformity of style aids downstream extract
         id = index_section_synopsis(paper_dict, text_chunk)
         section_synopses.append(text_chunk)
         section_ids.append(id)
+
+    # create paper summary and extract - these will update paper_library_df row internally
     cot.script.create_paper_summary(paper_id=paper_faiss_id)
     cot.script.create_paper_extract(paper_id=paper_faiss_id)
     return paper_faiss_id
@@ -928,6 +953,31 @@ Respond using this JSON template. Return only JSON without any Markdown or code 
         if 'relevant' in response and 'yes' in str(response['relevant']).lower():
             return True
     return False
+
+def generate_extended_search_queries(query):
+    information_requirements = cot.script.sufficient_response(query)
+    topics = information_requirements.split('\n')
+    queries = []
+    for topic in topics:
+        ners = rw.extract_ners(topic, paper_topic=query)
+        print(f'topic: {topic}\n  ners{ners}')
+        queries.append(ners)
+    return queries
+    
+def online_search (query):
+    #
+    ### Note - finding papers and queueing for ingest into LOCAL LIBRARY.
+    ### Doesn't need to return anything!
+    ## call get_articles in semanticScholar2 to query semanticScholar for each topic
+    #
+    queries = generate_extended_search_queries(query)
+    for keyword_set in queries:
+        print(f'keyword set: {keyword_set}')
+        result_list, total_papers, next_offset = get_articles(' '.join(keyword_set), confirm=True)
+        print(f'   s2_search found {len(result_list)} new papers')
+        while next_offset < total_papers and cot.confirmation_popup('Continue?', query):
+            result_list, total_papers, next_offset = get_articles(query, next_offset, confirm=True)
+
 
 def search(query, dscp='', top_k=20, web=False, whole_papers=False, query_is_title=False):
     
@@ -1129,9 +1179,9 @@ class PaperSelect(QWidget):
                 print(f'sections in paper {paper_id}, {len(sections)}')
                 paper_sections = sections['faiss_id'].tolist()
                 paper_excerpts = [[title, synopsis] for synopsis in sections['synopsis'].tolist()]
-                section_ids.extend(paper_sections)
-                excerpts.extend(paper_excerpts)
-        return [section_ids, excerpts]
+                resources = [paper_id, [paper_sections, paper_excerpts]]
+                break # only first checked paper for now
+        return resources
     
     def first_checked_paper_url(self):
         # returns the pdf url (file or http) for the first checked paper
@@ -1153,12 +1203,12 @@ class PaperSelect(QWidget):
     def on_discuss_clicked(self):
         """ Handles the discuss button click event. """
         resources = {}
-        resources['sections'] = self.collect_checked_resources()
+        resources['papers'] = self.collect_checked_resources()
         resources['dscp'] = self.dscp
         resources['template'] = cot.template
-        with open('discuss_resources.pkl', 'wb') as f:
+        with open('owl_data/discuss_resources.pkl', 'wb') as f:
             pickle.dump(resources, f)
-        rc = subprocess.run(['python3', 'paper_writer.py', '-discuss', 'discuss_resources.pkl'])
+        rc = subprocess.run(['python3', 'paper_writer.py', '-discuss', 'owl_data/discuss_resources.pkl'])
         
     def on_show_clicked(self):
         """ Handles the show button click event. """
@@ -1300,6 +1350,9 @@ if __name__ == '__main__':
         browse()
         
     else:
+        verify_paper_library()
+        app = QApplication(sys.argv)
+        online_search (input('?'))
         print(' -index_url, -index_file, or -index_paper')
     """
         papers_dir = "/home/bruce/Downloads/owl/tests/owl/arxiv/papers/"

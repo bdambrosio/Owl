@@ -17,7 +17,7 @@ import json
 class PersistentQueue(asyncio.Queue):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.persistence_file = "indexing_service_queue.json"
+        self.persistence_file = "owl_data/indexing_service_queue.json"
         self._items_list = []  # Mirror list for serialization
         self.lock = asyncio.Lock()
         self.serialize_lock = asyncio.Lock()

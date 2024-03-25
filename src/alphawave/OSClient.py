@@ -82,7 +82,7 @@ class OSClient(PromptCompletionClient):
                                               choice_set = argoptions['choice_set']
                                               )
         startTime = time.time()
-        max_input_tokens = 1500
+        max_input_tokens = 8192
         if hasattr(options, 'max_input_tokens') and getattr(options, 'max_input_tokens') is not None:
             max_input_tokens = options.max_input_tokens
         

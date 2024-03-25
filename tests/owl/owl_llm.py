@@ -32,7 +32,7 @@ models = [d for d in subdirs if ('exl2' in d or 'gptq' in d.lower() or 'phi-2' i
 #print(models)
 
 templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
-             "miqu-1-70b-sf-6.0bpw-h6-exl2":"llama-2",
+             "miqu-1-70b-gguf":"llama-2",
              "Mistral-7b-instruct": "llama-2",
              "mixtral-8bpw-exl2": "llama-2",
              "MixtralOrochi8x7B-8.0bpw-h8-exl2": "alpaca",
@@ -45,11 +45,14 @@ templates = {"bagel-dpo-34b-v0.2-6.5bpw-h8-exl2": "llama-2",
              "openchat-3.5-8bpw-h8-exl2":"openchat",
              "OpenHermes-Mixtral-8x7B-6.0bpw-h6-exl2":"llama-2",
              "orca-2-13b-16bit":"chatml",
+             "Qwen1.5-72b-chat-5_k_m-gguf":"chatml",
              "Qwen1.5-72B-5.0bpw-h6-exl2-liberated":"chatml",
              "Qwen1.5-72B-6.0bpw-h6-exl2-liberated":"chatml",
              "orca-2-13b-16bit":"chatml",
              "Senku-70B-Full-6.0bpw-h6-exl2": "chatml",
+             "Smaug-Cerebrum-8.0bpw-exl2": "alpaca",
              "Smaug-Mixtral-8.0bpw-exl2": "llama-2",
+             "Smaug-72B-gguf": "llama-2",
              "Smaug-Mixtral-6.5bpw-exl2": "llama-2",
              "tulu-2-dpo-70b-4.65bpw-h6-exl2": "zephyr"
 }
@@ -65,7 +68,7 @@ while model_number < 0 or model_number > len(models) -1:
                 context_size = json_config["max_position_embeddings"]
         except Exception as e:
             print(f'failure to load json.config {str(e)}\n setting context to 4096')
-            context_size = 4096
+            context_size = 12288
         if models[i] in templates:
             template = templates[models[i]]
             print(f'{i}. {models[i]}, context: {context_size}, template: {template}')
@@ -84,7 +87,7 @@ if model_name in templates:
     model_prompt_template = templates[model_name]
 print(f"Loading model: {model_name} prompt_template {model_prompt_template}")
 json_config = None
-context_size = 16384
+#context_size = 12288
 max_new_tokens = 250
 
 # get context size from model config
@@ -107,14 +110,38 @@ if model_name == 'phi-2':
     model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2")
     model.to('cuda')
     
-elif model_name.startswith('mixtral-gguf'):
+elif model_name.startswith('miqu-1-70b') and 'gguf' in model_name:
     # launch the llama.cpp server on localhost 8080
     llama_cpp = subprocess.Popen(['/home/bruce/Downloads/llama.cpp/build/bin/server',
-                                  '-m', '/home/bruce/Downloads/models/mixtral-gguf/mixtral-8x7b-instruct-v0.1.Q8_0.gguf',
-                                  '-c', '16384',
+                                  '-m', '/home/bruce/Downloads/models/miqu-1-70b-gguf/miqu-1-70b.q5_K_M.gguf',
+                                  '-c', '24576',
                                   '-ngl', '90',
                                   '-b',  '256'])
-    print(f'llama.cpp server started')
+    context_size=24576
+    print(f'miqu llama.cpp server started')
+
+elif model_name.startswith('Smaug') and 'gguf' in model_name:
+    # launch the llama.cpp server on localhost 8080
+    # crashes on first query - 3/17/2024
+    llama_cpp = subprocess.Popen(['/home/bruce/Downloads/llama.cpp/build/bin/server',
+                                  '-m', '/home/bruce/Downloads/models/Smaug-72B-gguf/Smaug-72B-v0.1.Q4_K_M.gguf',
+                                  '-c', '6144',
+                                  '-ngl', '90',
+                                  '-b',  '256'])
+    context_size=6144
+    print(f'Smaug-72B llama.cpp server started')
+
+elif model_name.startswith('Qwen') and 'gguf' in model_name:
+    # launch the llama.cpp server on localhost 8080
+    llama_cpp = subprocess.Popen(['/home/bruce/Downloads/llama.cpp/build/bin/server',
+                                  #'-m', '/home/bruce/Downloads/models/Qwen1.5-72b-chat-5_k_m-gguf/qwen1_5-72b-chat-q2_k.gguf',
+                                  '-m', '/home/bruce/Downloads/models/Qwen1.5-72b-chat-5_k_m-gguf/Liberated-Qwen1.5-72B-Q4_K_M.gguf',
+                                  #'-m', '/home/bruce/Downloads/models/Qwen1.5-72b-chat-5_k_m-gguf/qwen1_5-72b-chat-q5_k_m.gguf',
+                                  '-c', '8192',
+                                  '-ngl', '90',
+                                  '-b',  '256'])
+    context_size=8192
+    print(f'Qwen llama.cpp server started')
 
 else:
     #if 'dolphin' in models[model_number]:
@@ -137,7 +164,7 @@ else:
     elif 'miqu-1-70b' in model_name:
         print('miqu-1-70b load')
         model.load([20, 20, 20])
-    elif 'ixtral' in model_name:
+    elif 'ixtral' in model_name or 'erebrum' in model_name: #Smaug-Cerebrum exl2
         print(f' mixtral load')
         model.load([18, 20, 23])  # leave room on gpu 0 for other stuff, eg embed
     elif 'Qwen1.5' in model_name:
@@ -150,7 +177,7 @@ else:
     print('model load done..')
     tokenizer = ExLlamaV2Tokenizer(config)
 
-if model_name == 'phi-2':
+if model_name == 'phi-2' or 'gguf' in model_name:
     pass
 else:
     cache = ExLlamaV2Cache(model)
@@ -240,7 +267,7 @@ async def miqu_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, s
 
 async def llamacpp_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .1, stop_on_json=False):
     global stop_gen
-    print(f'miqu enter {type(query)} keys {query.keys()}')
+    print(f'llamacpp enter {type(query)} keys {query.keys()}')
 
     if stop_gen:
         return
@@ -248,11 +275,12 @@ async def llamacpp_pseudo_stream(query: Dict[Any, Any], max_new_tokens, temp = .
     del query['temp']
     del query['top_p']
     query['n_predict']=int(max_new_tokens)
-    #print(f'\n\nsmaug query {query}\n')
+    print(f'\n\nllamacpp query {query}\n')
     response = requests.post('http://127.0.0.1:8080/completion',
                              headers ={"Content-Type": "application/json"},
                              data=json.dumps(query))
-    #print(f'\nlama.cpp server response {response.json()["content"]}\n')
+    print(f'\nlama.cpp server response {response.json()["content"]}\n')
+    stop_gen=True
     yield response.json()['content']
 
     
@@ -303,11 +331,7 @@ async def get_stream(request: Request):
         stop_on_json=True
 
     prompt = message_j['prompt']
-    if model_name == 'phi-2':
-        stop_gen=False
-        print(f'phi-2! {query}')
-        return StreamingResponse(phi_pseudo_stream(prompt, max_new_tokens=max_tokens, temp=temp, stop_on_json=stop_on_json))
-    elif model_name.startswith('mixtral-gguf'):
+    if 'gguf' in model_name:
         stop_gen=False
         return StreamingResponse(llamacpp_pseudo_stream(query, max_new_tokens=max_tokens, temp=temp, stop_on_json=stop_on_json))
     else:

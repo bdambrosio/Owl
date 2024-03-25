@@ -296,6 +296,34 @@ Respond ONLY with the JSON above, do not include any commentary or explanatory t
     else:
         print(f'\nquery forsection:\n{section_outline}\nqueries:\n{queries}')
     return queries
+
+def generate_s2_search_queries(query):
+    information_requirements = cot.script.sufficient_response(query)
+    prompt = """
+Generate a set of short Semantic Scholar (s2) search queries, in JSON format, given the following set of information requirements withing the overall topic of:
+
+{{$query}}
+
+<InformationNeeds>
+{{$needs}}
+</InformationNeeds>
+
+A query should contain no more than 10 tokens. 
+Respond in a plain JSON format without any Markdown or code block formatting,  using the following format:
+
+{"information-need1":'s2 query text 1',"information-need2": '<s2 query text 2>', ...}
+
+Respond ONLY with the JSON above, do not include any commentary or explanatory text.
+"""
+    messages = [SystemMessage(prompt),
+                AssistantMessage('')
+                ]
+    queries = cot.llm.ask({"query":query, "needs":information_requirements}, messages, stop_on_json=True, max_tokens=300, validator=JSONResponseValidator())
+    if type(queries) is dict:
+        print(f'\nquery: {query}\ns2 queries:\n{json.dumps(queries, indent=2)}')
+    else:
+        print(f'\nquery: {query}\ns2 queries:\n{queries}')
+    return queries
     
 def s2_search (config, outline, section_outline, sbar=None):
     #
@@ -354,27 +382,28 @@ def write_report(app, topic):
 
     query_config = config['Query']
     query = ""
-    if query_config['exec'] == 'Yes':
+    if query_config['exec'] == 'Yes' or 'task' not in plan.keys():
         query = cot.confirmation_popup('Question to report on?', '')
-        save_plans()
-    elif 'task' not in plan.keys():
+    if 'task' not in plan.keys():
         plan['task']=query
+    save_plans()
             
     sbar_config = config['SBAR']
     if sbar_config['exec'] == 'Yes':
         # pass in query to sbar!
         #print(f'sbar input plan\n{plan}')
-        if 'sbar' in plan and type(plan['sbar']) is dict and cot.confirmation_popup('Edit existing sbar?', json.dumps(plan['sbar'], indent=2)):
-            # we already have an sbar, edit it
-            app = QApplication(sys.argv)
-            editor = ew.JsonEditor(plan['sbar'])
-            editor.closed.connect(handle_json_editor_closed)
-            editor.show()
-            app.exec()
-            print(f'SBAR: {updated_json}')
-            if updated_json is not None:
-                plan['sbar'] = updated_json
-                save_plans()
+        if 'sbar' in plan and type(plan['sbar']) is dict:
+            if cot.confirmation_popup('Edit existing sbar?', json.dumps(plan['sbar'], indent=2)):
+                # we already have an sbar, edit it
+                app = QApplication(sys.argv)
+                editor = ew.JsonEditor(plan['sbar'])
+                editor.closed.connect(handle_json_editor_closed)
+                editor.show()
+                app.exec()
+                print(f'SBAR: {updated_json}')
+                if updated_json is not None: # jsonEditor returns None if user presses cancel
+                    plan['sbar'] = updated_json
+                    save_plans()
         else:
             plan = pl.analyze(plan)
             save_plans()
@@ -590,9 +619,18 @@ def write_report_aux(config, paper_outline=None, section_outline=None, excerpts=
     return section, subsection_refs
 
 class DisplayApp(QtWidgets.QWidget):
-    def __init__(self, query, sections=[], dscp='', template=''):
+    def __init__(self, query, paper_id, sections=[], dscp='', template=''):
         super().__init__()
         self.query = query
+        self.paper_id = paper_id
+        self.paper_row = None
+        search_result = s2.paper_library_df[s2.paper_library_df['faiss_id']==int(paper_id)]
+        if len(search_result) > 0:
+            self.paper_row = search_result.iloc[0]
+            print(f'found paper {self.paper_row.title}')
+        else:
+            print(f"couldn't find paper {self.paper_id}")
+        print(f'sections {type(sections)}, {len(sections)}\n{sections[0]}')
         self.sections = sections
         self.dscp = dscp
         self.template = template
@@ -678,6 +716,7 @@ class DisplayApp(QtWidgets.QWidget):
         discuss_resources(self, input_text, self.sections, self.query+', '+self.dscp, self.template)
 
     def describe(self):
+        self.display_msg(self.paper_row.extract)
         print(f'calling describe sections: {len(self.sections[0])}')
         print(f'section ids: {self.sections[0]}')
         entities = set()
@@ -688,6 +727,11 @@ class DisplayApp(QtWidgets.QWidget):
             entities.update(section_entities)
             print(section_entities)
         print(entities)
+        print(f'paper_id {self.paper_id}')
+        search_result = s2.paper_library_df[s2.paper_library_df['faiss_id']==self.paper_id]
+        if len(search_result) > 0:
+            self.paper_row = search_result.iloc[0]
+            print(f'found paper {self.paper_row.title}')
         classification_prompt = [SystemMessage("Construct a minimal set of STEM NERs that covers the NERs provided below. The response should contain 5 to 8 NERs that collectively cover 90% of the provided NERs, with no or small overlap among the response NERs and minimal set-difference between the ontological space covered by the response NERs and the ontological space covered by the union of the user-provided NERs. Respond ONLY with the response NERs, followed by </END>."),
                                  UserMessage('User NERs:\n{{$ners}}'),
                                  AssistantMessage('Response NERs:\n')
@@ -696,7 +740,7 @@ class DisplayApp(QtWidgets.QWidget):
         print(response)
 
 
-def discuss_resources(display, query, sections, dscp='', template=None):
+def discuss_resources(display, query, paper_id, sections, dscp='', template=None):
     """ resources is [[section_ids], [[title, section_synopsis], ...]]"""
     # excerpts is just [[title, section_synopsis], ...]
     global updated_json, config
@@ -740,6 +784,8 @@ Respond only with the instruction, in plain JSON as above, with no markdown or c
 from Planner import Planner
 
 if __name__ == '__main__':
+    generate_s2_search_queries('what is miRNA?')
+    sys.exit(0)
     def parse_arguments():
         """Parses command-line arguments using the argparse library."""
         
@@ -756,14 +802,20 @@ if __name__ == '__main__':
             print(args.discuss)
             with open(args.discuss, 'rb') as f:
                 resources = pickle.load(f)
-            print(f'\nResources:\n{json.dumps(resources, indent=2)}')
+            #print(f'\nResources:\n{json.dumps(resources, indent=2)}')
             app = QApplication(sys.argv)
             cot = oiv.OwlInnerVoice(None, template=resources['template'])
             # set cot for rewrite so it can access llm
             rw.cot = cot
             s2.cot = cot
-
-            window = DisplayApp('Question?', resources['sections'], resources['dscp'], template=resources['template'])
+            #print(f'resources {json.dumps(resources, indent=2)}')
+            print(f'paper_id {resources["papers"][0]}')
+            #print(f'resources [0][1:] {resources["papers"][1]}')
+            window = DisplayApp(query='Question?',
+                                paper_id=resources['papers'][0],
+                                sections=resources['papers'][1],
+                                dscp=resources['dscp'],
+                                template=resources['template'])
             #window.show()
             app.exec()
             sys.exit(0)

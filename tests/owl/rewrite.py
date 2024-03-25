@@ -1,6 +1,7 @@
 import json, os, sys
 import wordfreq as wf
 import re
+import pickle
 from promptrix.VolatileMemory import VolatileMemory
 from promptrix.Prompt import Prompt
 from promptrix.SystemMessage import SystemMessage
@@ -12,16 +13,30 @@ from alphawave.DefaultResponseValidator import DefaultResponseValidator
 from alphawave.JSONResponseValidator import JSONResponseValidator
 
 cot=None
-ner_cache = {}
-ner_cache_filepath = 'paper_writer_ner_cache.json'
+KEGG_SYMBOLS = {}
+kegg_symbols_filepath = 'owl_data/kegg_symbols.pkl'
+if not os.path.exists(kegg_symbols_filepath):
+    print(f"no kegg_symbols.pkl found! ")
+    sys.exit(-1)
+else:
+    try:
+        with open(kegg_symbols_filepath, 'rb') as pf:
+            KEGG_SYMBOLS=pickle.load(pf)
+    except Exception as e:
+        print(f'failure to load kegg_symbols, repair or recreate\n  {str(e)}')
+        sys.exit(-1)
+        print(f"loaded {kegg_symbols_filepath}")
+
+NER_CACHE = {}
+ner_cache_filepath = 'owl_data/paper_writer_ner_cache.json'
 if not os.path.exists(ner_cache_filepath):
     with open(ner_cache_filepath, 'w') as pf:
-        json.dump(ner_cache, pf)
+        json.dump(NER_CACHE, pf)
         print(f"created 'paper_ner_cache'")
 else:
     try:
         with open(ner_cache_filepath, 'r') as pf:
-            ner_cache=json.load(pf)
+            NER_CACHE=json.load(pf)
     except Exception as e:
         print(f'failure to load entity cache, repair or delete\n  {str(e)}')
         sys.exit(-1)
@@ -53,31 +68,31 @@ def literal_included_ners(ners, text):
     return included_ners
 
 def section_ners(id, text, template):
-    global ner_cache
+    global NER_CACHE
     int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
-    if int_id not in ner_cache:
+    if int_id not in NER_CACHE:
         excerpt_items = extract_ners(text, title='', outline='', template=template)
-        ner_cache[int_id]=excerpt_items
+        NER_CACHE[int_id]=excerpt_items
         with open(ner_cache_filepath, 'w') as pf:
-            json.dump(ner_cache, pf)
-    return ner_cache[int_id]
+            json.dump(NER_CACHE, pf)
+    return NER_CACHE[int_id]
 
 def paper_ners(paper_title, paper_outline, paper_summaries, ids,template):
-    global ner_cache
+    global NER_CACHE
     items = set()
     total=len(ids); cached=0
     for id, excerpt in zip(ids, paper_summaries):
         # an 'excerpt' is [title, text]
         int_id = str(int(id)) # json 'dump' writes these ints as strings, so they won't match reloaded items unless we cast as strings
-        if int_id in ner_cache:
+        if int_id in NER_CACHE:
             cached += 1
         else:
             excerpt_items = extract_ners(excerpt[0]+'\n'+excerpt[1], title=paper_title, outline=paper_outline, template=template)
-            ner_cache[int_id]=list(set(excerpt_items))
-        items.update(ner_cache[int_id])
+            NER_CACHE[int_id]=list(set(excerpt_items))
+        items.update(NER_CACHE[int_id])
     print(f'ners total {total}, in cache: {cached}')
     with open(ner_cache_filepath, 'w') as pf:
-        json.dump(ner_cache, pf)
+        json.dump(NER_CACHE, pf)
     #print(f"wrote {ner_cache_filepath}")
     return items
 
@@ -92,6 +107,18 @@ def extract_acronyms(text, pattern=r"\b[A-Za-z]+(?:-[A-Za-z\d]*)+\b"):
     """
     return re.findall(pattern, text)
 
+def find_kegg_symbols(text):
+    global KEGG_SYMBOLS
+    symbols_found = set()
+    words = set(text.split(' ')) # going to be lots of duplicates of 'a', 'the', etc
+    for candidate in words:
+        candidate = candidate.strip()
+        #print(f'testing {candidate}')
+        if candidate in KEGG_SYMBOLS or candidate.lower() in KEGG_SYMBOLS:
+            print(f' found kegg symbol {candidate}')
+            symbols_found.add(candidate)
+    return symbols_found
+
 def extract_ners(text, title=None, paper_topic=None, outline=None, template=None):
     topic = ''
     if title is not None:
@@ -101,29 +128,28 @@ def extract_ners(text, title=None, paper_topic=None, outline=None, template=None
     if outline is not None and type(outline) is dict:
         topic += json.dumps(outline, indent=2)
         
-    kwd_messages=[SystemMessage(f"""You are a brilliant research analyst, able to see and extract connections and insights across a range of details in multiple seemingly independent papers.
-"""),
-                  UserMessage("""Your current task is to extract all NERs (Named Ners or keywords, which may appear as acronyms) important to the topic {{$topic}} from the following research excerpt.
+    kwd_messages=[SystemMessage("""Your task is to extract all NERs (Named-entities, relations, or keywords, which may appear as acronyms) important to the topic {{$topic}} that appear in the following Text.
+
+<Text>
+{{$text}}
+</Text>
 
 Respond using the following format:
-<NER>
+<NERs>
 NER1
 NER2
 ...
-</NER>
+</NERs>
 
-<RESEARCH EXCERPT>
-{{$text}}
-</RESEARCH EXCERPT>
 """),
-                  AssistantMessage("<NER>\n")
+                  AssistantMessage("<NERs>\n")
               ]
     
-    response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NER>')
+    response = cot.llm.ask({"topic":topic, "text":text}, kwd_messages, template=template, max_tokens=300, temp=0.1, eos='</NERs>')
     # remove all more common things
     keywords = []; response_ners = []
     if response is not None:
-        end = response.lower().rfind ('</NER>'.lower())
+        end = response.lower().rfind ('</NERs>'.lower())
         if end < 1: end = len(response)+1
         response = response[:end]
         response_ners = response.split('\n')
@@ -139,7 +165,10 @@ NER2
         if len(keywords) <=1:
             cutoff += .1
     #print(f'\nRewrite Extract_ners: {keywords}\n')
-    return keywords
+    ### now check membership in KEGG
+    keywords = set(keywords) # eliminate duplicates
+    keywords.update(find_kegg_symbols(text))
+    return list(keywords)
 
 def ners_to_str(item_list):
     return '\n'.join(item_list)
@@ -761,5 +790,5 @@ def shorten(resources, focus='', sections=default_sections, max_tokens=80*len(de
         #print(f'\n{key}:\n{extracts[key]}\n')
 
         text_to_shorten = text # start with this next time.
-    print(f'rw.shorten out: {len(rewrite)} chars')
+    print(f'rw.shorten out: {len(str(section_extracts))} chars')
     return section_extracts

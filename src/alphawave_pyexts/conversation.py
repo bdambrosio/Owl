@@ -734,7 +734,31 @@ register_conv_template(
     Conversation(
         name="claude",
         system="",
-        roles=("Human", "Assistant"),
+        roles=("user", "assistant"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
+        sep="\n\n",
+    )
+)
+# Claude default template
+register_conv_template(
+    Conversation(
+        name="claude-sonnet",
+        system="",
+        roles=("user", "assistant"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
+        sep="\n\n",
+    )
+)
+# Claude default template
+register_conv_template(
+    Conversation(
+        name="claude-opus",
+        system="",
+        roles=("user", "assistant"),
         messages=(),
         offset=0,
         sep_style=SeparatorStyle.ADD_COLON_SINGLE,

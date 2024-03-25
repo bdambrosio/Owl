@@ -116,7 +116,7 @@ class Interactions:
         self.memory = VolatileMemory({'input':'', 'history':[]})
         self.llm = llm(None, self.memory, self.osClient, self.openAIClient, self.template)
         self.owl = Owl(None, self.template)
-        self.interactions = self.read_interaction_history('owl_ch.json')
+        self.interactions = self.read_interaction_history('owl_data/owl_ch.json')
         self.jsonValidator = JSONResponseValidator()
         self.max_tokens = 8000
         self.embedder =  SentenceTransformer('all-MiniLM-L6-v2')
@@ -178,7 +178,7 @@ class Interactions:
                        updates[topic_name] = []
                     updates[topic_name].append(update)
 
-        with open('topic_interaction_updates.json', 'w') as j:
+        with open('owl_data/topic_interaction_updates.json', 'w') as j:
            json.dump(updates, j)
 
         # process interaction updates for a topic into a single thread update for that topic
@@ -188,7 +188,7 @@ class Interactions:
         return
 
     def create_thread_updates(self):
-        with open('topic_interaction_updates.json', 'r') as j:
+        with open('owl_data/topic_interaction_updates.json', 'r') as j:
            interaction_updates = json.load(j)
          
         thread_updates = {}
@@ -226,12 +226,12 @@ Respond only in JSON using the above format.
                  topic_name = 'Topic: '+update['topic']
                  thread_updates[topic_name] = update
               
-        with open('topic_thread_updates.json', 'w') as j:
+        with open('owl_data/topic_thread_updates.json', 'w') as j:
            json.dump(thread_updates, j)
 
 
     def update_topics(self):
-       with open('topic_thread_updates.json', 'r') as j:
+       with open('owl_data/topic_thread_updates.json', 'r') as j:
           topic_updates = json.load(j)
          
        # topic thread_updates uses fully qualified 'Topic: <topic_name>' as keys for topic items

@@ -46,6 +46,9 @@ import re
 import numpy as np
 from scipy.spatial import ConvexHull
 
+FOREST_FILEPATH = 'owl_data/paper_forest.pkl'
+LATTICE_FILEPATH = 'owl_data/lattice.pkl'
+
 def find_max_projection_difference(embedding_set, query_embedding):
     """ find the maximum difference between any two points from the embedding set 
         when projected onto the dimension defined by the query embedding """
@@ -301,7 +304,7 @@ def build_cluster_DAG(papers, max_depth, dimension, dimensions, thresholds):
     return root_node, cluster_nodes
 
 
-def save_lattice(root_node, cluster_nodes, filename):
+def save_lattice(root_node, cluster_nodes, filename=LATTICE_FILEPATH):
     lattice_data = {
         'root_node': root_node,
         'cluster_nodes': cluster_nodes
@@ -309,17 +312,17 @@ def save_lattice(root_node, cluster_nodes, filename):
     with open(filename, 'wb') as file:
         pickle.dump(lattice_data, file)
 
-def load_lattice(filename):
+def load_lattice(filename=LATTICE_FILEPATH):
     with open(filename, 'rb') as file:
         lattice_data = pickle.load(file)
     return lattice_data['root_node'], lattice_data['cluster_nodes']
 
 
-def save_forest(forest, filename):
+def save_forest(forest, filename=FOREST_FILEPATH):
     with open(filename, 'wb') as file:
         pickle.dump(forest, file)
 
-def load_forest(filename):
+def load_forest(filename=FOREST_FILEPATH):
     with open(filename, 'rb') as file:
         forest = pickle.load(file)
     return forest
@@ -596,8 +599,8 @@ if __name__=='__main__':
                                          max_depth=3,
                                          thresholds=[1.4,1.2,1.0])
     
-    save_forest(forest, 'paper_forest.pkl')
-    forest = load_forest('paper_forest.pkl')
+    save_forest(forest, PAPER_FOREST_FILEPATH)
+    forest = load_forest(PAPER_FOREST_FILEPATH)
     query ="""list all the miRNA that can be useful in early-stage cancer detection and that can be assayed via blood sample, that is, that appear in extra-celluar vesicles as circulating miRNA."""
     tree = forest['base']
     children = tree['root'].children
@@ -615,22 +618,22 @@ if __name__=='__main__':
         
     #cot.script.create_paper_summary(paper_id=12218601)
     #cot.script.create_paper_extract(paper_id=12218601)
-    #save_lattice(root_node, nodes, 'lattice.pkl')
+    #save_lattice(root_node, nodes, LATTICE_FILEPATH)
     #cot.script.update_extracts()
     #s2.save_paper_df()
     #paper = s2.get_paper_pd(paper_id=12218601)
     #summary_dict = recover_dict_from_text(paper['summary'], rw.default_sections)
     #print(json.dumps(summary_dict, indent=2))
     #cot.script.update_extracts()
-    #save_lattice(root_node, nodes, 'lattice.pkl')
+    #save_lattice(root_node, nodes, LATTICE_FILEPATH)
     #print(root_node, nodes)
-    #save_lattice(root_node, nodes, 'lattice.pkl')
+    #save_lattice(root_node, nodes, LATTICE_FILEPATH)
     #paper = s2.get_paper_pd(paper_id=93853867)
     #paper = s2.get_paper_pd(paper_id=12218601)
     #print(generate_comprehensive_answer(paper, root_node, nodes))
     # Load the lattice from a file
-    #root_node, nodes = load_lattice('lattice.pkl')
-    #cot.script.create_paper_novelty(93853867)
+    #root_node, nodes = load_lattice(LATTICE_FILEPATH)
+    #cot.script.create_paper_novely(93853867)
     # Start browsing the lattice
     build_clusterNode_embeddings(3, root_node, nodes)
     #browse_lattice(root_node, nodes)

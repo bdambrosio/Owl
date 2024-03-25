@@ -659,6 +659,23 @@ QComboBox QAbstractItemView { background-color: #101820; color: #FAEBD7; }  # Se
             self.display_msg(f'Failure to reload working memory\n  {str(e)}')
 
    def speak(self): # lauching working memory editor
+      prompt = [UserMessage("""Generate a question to add details to the task the user wants to accomplish.\nRespond using the following JSON template:
+
+{"question":\'<question to ask>\'}
+
+Respond only with the above JSON, without any commentary or explanatory text
+"""),
+                UserMessage("""What specific types of planning, problem-solving, or goal-directed behaviors are you interested in using LLMs for?"""),
+                UserMessage("""I am interested in using LLMs for researching scientific articles, processing the found pdfs, and using the found information to construct solutions for disease. These solutions will often involve custom miRNA and will require underestanding genomics and proteomics. Again, to focus, the goal at the moment is a system that can create such solutions, not the biological solution itself."""),
+                UserMessage("""Generate a followup question about any additional requirements of the task.
+Respond using the following JSON template:
+{"question":\'<question to ask>\'}
+
+Respond only with the above JSON, without any commentary or explanatory text""")
+                ]
+      self.owlCoT.llm.ask({}, prompt, client= self.owlCoT.llm.anthropicClient)
+      
+
       if self.tts:
          self.tts = False
          self.display_msg('Speech off')
