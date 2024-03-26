@@ -226,14 +226,58 @@ def search_sections(query, top_k=20):
     query_embed = embedding_request(query, 'search_query: ')
     # faiss_search
     embeds_np = np.array([query_embed], dtype=np.float32)
+    #
+    ### TODO how do we factor paper date and citations into score?
+    #
     scores, ids = section_indexIDMap.search(embeds_np, top_k)
     #print(f'ss ids {ids}, scores {scores}')
     # lookup text in section_library
     if len(ids) < 1:
         print(f'No items found')
         return [],[]
-    item_ids=[]; synopses = []
-    for id in ids[0]:
+    adj_scores = []; adj_ids = []
+    for score, id in zip(scores[0], ids[0]):
+        section_library_rows = section_library_df[section_library_df['faiss_id'] == id]
+        if len(section_library_rows) < 1:
+            section_library_rows = section_library_df[section_library_df['ner_faiss_id'] == id]
+        if len(section_library_rows) > 0:
+            section_row = section_library_rows.iloc[0]
+            
+            text = section_row['synopsis']
+            filtered_df = paper_library_df[paper_library_df['faiss_id'] == section_row['paper_id']]
+            if filtered_df.empty:
+                article_title = 'unknown'
+                adj_scores.append(adj_score*.96) # assume 10 yrs old, no refs
+                adj_id.append(id)
+            else:
+                paper_row = filtered_df.iloc[0]
+                article_title = paper_row['title']
+                paper_year = paper_row['year']
+                paper_citations = paper_row['citationCount']
+                paper_inflCitations = paper_row['inflCitations']
+                score_modifier = 1 # score modifier is a multiplier
+                age = min(10, max(0,2024-paper_year))
+                year_modifier = 1.0-.002*age
+                citation_modifier = 1.0
+                if paper_citations > -1:
+                    citation_modifier = 1.0+.002*(paper_citations-10*age)
+                inflCitation_modifier = 1.0
+                if paper_inflCitations > -1:
+                    inflCitation_modifier = 1.0+.002*(paper_inflCitations-2*age)
+                adj_score = score*year_modifier*citation_modifier*inflCitation_modifier
+                adj_scores.append(adj_score)
+                adj_ids.append(id)
+                #print(f'score {score}, {paper_year}, {paper_citations}, {paper_inflCitations}')
+                #print(f'score {adj_score}, {year_modifier}, {citation_modifier}, {inflCitation_modifier}')
+
+    # now resort using adj_scores
+    paired_data = list(zip(adj_scores,adj_ids))
+    # Sort the tuples based on scores in descending order
+    sorted_sections = sorted(paired_data, key=lambda x: x[0], reverse=True)
+
+    # now retrieve section_ids, synopses (title, section_text) in adjusted score order (descending)
+    item_ids = []; synopses = []
+    for score, id in sorted_sections:
         section_library_rows = section_library_df[section_library_df['faiss_id'] == id]
         if len(section_library_rows) < 1:
             section_library_rows = section_library_df[section_library_df['ner_faiss_id'] == id]
@@ -248,7 +292,6 @@ def search_sections(query, top_k=20):
                 article_title = paper_row['title']
             item_ids.append(id)
             synopses.append([article_title, text])
-            #print(f'{article_title} {len(text)}')
     return item_ids, synopses
 
 def convert_title_to_unix_filename(title):
@@ -528,9 +571,10 @@ def index_url(page_url):
     return paper_id
 
 
-def get_arxiv_preprint_url(query, top_k=10):
-    """This function gets the top_k articles based on a user's query, sorted by relevance.
+def get_arxiv_preprint_meta(query, top_k=3):
+    """This function gets the top_k articles based on a user's query title, sorted by relevance.
     It is used by s2 search when it can't download a title from S2 provided url.
+    Note s2 already has all the metadata, just need url of pdf.
     It also downloads the files and stores them in paper_library.csv to be retrieved by the read_article_and_summarize.
     """
 
@@ -565,8 +609,16 @@ def get_arxiv_preprint_url(query, top_k=10):
         return None
     else:
         #print(f'considering {best_ppr.title}')
-        if cot.confirmation_popup("found this, index it?", best_ppr.title):
-            return [x.href for x in best_ppr.links][1]
+        if best_ppr.title.strip()[:40].lower() == query.strip()[:40].lower():
+            result_dict = dict(paper_library_init_values)
+            result_dict["year"] = best_ppr.published.year
+            result_dict["title"] = best_ppr.title
+            result_dict["authors"] = [", ".join(str(author.name) for author in best_ppr.authors)]
+            result_dict["abstract"] = best_ppr.summary 
+            if hasattr(best_ppr, 'doi'):
+                result_dict["doi"]= best_ppr.doi
+            result_dict["pdf_url"] = [x.href for x in best_ppr.links][1]
+            return result_dict
         return None
 
 def get_paper_sections(paper_id):
@@ -582,6 +634,10 @@ def get_title(title):
         headers = {'x-api-key':ssKey, }
         response = requests.get(url, headers = headers)
         if response.status_code != 200:
+            arxiv_meta = get_arxiv_preprint_meta(title)
+            if arxiv_meta is not None:
+                print(f'FArxiv - {title}')
+                return arxiv_meta
             print(f'{response.status_code} - {title}')
             return None
         results = response.json()
@@ -597,8 +653,8 @@ def get_title(title):
             #print(f'considering {paper_title}')
             if paper_title.lower().startswith(title.lower()):
                 #data = get_semantic_scholar_meta(paper['paperId'])
-                print(f'found {paper_title}')
-                return paper
+                print(f'FS2 -  {paper_title}')
+                return paper ### need to translate this into paper_dict
         print(f'NM  - {title}')
     except Exception as e:
         traceback.print_exc()
@@ -607,8 +663,34 @@ def get_title(title):
 
 def verify_paper_library():
     for n, paper in paper_library_df.iterrows():
-        print(f"{paper['title']}")
-        get_title(paper['title'])
+        if paper['citationCount'] >0 or paper['inflCitations'] > 0:
+            continue
+        # citation counts maybe invalid, retry
+        paper_library_df.at[n, "citationCount"] = -1
+        paper_library_df.at[n, "inflCitations"] = -1
+        meta_data = get_title(paper['title'])
+        if meta_data is not None:
+            paper["abstract"] = str(meta_data['abstract'])
+            if 'year' in meta_data and type(meta_data['year']) is int and meta_data['year'] > 1900:
+                print(f"updating year {meta_data['year']}")
+                paper_library_df.at[n, "year"] = int(meta_data['year'])
+            if 'title' in meta_data and paper['title'] == paper_library_init_values['title']:
+                paper_library_df.at[n, "title"] = str(meta_data['title'])
+            if 'url' in meta_data and paper['article_url'] == paper_library_init_values['article_url']:
+                paper_library_df.at[n, "article_url"] = str(meta_data['url'])
+            if 'abstract' in meta_data and paper['abstract'] == paper_library_init_values['abstract']:
+                paper_library_df.at[n, "abstract"] = str(meta_data['abstract'])
+            if 'citationCount' in meta_data and int(meta_data['citationCount']) >= 0:
+                paper_library_df.at[n, "citationCount"]= int(meta_data['citationCount'])
+            if 'citationStyles' in meta_data and paper['citationStyles'] == paper_library_init_values['citationStyles']:
+                paper_library_df.at[n, "citationStyles"]= str(meta_data['citationStyles'])
+            if 'influentialCitationCount' in meta_data  and int(meta_data['influentialCitationCount']) >= 0:
+                paper_library_df.at[n, "inflCitations"] = int(meta_data['influentialCitationCount'])
+            if n%10 ==9: # save every 10
+                print('saving...')
+                save_paper_df()
+    save_paper_df()
+
 
 
 #get_title("Can Large Language Models Understand Context")
@@ -721,9 +803,10 @@ def get_articles(query, next_offset=0, library_file=paper_library_filepath, top_
                     continue
                 if not confirm or not cot.confirmation_popup("try retrieving preprint?", query ):
                     continue
-                preprint_url = get_arxiv_preprint_url(title)
-                if preprint_url is None:
+                arxiv_meta = get_arxiv_preprint_meta(title)
+                if arxiv_meta is None:
                     continue
+                preprint_url = arxiv_meta['pdf_url']
                 result_dict['pdf_url'] = preprint_url
                 result_dict['pdf_filepath'] = download_pdf(preprint_url, title)
             queue_paper_for_indexing(result_dict)
@@ -835,13 +918,20 @@ def index_paper(paper_dict):
         meta_data = get_title(title)
     if meta_data is not None:
         paper_dict["abstract"] = str(meta_data['abstract'])
-        #paper_dict["year"] = meta_data['year'])
-        paper_dict["title"] = str(meta_data['title'])
-        paper_dict["article_url"] = str(meta_data['url'])
-        paper_dict["abstract"] = str(meta_data['abstract'])
-        paper_dict["citationCount"]= int(meta_data['citationCount'])
-        paper_dict["citationStyles"]= str(meta_data['citationStyles'])
-        paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
+        if 'year' in meta_data and paper_dict['year'] != paper_library_init_values['year']:
+            paper_dict["year"] = int(meta_data['year'])
+        if 'title' in meta_data and paper_dict['title'] != paper_library_init_values['title']:
+            paper_dict["title"] = str(meta_data['title'])
+        if 'url' in meta_data and paper_dict['article_url'] == paper_library_init_values['article_url']:
+            paper_dict["article_url"] = str(meta_data['url'])
+        if 'abstract' in meta_data and paper_dict['abstract'] == paper_library_init_values['abstract']:
+            paper_dict["abstract"] = str(meta_data['abstract'])
+        if 'citationCount' in meta_data and int(meta_data['citationCount']) > 0:
+            paper_dict["citationCount"]= int(meta_data['citationCount'])
+        if 'citationStyles' in meta_data and paper_dict['citationStyles'] == paper_library_init_values['citationStyles']:
+            paper_dict["citationStyles"]= str(meta_data['citationStyles'])
+        if 'influentialCitationCount' in meta_data  and int(meta_data['influentialCitationCount']) > 0:
+            paper_dict["inflCitations"] = int(meta_data['influentialCitationCount'])
     abstract = paper_dict['abstract']
 
     # now have updated title, make sure we don't already have this paper
@@ -1350,9 +1440,11 @@ if __name__ == '__main__':
         browse()
         
     else:
-        verify_paper_library()
         app = QApplication(sys.argv)
-        online_search (input('?'))
+        #get_arxiv_preprint_meta('attention is all you need')
+        #verify_paper_library()
+
+
         print(' -index_url, -index_file, or -index_paper')
     """
         papers_dir = "/home/bruce/Downloads/owl/tests/owl/arxiv/papers/"

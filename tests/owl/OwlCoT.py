@@ -1362,7 +1362,7 @@ End your response with: </END>
         query = query.strip()
 
         requirements = self.script.sufficient_response(query)
-        ids, summaries = self.s2.search(query, dscp=requirements, top_k=int(max_tokens/100))
+        ids, summaries = s2.search(query, dscp=requirements, top_k=int(max_tokens/100))
         titles = [item[0] for item in summaries]
         titles = set(titles)
         texts = [item[1] for item in summaries]
